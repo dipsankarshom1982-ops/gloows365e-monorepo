@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Gloows365E — India's Smartest Learning App</title>
+<meta name="description" content="India's smartest learning app for school students. Stories, AI Guru, Short Reels, V-Coins and more. By Shikshakool Academy Private Limited."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',sans-serif;color:#1a1a2e;background:#fff;line-height:1.6}
+
+/* NAV */
+nav{background:#fff;border-bottom:1px solid #e8e8f0;position:sticky;top:0;z-index:100;padding:0}
+.nav-wrap{max-width:1200px;margin:0 auto;padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:68px}
+.logo{display:flex;align-items:center;gap:8px;text-decoration:none}
+.logo-text{font-size:22px;font-weight:800;letter-spacing:-.5px}
+.logo-gl{color:#4f46e5}.logo-oows{color:#1a1a2e}
+.logo-pill{background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:6px;padding:2px 8px;font-size:12px;font-weight:800;color:#fff}
+.logo-e{color:#f59e0b;font-size:17px;font-weight:800}
+.nav-links{display:flex;align-items:center;gap:32px}
+.nav-links a{font-size:14px;font-weight:500;color:#4b5563;text-decoration:none;transition:color .2s}
+.nav-links a:hover{color:#4f46e5}
+.nav-right{display:flex;align-items:center;gap:10px;position:relative}
+.login-wrap{position:relative}
+.login-toggle{display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:8px;border:1.5px solid #e5e7eb;background:#fff;font-size:14px;font-weight:600;color:#1a1a2e;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif}
+.login-toggle:hover{border-color:#4f46e5;color:#4f46e5}
+.login-toggle svg{transition:transform .2s}
+.login-toggle.open svg{transform:rotate(180deg)}
+.login-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:#fff;border:1px solid #e8e8f0;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.1);padding:8px;min-width:180px;display:none}
+.login-dropdown.show{display:block}
+.login-dropdown a{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;font-size:14px;font-weight:500;color:#374151;text-decoration:none;transition:background .15s}
+.login-dropdown a:hover{background:#f5f3ff;color:#4f46e5}
+.login-dropdown a span{font-size:18px}
+.btn-signup{padding:9px 22px;border-radius:8px;background:#4f46e5;color:#fff;font-size:14px;font-weight:600;border:none;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif}
+.btn-signup:hover{background:#4338ca;transform:translateY(-1px)}
+
+/* HERO */
+.hero{background:linear-gradient(135deg,#fafafe 0%,#f0effe 50%,#faf5ff 100%);padding:80px 0 100px}
+.hero-wrap{max-width:1200px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:center}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;background:#ede9fe;border:1px solid #c4b5fd;border-radius:99px;padding:6px 14px;font-size:12px;font-weight:600;color:#7c3aed;margin-bottom:20px}
+.hero-title{font-size:clamp(36px,4vw,56px);font-weight:800;line-height:1.1;letter-spacing:-1.5px;margin-bottom:20px;color:#0f0a2e}
+.hero-title span{color:#4f46e5}
+.hero-sub{font-size:17px;color:#6b7280;line-height:1.7;max-width:480px;margin-bottom:36px}
+.hero-btns{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:36px}
+.btn-hero-primary{padding:14px 28px;border-radius:10px;background:#4f46e5;color:#fff;font-size:15px;font-weight:700;border:none;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif;box-shadow:0 4px 20px rgba(79,70,229,.3)}
+.btn-hero-primary:hover{background:#4338ca;transform:translateY(-2px);box-shadow:0 8px 30px rgba(79,70,229,.4)}
+.btn-hero-sec{padding:14px 28px;border-radius:10px;background:#fff;color:#1a1a2e;font-size:15px;font-weight:600;border:1.5px solid #e5e7eb;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif}
+.btn-hero-sec:hover{border-color:#4f46e5;color:#4f46e5}
+.hero-stats{display:flex;gap:32px;flex-wrap:wrap}
+.hs{text-align:left}
+.hs-num{font-size:28px;font-weight:800;color:#4f46e5;font-family:'Inter',sans-serif}
+.hs-label{font-size:12px;color:#9ca3af;margin-top:2px}
+.hero-img{background:#fff;border:1px solid #e8e8f0;border-radius:20px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.08)}
+.app-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.app-card{background:#f8f7ff;border:1px solid #ede9fe;border-radius:12px;padding:16px;transition:all .2s}
+.app-card:hover{border-color:#a78bfa;transform:translateY(-2px)}
+.ac-icon{font-size:26px;margin-bottom:8px}
+.ac-title{font-size:13px;font-weight:700;color:#1a1a2e}
+.ac-desc{font-size:11px;color:#9ca3af;margin-top:3px}
+.app-footer{display:flex;justify-content:space-between;padding-top:16px;border-top:1px solid #f3f4f6}
+.af-stat .af-num{font-size:20px;font-weight:800;color:#4f46e5}
+.af-stat .af-lbl{font-size:11px;color:#9ca3af}
+
+/* TRUST BAR */
+.trust{background:#f9f9ff;border-top:1px solid #e8e8f0;border-bottom:1px solid #e8e8f0;padding:20px 0}
+.trust-inner{max-width:1200px;margin:0 auto;padding:0 24px;display:flex;align-items:center;justify-content:center;gap:40px;flex-wrap:wrap}
+.trust-item{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#6b7280}
+.trust-dot{width:6px;height:6px;border-radius:50%;background:#4f46e5;flex-shrink:0}
+
+/* SECTIONS */
+.section{padding:90px 0}
+.section.alt{background:#f9f9ff}
+.sec-inner{max-width:1200px;margin:0 auto;padding:0 24px}
+.sec-head{text-align:center;margin-bottom:60px}
+.sec-tag{display:inline-block;background:#ede9fe;color:#7c3aed;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:5px 14px;border-radius:99px;margin-bottom:14px}
+.sec-title{font-size:clamp(26px,3vw,40px);font-weight:800;letter-spacing:-1px;color:#0f0a2e;margin-bottom:14px}
+.sec-sub{font-size:16px;color:#6b7280;max-width:520px;margin:0 auto;line-height:1.7}
+
+/* FEATURES */
+.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.feat-card{background:#fff;border:1px solid #e8e8f0;border-radius:16px;padding:28px;transition:all .25s}
+.feat-card:hover{border-color:#a78bfa;box-shadow:0 8px 32px rgba(79,70,229,.08);transform:translateY(-3px)}
+.feat-icon{width:52px;height:52px;border-radius:12px;background:#ede9fe;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:18px}
+.feat-title{font-size:17px;font-weight:700;color:#0f0a2e;margin-bottom:8px}
+.feat-desc{font-size:14px;color:#6b7280;line-height:1.65}
+
+/* HOW IT WORKS */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:0;position:relative;margin-top:60px}
+.steps::before{content:'';position:absolute;top:30px;left:12%;right:12%;height:2px;background:linear-gradient(90deg,#4f46e5,#7c3aed,#4f46e5);opacity:.2}
+.step{text-align:center;padding:0 20px}
+.step-circle{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;font-size:20px;font-weight:800;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;position:relative;z-index:1;box-shadow:0 4px 16px rgba(79,70,229,.3)}
+.step-title{font-size:15px;font-weight:700;color:#0f0a2e;margin-bottom:8px}
+.step-desc{font-size:13px;color:#6b7280;line-height:1.6}
+
+/* CLASSES */
+.classes-wrap{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:40px}
+.class-tag{padding:10px 22px;border-radius:99px;border:1.5px solid #e5e7eb;font-size:14px;font-weight:600;color:#4b5563;transition:all .2s;cursor:default}
+.class-tag:hover{border-color:#4f46e5;color:#4f46e5;background:#f5f3ff}
+.class-tag.active{background:#4f46e5;border-color:#4f46e5;color:#fff}
+.boards-wrap{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:16px}
+.board-tag{padding:7px 18px;border-radius:99px;border:1px solid #e5e7eb;font-size:13px;font-weight:500;color:#6b7280}
+
+/* VCOIN */
+.vcoin-split{display:grid;grid-template-columns:1fr 1fr;gap:60px;align-items:center}
+.vcoin-list{display:flex;flex-direction:column;gap:16px}
+.vcoin-item{display:flex;align-items:flex-start;gap:14px;padding:18px;border:1px solid #e8e8f0;border-radius:14px;background:#fff;transition:border-color .2s}
+.vcoin-item:hover{border-color:#a78bfa}
+.vi-icon{font-size:28px;flex-shrink:0}
+.vi-title{font-size:15px;font-weight:700;color:#0f0a2e;margin-bottom:4px}
+.vi-desc{font-size:13px;color:#6b7280}
+.vcoin-card{background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:20px;padding:40px;text-align:center;color:#fff;box-shadow:0 20px 60px rgba(79,70,229,.3)}
+.vc-coin{font-size:64px;margin-bottom:12px}
+.vc-title{font-size:36px;font-weight:800;margin-bottom:8px}
+.vc-sub{font-size:15px;opacity:.8;margin-bottom:28px}
+.vc-tags{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:28px}
+.vc-tag{background:rgba(255,255,255,.15);border-radius:99px;padding:6px 16px;font-size:12px;font-weight:600}
+.vc-btn{background:#fff;color:#4f46e5;border:none;padding:13px 28px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;transition:all .2s;width:100%}
+.vc-btn:hover{background:#f5f3ff}
+
+/* REFERRAL */
+.ref-banner{background:linear-gradient(135deg,#0f0a2e,#1e1060,#0f0a2e);border-radius:20px;padding:60px;text-align:center;color:#fff;position:relative;overflow:hidden}
+.ref-banner::before{content:'';position:absolute;top:-80px;right:-80px;width:300px;height:300px;border-radius:50%;background:rgba(79,70,229,.2);filter:blur(60px)}
+.ref-emoji{font-size:52px;display:block;margin-bottom:16px}
+.ref-title{font-size:clamp(26px,3.5vw,40px);font-weight:800;letter-spacing:-1px;margin-bottom:12px}
+.ref-sub{font-size:16px;opacity:.7;max-width:480px;margin:0 auto 28px}
+.ref-coins{display:inline-flex;gap:0;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:14px;overflow:hidden;margin-bottom:28px}
+.ref-coin{padding:18px 32px;text-align:center}
+.ref-coin+.ref-coin{border-left:1px solid rgba(255,255,255,.15)}
+.rc-num{font-size:32px;font-weight:800;color:#fbbf24}
+.rc-label{font-size:12px;opacity:.6;margin-top:4px}
+
+/* CTA */
+.cta-section{background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:80px 0;text-align:center;color:#fff}
+.cta-title{font-size:clamp(28px,3.5vw,44px);font-weight:800;letter-spacing:-1px;margin-bottom:14px}
+.cta-sub{font-size:16px;opacity:.8;margin-bottom:36px}
+.cta-btns{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.cta-btn-w{background:#fff;color:#4f46e5;padding:14px 32px;border-radius:10px;font-size:15px;font-weight:700;border:none;cursor:pointer;font-family:'Inter',sans-serif;transition:all .2s}
+.cta-btn-w:hover{background:#f5f3ff;transform:translateY(-2px)}
+.cta-btn-o{background:transparent;color:#fff;padding:14px 32px;border-radius:10px;font-size:15px;font-weight:600;border:2px solid rgba(255,255,255,.4);cursor:pointer;font-family:'Inter',sans-serif;transition:all .2s}
+.cta-btn-o:hover{border-color:#fff;background:rgba(255,255,255,.1)}
+
+/* FOOTER */
+footer{background:#0f0a2e;color:#fff;padding:60px 0 32px}
+.footer-grid{max-width:1200px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:48px;margin-bottom:48px}
+.footer-brand p{font-size:13px;color:rgba(255,255,255,.5);margin-top:14px;line-height:1.7;max-width:260px}
+.footer-col h5{font-size:12px;font-weight:700;color:rgba(255,255,255,.4);letter-spacing:.08em;text-transform:uppercase;margin-bottom:16px}
+.footer-col a{display:block;font-size:13px;color:rgba(255,255,255,.6);text-decoration:none;margin-bottom:10px;transition:color .15s}
+.footer-col a:hover{color:#fff}
+.footer-bottom{max-width:1200px;margin:0 auto;padding:24px 24px 0;border-top:1px solid rgba(255,255,255,.08);display:flex;justify-content:space-between;font-size:12px;color:rgba(255,255,255,.3);flex-wrap:wrap;gap:12px}
+
+/* MODAL */
+.overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:24px;opacity:0;pointer-events:none;transition:opacity .25s}
+.overlay.open{opacity:1;pointer-events:all}
+.modal{background:#fff;border-radius:20px;padding:40px;width:100%;max-width:420px;position:relative;transform:translateY(16px);transition:transform .25s;box-shadow:0 24px 80px rgba(0,0,0,.15)}
+.overlay.open .modal{transform:translateY(0)}
+.modal-top{position:absolute;top:0;left:32px;right:32px;height:3px;background:linear-gradient(90deg,#4f46e5,#7c3aed);border-radius:99px}
+.modal-close{position:absolute;top:16px;right:16px;width:30px;height:30px;border-radius:8px;background:#f3f4f6;border:none;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7280}
+.modal-close:hover{background:#e5e7eb}
+.modal-logo{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:6px}
+.modal-sub{text-align:center;font-size:13px;color:#9ca3af;margin-bottom:24px}
+.tabs{display:flex;background:#f3f4f6;border-radius:10px;padding:4px;margin-bottom:24px;gap:4px}
+.tab{flex:1;padding:9px;border-radius:7px;font-size:13px;font-weight:600;background:transparent;border:none;color:#6b7280;cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif}
+.tab.active{background:#fff;color:#4f46e5;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:7px}
+.field input{width:100%;border:1.5px solid #e5e7eb;border-radius:10px;padding:11px 14px;font-size:14px;font-family:'Inter',sans-serif;color:#1a1a2e;outline:none;transition:border-color .2s;background:#fff}
+.field input:focus{border-color:#4f46e5}
+.field input::placeholder{color:#d1d5db}
+.field-hint{font-size:11px;color:#9ca3af;margin-top:6px}
+.modal-btn{width:100%;padding:13px;border-radius:10px;background:#4f46e5;color:#fff;font-size:15px;font-weight:700;font-family:'Inter',sans-serif;border:none;cursor:pointer;margin-top:4px;transition:all .2s;box-shadow:0 4px 16px rgba(79,70,229,.3)}
+.modal-btn:hover{background:#4338ca}.modal-btn:disabled{opacity:.65;cursor:not-allowed}
+.modal-or{text-align:center;font-size:12px;color:#d1d5db;margin:16px 0;position:relative}
+.modal-or::before,.modal-or::after{content:'';position:absolute;top:50%;width:42%;height:1px;background:#f3f4f6}
+.modal-or::before{left:0}.modal-or::after{right:0}
+.google-btn{width:100%;padding:12px;border-radius:10px;background:#fff;border:1.5px solid #e5e7eb;color:#1a1a2e;font-size:14px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:all .2s}
+.google-btn:hover{border-color:#4f46e5;background:#f5f3ff}
+.modal-note{text-align:center;font-size:11px;color:#9ca3af;margin-top:16px}
+.modal-note a{color:#6366f1;text-decoration:none}
+.fp{display:none}.fp.active{display:block}
+.aerr{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;font-size:13px;color:#ef4444;margin-bottom:14px;display:none;text-align:center}
+.aok{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;font-size:13px;color:#16a34a;margin-bottom:14px;display:none;text-align:center}
+
+/* SUCCESS TOAST */
+.toast{position:fixed;bottom:24px;right:24px;z-index:2000;background:#0f0a2e;color:#fff;padding:16px 22px;border-radius:12px;font-size:14px;font-weight:500;box-shadow:0 8px 32px rgba(0,0,0,.2);transform:translateY(80px);opacity:0;transition:all .3s;max-width:320px}
+.toast.show{transform:translateY(0);opacity:1}
+.toast-icon{font-size:20px;margin-right:8px}
+
+@media(max-width:1024px){.feat-grid{grid-template-columns:1fr 1fr}.footer-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:768px){.hero-wrap{grid-template-columns:1fr}.hero-img{display:none}.steps{grid-template-columns:1fr 1fr}.steps::before{display:none}.vcoin-split{grid-template-columns:1fr}.nav-links{display:none}.footer-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.feat-grid{grid-template-columns:1fr}.steps{grid-template-columns:1fr}.ref-banner{padding:40px 24px}.cta-btns{flex-direction:column;align-items:center}}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-wrap">
+    <a href="#" class="logo">
+      <span class="logo-text"><span class="logo-gl">Gl</span><span class="logo-oows">oows</span></span>
+      <span class="logo-pill">365</span>
+      <span class="logo-e">E</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it Works</a>
+      <a href="#vcoins">V-Coins</a>
+      <a href="mailto:support@gloows365.in">Contact</a>
+    </div>
+    <div class="nav-right">
+      <div class="login-wrap">
+        <button class="login-toggle" id="login-toggle" onclick="toggleLoginDrop()">
+          Login
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="login-dropdown" id="login-drop">
+          <a href="#" onclick="openModal('login');toggleLoginDrop();return false"><span>👨‍🎓</span> Student Login</a>
+          <a href="#" onclick="openModal('login');toggleLoginDrop();return false"><span>👨‍👩‍👧</span> Parent Login</a>
+        </div>
+      </div>
+      <button class="btn-signup" onclick="openModal('signup')">Sign Up Free</button>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-wrap">
+    <div>
+      <div class="hero-badge">🇮🇳 Built for India · Class 6–12</div>
+      <h1 class="hero-title">Learn Smarter.<br/><span>Compete & Earn.</span></h1>
+      <p class="hero-sub">India's most complete learning platform with AI-powered tutoring, short educational reels, and a reward system that makes learning fun.</p>
+      <div class="hero-btns">
+        <button class="btn-hero-primary" onclick="openModal('signup')">Get Started Free</button>
+        <button class="btn-hero-sec" onclick="openModal('login')">Login to Account</button>
+      </div>
+      <div class="hero-stats">
+        <div class="hs"><div class="hs-num">14+</div><div class="hs-label">Languages supported</div></div>
+        <div class="hs"><div class="hs-num">6–12</div><div class="hs-label">Classes covered</div></div>
+        <div class="hs"><div class="hs-num">Free</div><div class="hs-label">To get started</div></div>
+      </div>
+    </div>
+    <div class="hero-img">
+      <div class="app-grid">
+        <div class="app-card"><div class="ac-icon">📖</div><div class="ac-title">Stories</div><div class="ac-desc">Daily educational stories</div></div>
+        <div class="app-card"><div class="ac-icon">🤖</div><div class="ac-title">AI Guru</div><div class="ac-desc">Ask any doubt instantly</div></div>
+        <div class="app-card"><div class="ac-icon">🎬</div><div class="ac-title">Short Reels</div><div class="ac-desc">Learn in 60 seconds</div></div>
+        <div class="app-card"><div class="ac-icon">🪙</div><div class="ac-title">V-Coins</div><div class="ac-desc">Earn while you learn</div></div>
+      </div>
+      <div class="app-footer">
+        <div class="af-stat"><div class="af-num">CBSE</div><div class="af-lbl">& all boards</div></div>
+        <div class="af-stat"><div class="af-num">AI</div><div class="af-lbl">Powered</div></div>
+        <div class="af-stat"><div class="af-num">100%</div><div class="af-lbl">Free to start</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TRUST BAR -->
+<div class="trust">
+  <div class="trust-inner">
+    <div class="trust-item"><div class="trust-dot"></div>Firebase Secured</div>
+    <div class="trust-item"><div class="trust-dot"></div>CBSE / ICSE / State Boards</div>
+    <div class="trust-item"><div class="trust-dot"></div>14 Regional Languages</div>
+    <div class="trust-item"><div class="trust-dot"></div>No Ads in Core Learning</div>
+    <div class="trust-item"><div class="trust-dot"></div>Shikshakool Academy Pvt. Ltd.</div>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<div class="section" id="features">
+  <div class="sec-inner">
+    <div class="sec-head">
+      <div class="sec-tag">Phase 1 Features</div>
+      <h2 class="sec-title">Everything a student needs. In one app.</h2>
+      <p class="sec-sub">Built ground-up for Indian school students with AI at the core and rewards keeping you motivated.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="feat-card"><div class="feat-icon">📖</div><h3 class="feat-title">Stories</h3><p class="feat-desc">Bite-sized educational stories from teachers and toppers. Browse by subject, class, or language. New stories every day.</p></div>
+      <div class="feat-card"><div class="feat-icon">🤖</div><h3 class="feat-title">AI Guru</h3><p class="feat-desc">Ask any doubt in your own language. Get instant explanations, exam tips, and study notes powered by Gemini AI.</p></div>
+      <div class="feat-card"><div class="feat-icon">📸</div><h3 class="feat-title">PhotoSolve</h3><p class="feat-desc">Click a photo of any question — AI solves it step by step with full explanation. Like a tutor in your pocket.</p></div>
+      <div class="feat-card"><div class="feat-icon">🎬</div><h3 class="feat-title">Short Reels</h3><p class="feat-desc">60-second concept videos curated by Gloows365E educators. Swipe to learn, fast.</p></div>
+      <div class="feat-card"><div class="feat-icon">🎁</div><h3 class="feat-title">Refer & Earn</h3><p class="feat-desc">Share your referral code with friends. Both of you earn V-Coins the moment they sign up. No limits.</p></div>
+      <div class="feat-card"><div class="feat-icon">🪙</div><h3 class="feat-title">V-Coins</h3><p class="feat-desc">Earn coins for learning, referring friends, and completing daily challenges. Redeem for subscriptions and rewards.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- HOW IT WORKS -->
+<div class="section alt" id="how">
+  <div class="sec-inner">
+    <div class="sec-head">
+      <div class="sec-tag">How it Works</div>
+      <h2 class="sec-title">Start learning in under 2 minutes.</h2>
+      <p class="sec-sub">Simple, fast onboarding. No complicated setup required.</p>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="step-circle">1</div><h4 class="step-title">Create Account</h4><p class="step-desc">Sign up free with your email. Enter your class, board and preferred language.</p></div>
+      <div class="step"><div class="step-circle">2</div><h4 class="step-title">Explore Content</h4><p class="step-desc">Browse Stories, watch Short Reels and ask AI Guru your first doubt.</p></div>
+      <div class="step"><div class="step-circle">3</div><h4 class="step-title">Earn V-Coins</h4><p class="step-desc">Coins are awarded automatically for learning activities and referrals.</p></div>
+      <div class="step"><div class="step-circle">4</div><h4 class="step-title">Grow & Win</h4><p class="step-desc">Climb leaderboards, unlock premium features and showcase your skills.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- CLASSES -->
+<div class="section">
+  <div class="sec-inner">
+    <div class="sec-head">
+      <div class="sec-tag">Who is it for</div>
+      <h2 class="sec-title">Class 6 to 12. All boards covered.</h2>
+      <p class="sec-sub">Content mapped to your exact syllabus across all major Indian boards.</p>
+    </div>
+    <div class="classes-wrap">
+      <span class="class-tag">Class 6</span><span class="class-tag">Class 7</span>
+      <span class="class-tag active">Class 8</span><span class="class-tag active">Class 9</span>
+      <span class="class-tag active">Class 10</span>
+      <span class="class-tag">Class 11</span><span class="class-tag">Class 12</span>
+    </div>
+    <div class="boards-wrap">
+      <span class="board-tag">CBSE</span><span class="board-tag">ICSE</span>
+      <span class="board-tag">West Bengal Board</span><span class="board-tag">Maharashtra Board</span>
+      <span class="board-tag">Tamil Nadu Board</span><span class="board-tag">& more</span>
+    </div>
+  </div>
+</div>
+
+<!-- VCOINS -->
+<div class="section alt" id="vcoins">
+  <div class="sec-inner">
+    <div class="vcoin-split">
+      <div>
+        <div class="sec-tag">V-Coins System</div>
+        <h2 class="sec-title" style="text-align:left">Get rewarded for learning.</h2>
+        <p style="font-size:16px;color:#6b7280;margin-bottom:32px;line-height:1.7">Every action on Gloows365E earns you V-Coins — the in-app currency that unlocks real value.</p>
+        <div class="vcoin-list">
+          <div class="vcoin-item"><div class="vi-icon">📖</div><div><div class="vi-title">View a Story</div><div class="vi-desc">Earn coins every time you complete an educational story.</div></div></div>
+          <div class="vcoin-item"><div class="vi-icon">🎁</div><div><div class="vi-title">Refer a Friend</div><div class="vi-desc">You get 50 V-Coins. Your friend gets 30 V-Coins as a welcome bonus.</div></div></div>
+          <div class="vcoin-item"><div class="vi-icon">🤖</div><div><div class="vi-title">Use AI Guru</div><div class="vi-desc">Complete AI-guided learning sessions to earn daily coin rewards.</div></div></div>
+        </div>
+      </div>
+      <div>
+        <div class="vcoin-card">
+          <div class="vc-coin">🪙</div>
+          <div class="vc-title">V-Coins</div>
+          <div class="vc-sub">Your in-app learning currency</div>
+          <div class="vc-tags"><span class="vc-tag">✓ Earn daily</span><span class="vc-tag">✓ Refer friends</span><span class="vc-tag">✓ Redeem rewards</span></div>
+          <button class="vc-btn" onclick="openModal('signup')">Start Earning Free →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- REFERRAL -->
+<div class="section">
+  <div class="sec-inner">
+    <div class="ref-banner">
+      <span class="ref-emoji">🎁</span>
+      <h2 class="ref-title">Invite friends. Both of you win.</h2>
+      <p class="ref-sub">Share your unique referral code. When your friend signs up, you both instantly earn V-Coins.</p>
+      <div class="ref-coins">
+        <div class="ref-coin"><div class="rc-num">50</div><div class="rc-label">You earn (V-Coins)</div></div>
+        <div class="ref-coin"><div class="rc-num">30</div><div class="rc-label">Friend earns (V-Coins)</div></div>
+      </div>
+      <br/>
+      <button class="btn-hero-primary" style="font-size:15px" onclick="openModal('signup')">Join & Get Your Code</button>
+    </div>
+  </div>
+</div>
+
+<!-- CTA -->
+<div class="cta-section">
+  <div class="sec-inner">
+    <h2 class="cta-title">Ready to learn smarter?</h2>
+    <p class="cta-sub">Join thousands of students already learning on Gloows365E. Free to get started.</p>
+    <div class="cta-btns">
+      <button class="cta-btn-w" onclick="openModal('signup')">Create Free Account</button>
+      <button class="cta-btn-o" onclick="openModal('login')">Login</button>
+    </div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a href="#" class="logo" style="margin-bottom:4px">
+        <span class="logo-text" style="font-size:20px"><span class="logo-gl">Gl</span><span style="color:#fff">oows</span></span>
+        <span class="logo-pill">365</span>
+        <span class="logo-e">E</span>
+      </a>
+      <p>India's smartest learning platform for school students. Learn, compete, and earn with AI-powered education.</p>
+      <p style="margin-top:10px;font-size:12px;color:rgba(255,255,255,.25)">Shikshakool Academy Private Limited<br/>gloows365.in</p>
+    </div>
+    <div class="footer-col"><h5>Platform</h5><a href="#features">Features</a><a href="#how">How it Works</a><a href="#vcoins">V-Coins</a><a href="#" onclick="openModal('signup');return false">Sign Up Free</a></div>
+    <div class="footer-col"><h5>Company</h5><a href="#">About Us</a><a href="mailto:support@gloows365.in">Contact</a><a href="#">Careers</a></div>
+    <div class="footer-col"><h5>Legal</h5><a href="#">Privacy Policy</a><a href="#">Terms of Service</a><a href="#">Refund Policy</a></div>
+  </div>
+  <div class="footer-bottom">
+    <span>© 2025 Shikshakool Academy Private Limited. All rights reserved.</span>
+    <span>gloows365.in</span>
+  </div>
+</footer>
+
+<!-- MODAL -->
+<div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-top"></div>
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-logo">
+      <span style="font-size:24px;font-weight:800;font-family:'Inter',sans-serif"><span class="logo-gl">Gl</span><span style="color:#1a1a2e">oows</span></span>
+      <span class="logo-pill" style="font-size:13px">365</span>
+      <span class="logo-e" style="font-size:17px">E</span>
+    </div>
+    <p class="modal-sub">India's smartest learning app</p>
+    <div class="tabs">
+      <button class="tab active" id="tab-login" onclick="switchTab('login')">Login</button>
+      <button class="tab" id="tab-signup" onclick="switchTab('signup')">Sign Up</button>
+    </div>
+    <!-- LOGIN -->
+    <div class="fp active" id="panel-login">
+      <div class="aerr" id="login-error"></div>
+      <div class="aok" id="login-ok"></div>
+      <div class="field"><label>Email Address</label><input id="login-email" type="email" placeholder="yourname@email.com" autocomplete="email"/></div>
+      <div class="field"><label>Password</label><input id="login-password" type="password" placeholder="Enter your password" autocomplete="current-password"/><div class="field-hint"><a href="#" onclick="handleForgotPassword();return false" style="color:#6366f1;font-size:11px;text-decoration:none">Forgot password?</a></div></div>
+      <button class="modal-btn" id="login-btn" onclick="handleLogin()">Login to Gloows365E</button>
+      <div class="modal-or">or</div>
+      <button class="google-btn" onclick="handleGoogle()">
+        <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Continue with Google
+      </button>
+      <p class="modal-note">Don't have an account? <a href="#" onclick="switchTab('signup');return false">Sign up free</a></p>
+    </div>
+    <!-- SIGNUP -->
+    <div class="fp" id="panel-signup">
+      <div class="aerr" id="signup-error"></div>
+      <div class="field"><label>Full Name</label><input id="signup-name" type="text" placeholder="Your full name" autocomplete="name"/></div>
+      <div class="field"><label>Email Address</label><input id="signup-email" type="email" placeholder="yourname@email.com" autocomplete="email"/></div>
+      <div class="field"><label>Password</label><input id="signup-password" type="password" placeholder="Minimum 6 characters" autocomplete="new-password"/></div>
+      <div class="field"><label>Referral Code <span style="color:#9ca3af;font-weight:400">(optional)</span></label><input id="signup-referral" type="text" placeholder="Enter friend's code" maxlength="8" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"/><div class="field-hint">Both you and your friend earn V-Coins!</div></div>
+      <button class="modal-btn" id="signup-btn" onclick="handleSignup()">Create Free Account</button>
+      <div class="modal-or">or</div>
+      <button class="google-btn" onclick="handleGoogle()">
+        <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Continue with Google
+      </button>
+      <p class="modal-note">By signing up you agree to our <a href="#">Terms</a> and <a href="#">Privacy Policy</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- SUCCESS TOAST -->
+<div class="toast" id="toast"><span class="toast-icon">🎉</span><span id="toast-msg">Welcome to Gloows365E!</span></div>
+
+<script>
+// Firebase init
+firebase.initializeApp({
+  apiKey:"AIzaSyCpS6KjmnGAD5vCuB_swM2SWRd6-nhoiys",
+  authDomain:"gloows-03b6sz.firebaseapp.com",
+  projectId:"gloows-03b6sz",
+  storageBucket:"gloows-03b6sz.firebasestorage.app",
+  messagingSenderId:"1039247674814",
+  appId:"1:1039247674814:web:071d5c2982065f6712bdef"
+});
+var auth=firebase.auth(),db=firebase.firestore();
+
+// Login dropdown
+function toggleLoginDrop(){
+  var t=document.getElementById('login-toggle');
+  var d=document.getElementById('login-drop');
+  t.classList.toggle('open');
+  d.classList.toggle('show');
+}
+document.addEventListener('click',function(e){
+  if(!e.target.closest('.login-wrap')){
+    document.getElementById('login-toggle').classList.remove('open');
+    document.getElementById('login-drop').classList.remove('show');
+  }
+});
+
+// Modal
+function openModal(tab){
+  switchTab(tab);
+  document.getElementById('overlay').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeModal(){
+  document.getElementById('overlay').classList.remove('open');
+  document.body.style.overflow='';
+}
+function switchTab(tab){
+  document.getElementById('tab-login').classList.toggle('active',tab==='login');
+  document.getElementById('tab-signup').classList.toggle('active',tab==='signup');
+  document.getElementById('panel-login').classList.toggle('active',tab==='login');
+  document.getElementById('panel-signup').classList.toggle('active',tab==='signup');
+}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});
+
+// Toast
+function showToast(msg){
+  var t=document.getElementById('toast');
+  document.getElementById('toast-msg').textContent=msg;
+  t.classList.add('show');
+  setTimeout(function(){t.classList.remove('show');},4000);
+}
+
+// Error helpers
+function showErr(id,msg){var el=document.getElementById(id);if(el){el.textContent=msg;el.style.display='block';}}
+function clearErr(id){var el=document.getElementById(id);if(el)el.style.display='none';}
+function showOk(id,msg){var el=document.getElementById(id);if(el){el.textContent=msg;el.style.display='block';}}
+function friendlyErr(code){
+  var m={'auth/user-not-found':'No account found with this email.','auth/wrong-password':'Incorrect password.','auth/invalid-credential':'Incorrect email or password.','auth/invalid-email':'Please enter a valid email address.','auth/email-already-in-use':'An account already exists with this email.','auth/weak-password':'Password must be at least 6 characters.','auth/too-many-requests':'Too many attempts. Please wait a moment.','auth/network-request-failed':'Network error. Check your connection.','auth/popup-closed-by-user':'Sign-in cancelled.','auth/popup-blocked':'Popup blocked. Please allow popups.'};
+  return m[code]||'Something went wrong. Please try again.';
+}
+
+// On login success — close modal, show toast
+function onSuccess(name){
+  closeModal();
+  showToast('Welcome' + (name ? ', '+name.split(' ')[0] : '') + '! 🎉');
+}
+
+// Ensure user doc
+function ensureUserDoc(user){
+  return db.collection('users').doc(user.uid).get().then(function(s){
+    if(!s.exists){return db.collection('users').doc(user.uid).set({email:user.email||'',displayName:user.displayName||'',photoURL:user.photoURL||'',profileType:'web',createdAt:firebase.firestore.FieldValue.serverTimestamp(),vCoins:0},{merge:true});}
+  });
+}
+
+// LOGIN
+function handleLogin(){
+  clearErr('login-error');clearErr('login-ok');
+  var email=document.getElementById('login-email').value.trim();
+  var pass=document.getElementById('login-password').value;
+  if(!email||!pass){showErr('login-error','Please enter your email and password.');return;}
+  var btn=document.getElementById('login-btn');
+  btn.disabled=true;btn.textContent='Signing in…';
+  auth.signInWithEmailAndPassword(email,pass)
+    .then(function(c){onSuccess(c.user.displayName||c.user.email);})
+    .catch(function(e){showErr('login-error',friendlyErr(e.code));btn.disabled=false;btn.textContent='Login to Gloows365E';});
+}
+
+// SIGNUP
+function handleSignup(){
+  clearErr('signup-error');
+  var name=document.getElementById('signup-name').value.trim();
+  var email=document.getElementById('signup-email').value.trim();
+  var pass=document.getElementById('signup-password').value;
+  var code=document.getElementById('signup-referral').value.trim().toUpperCase();
+  if(!name||!email||!pass){showErr('signup-error','Please fill in all required fields.');return;}
+  if(pass.length<6){showErr('signup-error','Password must be at least 6 characters.');return;}
+  var btn=document.getElementById('signup-btn');
+  btn.disabled=true;btn.textContent='Creating account…';
+  auth.createUserWithEmailAndPassword(email,pass)
+    .then(function(c){return ensureUserDoc(c.user);})
+    .then(function(){onSuccess(name);})
+    .catch(function(e){showErr('signup-error',friendlyErr(e.code));btn.disabled=false;btn.textContent='Create Free Account';});
+}
+
+// GOOGLE
+function handleGoogle(){
+  var p=new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(p)
+    .then(function(r){return ensureUserDoc(r.user).then(function(){onSuccess(r.user.displayName);});})
+    .catch(function(e){if(e.code!=='auth/popup-closed-by-user'){showErr('login-error',friendlyErr(e.code));}});
+}
+
+// FORGOT PASSWORD
+function handleForgotPassword(){
+  var email=document.getElementById('login-email').value.trim();
+  if(!email){showErr('login-error','Enter your email above first, then click Forgot Password.');return;}
+  clearErr('login-error');
+  auth.sendPasswordResetEmail(email)
+    .then(function(){showOk('login-ok','✅ Reset email sent! Check your inbox.');})
+    .catch(function(e){showErr('login-error',friendlyErr(e.code));});
+}
+</script>
+</body>
+</html>

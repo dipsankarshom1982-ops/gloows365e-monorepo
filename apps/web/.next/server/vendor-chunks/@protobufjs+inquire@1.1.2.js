@@ -1,0 +1,25 @@
+"use strict";
+/*
+ * ATTENTION: An "eval-source-map" devtool has been used.
+ * This devtool is neither made for production nor for readable output files.
+ * It uses "eval()" calls to create a separate source file with attached SourceMaps in the browser devtools.
+ * If you are trying to read the output file, select a different devtool (https://webpack.js.org/configuration/devtool/)
+ * or disable the default devtool with "devtool: false".
+ * If you are looking for production-ready output files, see mode: "production" (https://webpack.js.org/configuration/mode/).
+ */
+exports.id = "vendor-chunks/@protobufjs+inquire@1.1.2";
+exports.ids = ["vendor-chunks/@protobufjs+inquire@1.1.2"];
+exports.modules = {
+
+/***/ "(ssr)/../../node_modules/.pnpm/@protobufjs+inquire@1.1.2/node_modules/@protobufjs/inquire/index.js":
+/*!****************************************************************************************************!*\
+  !*** ../../node_modules/.pnpm/@protobufjs+inquire@1.1.2/node_modules/@protobufjs/inquire/index.js ***!
+  \****************************************************************************************************/
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+eval("\r\nmodule.exports = inquire;\r\n\r\n/**\r\n * Requires a module only if available.\r\n * @memberof util\r\n * @param {string} moduleName Module to require\r\n * @returns {?Object} Required module if available and not empty, otherwise `null`\r\n * @deprecated Legacy optional require helper. Will be removed in a future release.\r\n */\r\nfunction inquire(moduleName) {\r\n  try {\r\n    if (false) {}\r\n    var mod = __webpack_require__(\"(ssr)/../../node_modules/.pnpm/@protobufjs+inquire@1.1.2/node_modules/@protobufjs/inquire sync recursive\")(moduleName);\r\n    if (mod && (mod.length || Object.keys(mod).length)) return mod;\r\n    return null;\r\n  } catch (err) {\r\n    // ignore\r\n    return null;\r\n  }\r\n}\r\n\r\n/*\r\n// maybe worth a shot to prevent renaming issues:\r\n// see: https://github.com/webpack/webpack/blob/master/lib/dependencies/CommonJsRequireDependencyParserPlugin.js\r\n// triggers on:\r\n// - expression require.cache\r\n// - expression require (???)\r\n// - call require\r\n// - call require:commonjs:item\r\n// - call require:commonjs:context\r\n\r\nObject.defineProperty(Function.prototype, \"__self\", { get: function() { return this; } });\r\nvar r = require.__self;\r\ndelete Function.prototype.__self;\r\n*/\r\n//# sourceURL=[module]\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiKHNzcikvLi4vLi4vbm9kZV9tb2R1bGVzLy5wbnBtL0Bwcm90b2J1ZmpzK2lucXVpcmVAMS4xLjIvbm9kZV9tb2R1bGVzL0Bwcm90b2J1ZmpzL2lucXVpcmUvaW5kZXguanMiLCJtYXBwaW5ncyI6IkFBQWE7QUFDYjtBQUNBO0FBQ0E7QUFDQTtBQUNBO0FBQ0EsV0FBVyxRQUFRO0FBQ25CLGFBQWEsU0FBUztBQUN0QjtBQUNBO0FBQ0E7QUFDQTtBQUNBLFFBQVEsS0FBNkIsRUFBRSxFQUVsQztBQUNMLGNBQWMsZ0lBQVEsVUFBVSxDQUFDO0FBQ2pDO0FBQ0E7QUFDQSxJQUFJO0FBQ0o7QUFDQTtBQUNBO0FBQ0E7QUFDQTtBQUNBO0FBQ0E7QUFDQTtBQUNBO0FBQ0E7QUFDQTtBQUNBO0FBQ0E7QUFDQTtBQUNBO0FBQ0Esc0RBQXNELGtCQUFrQixnQkFBZ0I7QUFDeEY7QUFDQTtBQUNBIiwic291cmNlcyI6WyJDOlxcR0xPT1dTMzY1RS1NT05PUkVQT1xcbm9kZV9tb2R1bGVzXFwucG5wbVxcQHByb3RvYnVmanMraW5xdWlyZUAxLjEuMlxcbm9kZV9tb2R1bGVzXFxAcHJvdG9idWZqc1xcaW5xdWlyZVxcaW5kZXguanMiXSwic291cmNlc0NvbnRlbnQiOlsiXCJ1c2Ugc3RyaWN0XCI7XHJcbm1vZHVsZS5leHBvcnRzID0gaW5xdWlyZTtcclxuXHJcbi8qKlxyXG4gKiBSZXF1aXJlcyBhIG1vZHVsZSBvbmx5IGlmIGF2YWlsYWJsZS5cclxuICogQG1lbWJlcm9mIHV0aWxcclxuICogQHBhcmFtIHtzdHJpbmd9IG1vZHVsZU5hbWUgTW9kdWxlIHRvIHJlcXVpcmVcclxuICogQHJldHVybnMgez9PYmplY3R9IFJlcXVpcmVkIG1vZHVsZSBpZiBhdmFpbGFibGUgYW5kIG5vdCBlbXB0eSwgb3RoZXJ3aXNlIGBudWxsYFxyXG4gKiBAZGVwcmVjYXRlZCBMZWdhY3kgb3B0aW9uYWwgcmVxdWlyZSBoZWxwZXIuIFdpbGwgYmUgcmVtb3ZlZCBpbiBhIGZ1dHVyZSByZWxlYXNlLlxyXG4gKi9cclxuZnVuY3Rpb24gaW5xdWlyZShtb2R1bGVOYW1lKSB7XHJcbiAgdHJ5IHtcclxuICAgIGlmICh0eXBlb2YgcmVxdWlyZSAhPT0gXCJmdW5jdGlvblwiKSB7XHJcbiAgICAgIHJldHVybiBudWxsO1xyXG4gICAgfVxyXG4gICAgdmFyIG1vZCA9IHJlcXVpcmUobW9kdWxlTmFtZSk7XHJcbiAgICBpZiAobW9kICYmIChtb2QubGVuZ3RoIHx8IE9iamVjdC5rZXlzKG1vZCkubGVuZ3RoKSkgcmV0dXJuIG1vZDtcclxuICAgIHJldHVybiBudWxsO1xyXG4gIH0gY2F0Y2ggKGVycikge1xyXG4gICAgLy8gaWdub3JlXHJcbiAgICByZXR1cm4gbnVsbDtcclxuICB9XHJcbn1cclxuXHJcbi8qXHJcbi8vIG1heWJlIHdvcnRoIGEgc2hvdCB0byBwcmV2ZW50IHJlbmFtaW5nIGlzc3VlczpcclxuLy8gc2VlOiBodHRwczovL2dpdGh1Yi5jb20vd2VicGFjay93ZWJwYWNrL2Jsb2IvbWFzdGVyL2xpYi9kZXBlbmRlbmNpZXMvQ29tbW9uSnNSZXF1aXJlRGVwZW5kZW5jeVBhcnNlclBsdWdpbi5qc1xyXG4vLyB0cmlnZ2VycyBvbjpcclxuLy8gLSBleHByZXNzaW9uIHJlcXVpcmUuY2FjaGVcclxuLy8gLSBleHByZXNzaW9uIHJlcXVpcmUgKD8/PylcclxuLy8gLSBjYWxsIHJlcXVpcmVcclxuLy8gLSBjYWxsIHJlcXVpcmU6Y29tbW9uanM6aXRlbVxyXG4vLyAtIGNhbGwgcmVxdWlyZTpjb21tb25qczpjb250ZXh0XHJcblxyXG5PYmplY3QuZGVmaW5lUHJvcGVydHkoRnVuY3Rpb24ucHJvdG90eXBlLCBcIl9fc2VsZlwiLCB7IGdldDogZnVuY3Rpb24oKSB7IHJldHVybiB0aGlzOyB9IH0pO1xyXG52YXIgciA9IHJlcXVpcmUuX19zZWxmO1xyXG5kZWxldGUgRnVuY3Rpb24ucHJvdG90eXBlLl9fc2VsZjtcclxuKi9cclxuIl0sIm5hbWVzIjpbXSwiaWdub3JlTGlzdCI6WzBdLCJzb3VyY2VSb290IjoiIn0=\n//# sourceURL=webpack-internal:///(ssr)/../../node_modules/.pnpm/@protobufjs+inquire@1.1.2/node_modules/@protobufjs/inquire/index.js\n");
+
+/***/ })
+
+};
+;

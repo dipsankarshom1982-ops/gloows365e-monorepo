@@ -1,0 +1,21 @@
+node_modules/
+.env
+.next/
+.expo/
+dist/
+build/
+.vscode/
+firebase-debug.log
+
+# Expo
+.expo-shared/
+
+# Next.js
+out/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
