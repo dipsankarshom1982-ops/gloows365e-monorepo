@@ -112,6 +112,23 @@ service cloud.firestore {
       allow write: if request.auth.token.admin == true;
     }
 
+    // 🎯 EDUCATION OPPORTUNITIES (admin writes, all authenticated read)
+    // Was missing entirely — every read fell through Firestore's default
+    // deny-all, so apps/mobile/app/restart-education/opportunities.tsx's
+    // onSnapshot listener always errored and silently showed its hardcoded
+    // fallback list forever, no matter what admin configured.
+    match /educationOpportunities/{opportunityId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+
+    // 🌟 RESTART SUCCESS STORIES (admin writes, all authenticated read)
+    // Same gap as educationOpportunities above, for success-stories.tsx.
+    match /restartSuccessStories/{storyId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+
     // 🔖 BOOKMARKS
     match /bookmarks/{userId} {
       allow read, write: if request.auth.uid == userId;
@@ -145,11 +162,41 @@ service cloud.firestore {
         );
       match /participant/{userId} {
         allow read: if request.auth != null;
-        allow create: if request.auth != null
-          && request.auth.uid == userId
-          && request.resource.data.userId == request.auth.uid;
-        allow update: if request.auth != null && request.auth.uid == userId;
+        // Creation only happens through the joinVidyastarContest Cloud
+        // Function (Admin SDK, bypasses these rules) — it's the only place
+        // that verifies the V-Coins entry fee was actually paid. Direct
+        // client create used to be allowed here with no validation on
+        // entryFeePaid/sponsored, so any signed-in user could write
+        // themselves a free "joined" doc for any paid contest.
+        allow create: if false;
+        // Updates (quiz answers, score, rank, completed) only happen
+        // through the submitVidyastarContestQuiz Cloud Function now too —
+        // it has to write EVERY participant's rank in one batch when a
+        // quiz is submitted, which a same-uid-only rule can never allow
+        // for docs other than the submitter's own (Firestore batches are
+        // all-or-nothing, so that cross-user write used to fail the whole
+        // batch — see submitVidyastarContestQuiz.ts for the full story).
+        allow update: if false;
       }
+      match /lessons/{language} {
+        // Lesson content is generated lazily per (contest, language) by the
+        // getContestLesson Cloud Function (Admin SDK, bypasses these rules)
+        // the first time a student in that language opens the lesson —
+        // never written directly by a client, same reason participant
+        // writes are Cloud-Function-only above.
+        allow read: if request.auth != null;
+        allow write: if false;
+      }
+    }
+
+    // ⭐ VIDYASTAR CONFIG — rank-tier prizes per period, keyed by periodKey.
+    // Was missing entirely — every read/write fell through Firestore's
+    // default deny-all, so the admin's VidyaStar Config page and the
+    // student-facing prize displays (contest cards, results) that read this
+    // collection directly by periodKey all silently failed.
+    match /vidyastarConfig/{periodKey} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
     }
 
     // 🧠 QUIZZES
@@ -229,6 +276,20 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == uid;
     }
+    // 🏆 STARBOARD — was missing entirely, so every read from Starboard
+    // (web/mobile leaderboard screens, admin's StarboardPayouts.tsx) fell
+    // through Firestore's default deny-all, even though the points
+    // themselves were being written correctly by
+    // submitVidyastarContestQuiz's syncToStarboard() (Admin SDK, bypasses
+    // rules). Same shape as the vidyastarConfig gap fixed earlier — the
+    // data existed, only the read rule was missing. Write is admin-only:
+    // the Cloud Function above doesn't need this rule (Admin SDK bypasses
+    // it), but StarboardPayouts.tsx writes lastPayoutLabel/lastPayoutPrize
+    // back to these same docs via the regular client SDK as an admin user.
+    match /leaderboard/{tab}/entries/{uid} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
     match /leaderboards/{tab}/{scope}/{uid} {
       allow read: if request.auth != null;
       allow write: if false;
@@ -237,6 +298,39 @@ service cloud.firestore {
       allow read, write: if request.auth.uid == userId;
       match /missions/{missionId} {
         allow read, write: if request.auth.uid == userId;
+      }
+    }
+
+    // 🔥 DAILY STREAK QUIZ — NEW
+    // Questions: admin-authored question bank. Students never read this
+    // directly — they get today's question via the getTodaysStreakQuizQuestion
+    // Cloud Function, which strips correctOption/explanation before
+    // returning. So this collection is admin-only, full stop.
+    match /dailyStreakQuizQuestions/{questionId} {
+      allow read, write: if request.auth.token.admin == true;
+
+      // AI-translated versions of the (always-English) question above —
+      // generated lazily per language by getTodaysStreakQuizQuestion
+      // (Admin SDK, bypasses this rule). Same admin-only posture as the
+      // parent: students never read this directly, only via the callable's
+      // response, same reason correctOption/explanation are never exposed
+      // pre-submission on the parent doc either.
+      match /translations/{language} {
+        allow read, write: if request.auth.token.admin == true;
+      }
+    }
+    // Progress: per-student streak/weekly-progress/completed-weeks rollup,
+    // written only by the submitDailyStreakQuizAnswer / applyForAmbassadorProgram
+    // Cloud Functions (Admin SDK, bypasses these rules). Students may read
+    // their own doc to drive the stats header; never write it directly —
+    // that's how "one submission per day" and the streak math stay
+    // tamper-proof.
+    match /studentDailyStreakProgress/{userId} {
+      allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
+      allow write: if false;
+      match /days/{date} {
+        allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
+        allow write: if false;
       }
     }
 
@@ -383,6 +477,27 @@ service cloud.firestore {
       allow write: if request.auth.token.admin == true;
     }
 
+    // ⭐ FEEDBACK & RATINGS — admin-configurable list of rateable features
+    match /feedbackFeatures/{featureId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+
+    // One doc per student, upsert (student edits their own submission
+    // freely); admin reads all for the submissions list + analytics. No
+    // delete — same non-destructive posture as educationLeads/dataRightsLog.
+    match /feedback/{uid} {
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.userId == request.auth.uid;
+      allow read:   if request.auth != null
+        && (request.auth.uid == uid || request.auth.token.admin == true);
+      allow delete: if false;
+    }
+
     // 🎟️ COUPONS
     match /coupons/{id} {
       allow read, write: if request.auth.token.admin == true;
@@ -409,6 +524,7 @@ service cloud.firestore {
       allow read, update: if request.auth.token.admin == true;
       allow delete: if false;
     }
+
     match /affiliateProducts/{productId} {
       allow read: if request.auth != null;
       allow write: if request.auth.token.admin == true;
@@ -443,5 +559,70 @@ service cloud.firestore {
         allow write: if false;
       }
     }
+
+    // 📋 WAITLIST — website "Join With Us" form
+    // Anyone (unauthenticated too) can create — no login required on the website.
+    // Only admins can read, update, delete.
+    match /waitlist/{docId} {
+      allow create: if true;
+      allow read, update, delete: if request.auth != null
+        && request.auth.token.admin == true;
+    }
+
+    // 🔐 DPDP — DATA RIGHTS AUDIT LOG
+    // Written only by the exportMyData / eraseMyAccount Cloud Functions
+    // (Admin SDK, bypasses these rules) — clients never write their own
+    // audit trail, so a user can't fake or erase evidence of a request.
+    match /dataRightsLog/{id} {
+      allow read: if request.auth != null && request.auth.token.admin == true;
+      allow write: if false;
+    }
+
+    // 📮 DPDP — GRIEVANCE TRACKER (admin panel only; grievances arrive via
+    // support@gloows365.in today, not an in-app form)
+    match /grievances/{id} {
+      allow read, write: if request.auth != null && request.auth.token.admin == true;
+    }
+
+    // 🛡️ DPDP — DATA BREACH INCIDENT LOG (append-only; no deletes so the
+    // audit trail can't be tampered with after the fact)
+    match /dataBreachLog/{id} {
+      allow read, create, update: if request.auth != null && request.auth.token.admin == true;
+      allow delete: if false;
+    }
+
+    // 🌍 PUBLIC CONFIG — small set of docs that must be readable by anyone,
+    // including signed-out visitors on the public website (e.g.
+    // publicConfig/grievanceOfficer, published per the DPDP Act, 2023).
+    // Unlike appConfig above, no auth is required to read.
+    match /publicConfig/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.token.admin == true;
+    }
+
+    // 🎁 PRIZE CLAIMS — VidyaStar Starboard prize fulfillment. Created only
+    // by admin (StarboardPayouts.tsx, alongside the existing VCoins-credit
+    // batch) when a prize is awarded. A student may read their own docs and
+    // submit their delivery details exactly once — the update rule only
+    // allows the unclaimed → claimed transition, touching claimInfo/status
+    // only, so a student can't alter the prize itself, skip straight to
+    // "delivered", or resubmit claimInfo after admin has started fulfilling
+    // it. Admin can update anything (status, deliveryInfo) at any time.
+    match /prizeClaims/{claimId} {
+      allow read: if request.auth != null
+        && (resource.data.uid == request.auth.uid || request.auth.token.admin == true);
+      allow create: if request.auth != null && request.auth.token.admin == true;
+      allow update: if request.auth != null && (
+        request.auth.token.admin == true
+        || (
+          resource.data.uid == request.auth.uid
+          && resource.data.status == "unclaimed"
+          && request.resource.data.status == "claimed"
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly(["claimInfo", "status"])
+        )
+      );
+      allow delete: if false;
+    }
+
   }
 }
