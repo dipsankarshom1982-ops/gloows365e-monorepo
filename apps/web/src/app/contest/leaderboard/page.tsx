@@ -10,6 +10,14 @@ import AuthGuard from "@/components/layout/AuthGuard";
 import { auth, db } from "@/lib/firebase";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 
+// NOTE: `name` must be read straight off the participant doc, not fetched
+// separately from students/{uid} — firestore.rules locks students/{uid}
+// reads to that student's own uid, so a per-row fetch of another
+// participant's doc is always denied and silently falls back to "Student"
+// for everyone but the viewer. joinVidyastarContest (Admin SDK) already
+// denormalizes name onto the participant doc at join time for exactly
+// this reason — see functions/src/vidyastarContest.ts.
+
 function parseDate(t: any): Date | null {
   if (!t) return null;
   if (typeof t.toDate === "function") return t.toDate();
@@ -52,11 +60,11 @@ function ContestLeaderboardContent() {
     const completed = participantSnap.docs
       .filter((d) => d.data().completed)
       .map((d) => ({
-        userId: d.data().userId as string,
-        score: d.data().score ?? 0,
+        userId:    d.data().userId as string,
+        name:      d.data().name      ?? "Student",
+        score:     d.data().score     ?? 0,
         timeBonus: d.data().timeBonus ?? 0,
-        rank: d.data().rank ?? 999,
-        name: "Student",
+        rank:      d.data().rank      ?? 999,
       }))
       .sort((a, b) => a.rank - b.rank);
 
@@ -67,20 +75,8 @@ function ContestLeaderboardContent() {
     const uid = auth.currentUser?.uid;
     const selfRow = completed.find((r) => r.userId === uid);
     const others  = completed.filter((r) => r.userId !== uid).slice(0, selfRow ? 49 : 50);
-    const ordered = selfRow ? [selfRow, ...others] : others;
 
-    const named: Row[] = await Promise.all(
-      ordered.map(async (r) => {
-        try {
-          const snap = await getDoc(doc(db, "students", r.userId));
-          return { ...r, name: snap.exists() ? (snap.data()?.name ?? "Student") : "Student" };
-        } catch {
-          return r;
-        }
-      })
-    );
-
-    setRows(named);
+    setRows(selfRow ? [selfRow, ...others] : others);
   }, [contestId]);
 
   useEffect(() => {
