@@ -1,8 +1,9 @@
-// PATH: app/(drawer)/_layout.tsx
+// PATH: apps/mobile/app/(drawer)/_layout.tsx
 // Changes:
 //  • Removed LearnFunCoins and Pan-India learnScore rank
 //  • Replaced with VCoins balance + VCoins annual rank
 //  • Added surprise gift claim banner (if gift is available and unclaimed)
+//  • Added Skill Boost drawer item
 
 import { Drawer } from "expo-router/drawer";
 import {
@@ -17,13 +18,15 @@ import {
 
 import { useTheme } from "@/context/ThemeContext";
 import { useLanguage, useAppTranslation } from "@/context/LanguageContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
-import { useFeatureFlags } from "@/context/FeatureFlagsContext";
+import { useStudentProfile, useFeatureFlags } from "@gloows/shared-logic";
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
 import { auth, db } from "@/lib/firebase";
 import { getLevelFromXP, XP_PER_LEVEL } from "@/lib/learnfun/constants";
+import { ensureStudentId } from "@/services/studentIdService";
+import TitleAvatar from "@/components/TitleAvatar";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
@@ -35,8 +38,20 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+
+// Same detection used by app/index.tsx's boot-time routing — duplicated
+// (not shared) to match that file's own convention. This is a defensive
+// guard, not the primary routing mechanism: index.tsx already sends
+// restart-education users straight to /restart-education/home and never
+// into this (drawer) stack in the first place. This exists so that if a
+// restart-education profile's studentProfile resolves while this layout
+// is somehow already mounted (stale nav state, a deep link, app-state
+// restore after being killed, etc.), they still can't end up looking at
+// the main student app — they get bounced back out immediately.
+const RESTART_TYPES = ["restartEducation", "restart_education", "restart"];
+const RESTART_INDICATOR_FIELDS = ["lastClassPassed", "educationGapReason", "currentOccupation"];
 
 export default function DrawerLayout() {
   const router = useRouter();
@@ -48,17 +63,50 @@ export default function DrawerLayout() {
 
   const { studentProfile, profileLoading: loading } = useStudentProfile();
 
-  // VCoins balance (real-time from users/{uid})
-  const [vCoins, setVCoins] = useState<number>(0);
-  // Annual VCoins rank
-  const [vCoinRank, setVCoinRank] = useState<number | null>(null);
-  // Surprise gift state
+  useEffect(() => {
+    if (!studentProfile) return;
+    const profile = studentProfile as Record<string, any>;
+    const isRestartUser =
+      (profile.profileType && RESTART_TYPES.includes(profile.profileType)) ||
+      RESTART_INDICATOR_FIELDS.some((f) => f in profile);
+    if (isRestartUser) {
+      router.replace("/restart-education/home" as any);
+    }
+  }, [studentProfile]);
+
+  const [vCoins,        setVCoins]        = useState<number>(0);
+  const [vCoinRank,     setVCoinRank]     = useState<number | null>(null);
   const [giftAvailable, setGiftAvailable] = useState(false);
-  const [giftClaimed, setGiftClaimed] = useState(false);
+  const [giftClaimed,   setGiftClaimed]   = useState(false);
+  const [studentIdCopied, setStudentIdCopied] = useState(false);
+
+  // Self-heal: any account that predates this feature (or whose
+  // registration-time ensureStudentId() call failed non-fatally) still
+  // won't have a studentId on their profile — request one the first time
+  // the drawer sees that gap. Idempotent server-side, and the ref guard
+  // keeps this to one call per mount even though studentProfile updates
+  // (e.g. vCoins ticking) re-run this effect.
+  const studentIdRequestedRef = useRef(false);
+  useEffect(() => {
+    if (loading || !studentProfile || studentProfile.studentId) return;
+    if (studentIdRequestedRef.current) return;
+    studentIdRequestedRef.current = true;
+    ensureStudentId().catch(() => { studentIdRequestedRef.current = false; });
+  }, [loading, studentProfile]);
 
   const currentYear = new Date().getFullYear();
 
   // Listen to user doc for vCoins balance + gift
+  // FIX (bug report — "all updated v-coins must be shown in drawer and
+  // v-coins page properly"): there are two separate, disconnected balance
+  // fields on users/{uid} — vCoinsBalance (written by services/
+  // vCoinsService.ts's creditVCoins(), used for reels/videos/contests/
+  // registration) and vCoins (written by a separate backend Cloud
+  // Function, claimVCoinReward, used by the Daily Streak Quiz). Nothing
+  // reconciles them. This used to read vCoins alone, so any coins earned
+  // through the other pipeline never showed here. hooks/useVCoins.ts,
+  // VCoinsHeaderBadge (via services/vCoinsService.ts), and this drawer now
+  // all sum both fields the same way.
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
@@ -66,10 +114,8 @@ export default function DrawerLayout() {
     const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
       if (!snap.exists()) return;
       const d = snap.data();
-      const bal = d.vCoins ?? 0;
-      setVCoins(bal);
+      setVCoins((d.vCoinsBalance ?? 0) + (d.vCoins ?? 0));
 
-      // Gift: admin sets surpriseGift.year + surpriseGift.available
       const gift = d.surpriseGift;
       if (gift && gift.available && gift.year === currentYear) {
         setGiftAvailable(true);
@@ -83,7 +129,7 @@ export default function DrawerLayout() {
     return () => unsub();
   }, []);
 
-  // Compute annual VCoins rank: count users with more yearlyVCoins than current user
+  // Compute annual VCoins rank
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
@@ -107,13 +153,22 @@ export default function DrawerLayout() {
   const xpInLevel = learnXP % XP_PER_LEVEL;
   const xpPct     = Math.min((xpInLevel / XP_PER_LEVEL) * 100, 100);
 
-  const name         = studentProfile?.name         || auth.currentUser?.email?.split("@")[0] || "Student";
-  const school       = studentProfile?.school       || t("yourSchool") || "Your School";
-  const studentClass = studentProfile?.class        || "";
-  const language     = studentProfile?.preferredLanguage || "English";
+  const name         = studentProfile?.name               || auth.currentUser?.email?.split("@")[0] || "Student";
+  const school       = studentProfile?.school             || t("yourSchool") || "Your School";
+  const studentClass = studentProfile?.class              || "";
+  const language     = studentProfile?.preferredLanguage  || "English";
   const district     = studentProfile?.location?.district || "";
   const state        = studentProfile?.location?.state    || "";
-  const profilePic   = studentProfile?.profilePic   || null;
+  const profilePic   = studentProfile?.profilePic         || null;
+  const studentTitle = (studentProfile as Record<string, any> | null | undefined)?.title as string | undefined;
+  const studentId    = studentProfile?.studentId;
+
+  const handleCopyStudentId = async () => {
+    if (!studentId) return;
+    await Clipboard.setStringAsync(studentId);
+    setStudentIdCopied(true);
+    setTimeout(() => setStudentIdCopied(false), 1500);
+  };
 
   const handleLogout = async () => {
     if (auth.currentUser?.email) {
@@ -151,14 +206,37 @@ export default function DrawerLayout() {
                 <ActivityIndicator color="#fff" size="large" />
               ) : (
                 <>
-                  <Image
-                    source={{
-                      uri: profilePic || "https://i.pravatar.cc/150?u=" + (auth.currentUser?.email || "user"),
-                    }}
-                    style={styles.avatar}
-                  />
+                  {profilePic ? (
+                    <Image source={{ uri: profilePic }} style={styles.avatar} />
+                  ) : (
+                    // FIX (bug report — avatar problem): same fallback fix
+                    // as header.tsx — no more random pravatar.cc image.
+                    <TitleAvatar title={studentTitle} size={70} style={styles.avatar} />
+                  )}
 
                   <Text style={styles.name}>{name}</Text>
+
+                  {/* Student ID — auto-assigned, human-readable (e.g.
+                      GLS000123), stable for the account's lifetime. Tap to
+                      copy for support/reference use. Shown once assigned;
+                      the self-heal effect above requests one for accounts
+                      that don't have it yet, so this appears within a
+                      moment even for pre-existing users. */}
+                  {!!studentId && (
+                    <TouchableOpacity
+                      style={styles.studentIdBadge}
+                      onPress={handleCopyStudentId}
+                      activeOpacity={0.75}
+                    >
+                      <Ionicons name="id-card-outline" size={12} color="#c7d2fe" />
+                      <Text style={styles.studentIdText}>{studentId}</Text>
+                      <Ionicons
+                        name={studentIdCopied ? "checkmark" : "copy-outline"}
+                        size={11}
+                        color={studentIdCopied ? "#34D399" : "#818cf8"}
+                      />
+                    </TouchableOpacity>
+                  )}
 
                   <View style={styles.infoBox}>
                     <Text style={styles.infoText}>🏫 {school}</Text>
@@ -252,13 +330,23 @@ export default function DrawerLayout() {
                 <DrawerItem icon="home" label={t("home")}
                   onPress={() => router.push("/(drawer)/(tabs)/home")} active colors={colors} />
               )}
-              {drawerItem("leaderboard") && (
-                <DrawerItem icon="trophy-outline" label={t("leaderboard")}
-                  onPress={() => router.push("/leaderboard")} colors={colors} />
+              {drawerItem("starboard") && (
+                <DrawerItem icon="trophy-outline" label={t("Starboard")}
+                 onPress={() => router.push("/starboard")} colors={colors} />
+              )}
+              {drawerItem("myPrizes") && (
+                <DrawerItem icon="gift-outline" label="My Prizes"
+                 onPress={() => router.push("/my-prizes" as any)} colors={colors} />
               )}
               {drawerItem("wallet") && (
                 <DrawerItem icon="wallet-outline" label={t("wallet")}
                   onPress={() => router.push("/vcoins/wallet")} colors={colors} />
+              )}
+              {drawerItem("dailyStreakQuiz") && (
+                <DailyStreakQuizDrawerItem
+                  onPress={() => router.push("/daily-streak-quiz" as any)}
+                  colors={colors}
+                />
               )}
               {drawerItem("settings") && (
                 <DrawerItem icon="settings-outline" label={t("settings")}
@@ -275,6 +363,10 @@ export default function DrawerLayout() {
               {drawerItem("learnfun") && (
                 <DrawerItem icon="book-outline" label={t("learnFunLabel") ?? "LearnFun"}
                   onPress={() => router.push("/(drawer)/(tabs)/learnFun")} colors={colors} />
+              )}
+              {drawerItem("skillboost") && (
+                <DrawerItem icon="flash-outline" label="Skill Boost"
+                  onPress={() => router.push("/(drawer)/(tabs)/skillboost")} colors={colors} />
               )}
 
               {/* Language selector */}
@@ -304,16 +396,19 @@ export default function DrawerLayout() {
               {drawerItem("skillboard") && (
                 <SkillBoardItem onPress={() => router.push("/skillboard")} />
               )}
+              {drawerItem("glostore") && (
+                <GloStoreItem onPress={() => router.push("/glostore" as any)} />
+              )}
             </View>
           </ScrollView>
 
           {/* LOGOUT — pinned at bottom */}
           <TouchableOpacity
-            style={[styles.logout, { backgroundColor: `${colors.text}10`, marginBottom: insets.bottom }]}
+            style={[styles.logout, { backgroundColor: "rgba(248,113,113,0.08)", borderColor: colors.border, marginBottom: insets.bottom }]}
             onPress={handleLogout}
           >
             <Ionicons name="log-out-outline" size={20} color="#F87171" />
-            <Text style={[styles.logoutText, { color: colors.text }]}>{t("logout")}</Text>
+            <Text style={styles.logoutText}>{t("logout")}</Text>
           </TouchableOpacity>
 
         </SafeAreaView>
@@ -345,6 +440,51 @@ function SkillBoardItem({ onPress }: { onPress: () => void }) {
   );
 }
 
+// 🔥 Daily Streak Quiz — flame + quiz icon combo, sits just below Wallet
+// (the app's "Coins/Rewards" engagement section) per spec §1.
+function DailyStreakQuizDrawerItem({ onPress, colors }: { onPress: () => void; colors: any }) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.85}
+      style={[styles.streakQuizItem, { backgroundColor: colors.background, borderColor: "rgba(249,115,22,0.3)" }]}
+    >
+      <View style={styles.streakQuizIconStack}>
+        <Ionicons name="help-circle" size={20} color="#f97316" />
+        <Text style={styles.streakQuizFlame}>🔥</Text>
+      </View>
+      <Text style={[styles.label, { color: colors.text }]}>Daily Streak Quiz</Text>
+      <View style={styles.streakQuizBadge}>
+        <Text style={styles.streakQuizBadgeText}>NEW</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// 🛍️ GloStore — admin-curated affiliate products (books, stationery, kits).
+// Same treatment as Skill Board: its own gold gradient pill so it stands
+// out from the plain list items, since it's a monetization surface.
+function GloStoreItem({ onPress }: { onPress: () => void }) {
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={styles.skillBoardWrapper}>
+      <LinearGradient
+        colors={["#7c2d12", "#ea580c", "#fb923c"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.skillBoardGradient}
+      >
+        <View style={styles.skillBoardLeft}>
+          <Ionicons name="storefront" size={22} color="#fff" />
+          <Text style={styles.skillBoardLabel}>GloStore</Text>
+        </View>
+        <View style={styles.skillBoardBadge}>
+          <Text style={styles.skillBoardBadgeText}>🛍️ SHOP</Text>
+        </View>
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+}
+
 function DrawerItem({ icon, label, onPress, active, colors }: any) {
   return (
     <TouchableOpacity
@@ -367,6 +507,13 @@ const styles = StyleSheet.create({
   },
   avatar: { width: 70, height: 70, borderRadius: 35, marginBottom: 4 },
   name: { color: "#fff", fontSize: 17, fontWeight: "800" },
+  studentIdBadge: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    backgroundColor: "rgba(0,0,0,0.3)", borderRadius: 10,
+    paddingHorizontal: 10, paddingVertical: 4, marginTop: 4,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
+  },
+  studentIdText: { color: "#c7d2fe", fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
   infoBox: { alignItems: "center", marginVertical: 4 },
   infoText: { color: "#c7d2fe", fontSize: 12, marginVertical: 2, fontWeight: "500" },
   statsRow: {
@@ -400,8 +547,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
   },
   rankViewText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-
-  // Surprise gift banner
   giftBanner: {
     flexDirection: "row", alignItems: "center", gap: 10,
     backgroundColor: "#d97706", borderRadius: 12,
@@ -412,10 +557,20 @@ const styles = StyleSheet.create({
   giftEmoji: { fontSize: 22 },
   giftTitle: { color: "#fff", fontSize: 13, fontWeight: "800" },
   giftSub:   { color: "rgba(255,255,255,0.8)", fontSize: 11, fontWeight: "500" },
-
   menu:     { marginTop: 20 },
   item:     { flexDirection: "row", alignItems: "center", paddingVertical: 14 },
   label:    { marginLeft: 15, fontSize: 15 },
+  streakQuizItem: {
+    flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 10,
+    borderRadius: 12, borderWidth: 1, marginVertical: 4,
+  },
+  streakQuizIconStack: { width: 24, alignItems: "center" },
+  streakQuizFlame: { fontSize: 11, marginTop: -4 },
+  streakQuizBadge: {
+    marginLeft: "auto", backgroundColor: "#f97316", borderRadius: 6,
+    paddingHorizontal: 6, paddingVertical: 2,
+  },
+  streakQuizBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800" },
   langItem: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10 },
   langIconBox: { width: 34, height: 34, borderRadius: 10, justifyContent: "center", alignItems: "center" },
   langTextBlock: { flex: 1 },

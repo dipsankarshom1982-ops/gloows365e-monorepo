@@ -50,6 +50,14 @@ export { getHomeFeed, getReelsFeed } from "./feed";
 
 // ── VCoins ─────────────────────────────────────────────────────────────────
 export { claimVCoinReward, getVCoinBalance } from "./vcoins";
+export { joinVidyastarContest, deleteContest } from "./vidyastarContest";
+export { submitVidyastarContestQuiz } from "./submitVidyastarContestQuiz";
+
+// ── Daily Streak Quiz ──────────────────────────────────────────────────────
+export {
+  getTodaysStreakQuizQuestion, submitDailyStreakQuizAnswer,
+  applyForAmbassadorProgram, dailyStreakQuizReminder,
+} from "./dailyStreakQuiz";
 
 // ── AI Personalized Dashboard ───────────────────────────────────────────────
 export { getPersonalizedDashboard } from "./personalDashboard";
@@ -78,14 +86,20 @@ export { aggregateAdAnalytics, claimAdReward, getAds, recordAdEvent } from "./ad
 // ── Admin Management ───────────────────────────────────────────────────────────
 export { approveContent, createAdmin, createComboPlan, createCoupon, getUserSubscriptionHistory, removeAdmin } from "./adminManagement";
 
-// ── Contest Lesson Generation ──────────────────────────────────────────────────
-export { generateContestLesson } from "./contestLesson";
+// ── Contest Lesson Generation (lazy, per student language) ─────────────────────
+export { getContestLesson } from "./contestLesson";
 
 // ── VidyaStar Board Aggregation ───────────────────────────────────────────────
 export { onContestParticipantWrite } from "./vidyastarBoard";
 
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 export { applyReferral, getReferralLeaderboard } from "./referral";
+
+// ── Data Rights (DPDP Act 2023) ─────────────────────────────────────────────────
+export { exportMyData, eraseMyAccount, adminEraseStudent } from "./dataRights";
+
+// ── Student ID (auto-assigned, human-readable) ─────────────────────────────────
+export { ensureStudentId } from "./studentId";
 
 // ───────────────────────────────────────────────────────────
 // TYPES

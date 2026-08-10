@@ -10,7 +10,8 @@
  * Also added vite.config optimization (see vite.config.ts output).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.followUp = exports.generateLesson = exports.onPostCreated = exports.updateSkillboard = exports.getReferralLeaderboard = exports.applyReferral = exports.onContestParticipantWrite = exports.generateContestLesson = exports.removeAdmin = exports.getUserSubscriptionHistory = exports.createCoupon = exports.createComboPlan = exports.createAdmin = exports.approveContent = exports.recordAdEvent = exports.getAds = exports.claimAdReward = exports.aggregateAdAnalytics = exports.aiGuruPaymentSuccess = exports.aiGuruCreateSubscription = exports.aiGuruCheckoutPage = exports.voiceTutorAnswer = exports.generateExam = exports.evaluateExam = exports.photoSolve = exports.restartEducationAdvisor = exports.askAiGuruQuestion = exports.getPersonalizedDashboard = exports.getVCoinBalance = exports.claimVCoinReward = exports.getReelsFeed = exports.getHomeFeed = exports.getLeaderboard = exports.seekhoUpdateRevisionQueue = exports.seekhoOnChapterComplete = exports.seekhoGetDailyStudyPlan = exports.seekhoDailyRevisionReminder = exports.seekhoCreateSubscription = exports.vidyaguruChat = exports.discoverTrending = exports.discoverSearch = void 0;
+exports.onPostCreated = exports.updateSkillboard = exports.ensureStudentId = exports.adminEraseStudent = exports.eraseMyAccount = exports.exportMyData = exports.getReferralLeaderboard = exports.applyReferral = exports.onContestParticipantWrite = exports.getContestLesson = exports.removeAdmin = exports.getUserSubscriptionHistory = exports.createCoupon = exports.createComboPlan = exports.createAdmin = exports.approveContent = exports.recordAdEvent = exports.getAds = exports.claimAdReward = exports.aggregateAdAnalytics = exports.aiGuruPaymentSuccess = exports.aiGuruCreateSubscription = exports.aiGuruCheckoutPage = exports.voiceTutorAnswer = exports.generateExam = exports.evaluateExam = exports.photoSolve = exports.restartEducationAdvisor = exports.askAiGuruQuestion = exports.getPersonalizedDashboard = exports.dailyStreakQuizReminder = exports.applyForAmbassadorProgram = exports.submitDailyStreakQuizAnswer = exports.getTodaysStreakQuizQuestion = exports.submitVidyastarContestQuiz = exports.deleteContest = exports.joinVidyastarContest = exports.getVCoinBalance = exports.claimVCoinReward = exports.getReelsFeed = exports.getHomeFeed = exports.getLeaderboard = exports.seekhoUpdateRevisionQueue = exports.seekhoOnChapterComplete = exports.seekhoGetDailyStudyPlan = exports.seekhoDailyRevisionReminder = exports.seekhoCreateSubscription = exports.vidyaguruChat = exports.discoverTrending = exports.discoverSearch = void 0;
+exports.followUp = exports.generateLesson = void 0;
 const admin = require("firebase-admin");
 const functionsV1 = require("firebase-functions/v1");
 const firestore_1 = require("firebase-functions/v2/firestore");
@@ -45,6 +46,17 @@ Object.defineProperty(exports, "getReelsFeed", { enumerable: true, get: function
 var vcoins_1 = require("./vcoins");
 Object.defineProperty(exports, "claimVCoinReward", { enumerable: true, get: function () { return vcoins_1.claimVCoinReward; } });
 Object.defineProperty(exports, "getVCoinBalance", { enumerable: true, get: function () { return vcoins_1.getVCoinBalance; } });
+var vidyastarContest_1 = require("./vidyastarContest");
+Object.defineProperty(exports, "joinVidyastarContest", { enumerable: true, get: function () { return vidyastarContest_1.joinVidyastarContest; } });
+Object.defineProperty(exports, "deleteContest", { enumerable: true, get: function () { return vidyastarContest_1.deleteContest; } });
+var submitVidyastarContestQuiz_1 = require("./submitVidyastarContestQuiz");
+Object.defineProperty(exports, "submitVidyastarContestQuiz", { enumerable: true, get: function () { return submitVidyastarContestQuiz_1.submitVidyastarContestQuiz; } });
+// ── Daily Streak Quiz ──────────────────────────────────────────────────────
+var dailyStreakQuiz_1 = require("./dailyStreakQuiz");
+Object.defineProperty(exports, "getTodaysStreakQuizQuestion", { enumerable: true, get: function () { return dailyStreakQuiz_1.getTodaysStreakQuizQuestion; } });
+Object.defineProperty(exports, "submitDailyStreakQuizAnswer", { enumerable: true, get: function () { return dailyStreakQuiz_1.submitDailyStreakQuizAnswer; } });
+Object.defineProperty(exports, "applyForAmbassadorProgram", { enumerable: true, get: function () { return dailyStreakQuiz_1.applyForAmbassadorProgram; } });
+Object.defineProperty(exports, "dailyStreakQuizReminder", { enumerable: true, get: function () { return dailyStreakQuiz_1.dailyStreakQuizReminder; } });
 // ── AI Personalized Dashboard ───────────────────────────────────────────────
 var personalDashboard_1 = require("./personalDashboard");
 Object.defineProperty(exports, "getPersonalizedDashboard", { enumerable: true, get: function () { return personalDashboard_1.getPersonalizedDashboard; } });
@@ -82,9 +94,9 @@ Object.defineProperty(exports, "createComboPlan", { enumerable: true, get: funct
 Object.defineProperty(exports, "createCoupon", { enumerable: true, get: function () { return adminManagement_1.createCoupon; } });
 Object.defineProperty(exports, "getUserSubscriptionHistory", { enumerable: true, get: function () { return adminManagement_1.getUserSubscriptionHistory; } });
 Object.defineProperty(exports, "removeAdmin", { enumerable: true, get: function () { return adminManagement_1.removeAdmin; } });
-// ── Contest Lesson Generation ──────────────────────────────────────────────────
+// ── Contest Lesson Generation (lazy, per student language) ─────────────────────
 var contestLesson_1 = require("./contestLesson");
-Object.defineProperty(exports, "generateContestLesson", { enumerable: true, get: function () { return contestLesson_1.generateContestLesson; } });
+Object.defineProperty(exports, "getContestLesson", { enumerable: true, get: function () { return contestLesson_1.getContestLesson; } });
 // ── VidyaStar Board Aggregation ───────────────────────────────────────────────
 var vidyastarBoard_1 = require("./vidyastarBoard");
 Object.defineProperty(exports, "onContestParticipantWrite", { enumerable: true, get: function () { return vidyastarBoard_1.onContestParticipantWrite; } });
@@ -92,6 +104,14 @@ Object.defineProperty(exports, "onContestParticipantWrite", { enumerable: true, 
 var referral_1 = require("./referral");
 Object.defineProperty(exports, "applyReferral", { enumerable: true, get: function () { return referral_1.applyReferral; } });
 Object.defineProperty(exports, "getReferralLeaderboard", { enumerable: true, get: function () { return referral_1.getReferralLeaderboard; } });
+// ── Data Rights (DPDP Act 2023) ─────────────────────────────────────────────────
+var dataRights_1 = require("./dataRights");
+Object.defineProperty(exports, "exportMyData", { enumerable: true, get: function () { return dataRights_1.exportMyData; } });
+Object.defineProperty(exports, "eraseMyAccount", { enumerable: true, get: function () { return dataRights_1.eraseMyAccount; } });
+Object.defineProperty(exports, "adminEraseStudent", { enumerable: true, get: function () { return dataRights_1.adminEraseStudent; } });
+// ── Student ID (auto-assigned, human-readable) ─────────────────────────────────
+var studentId_1 = require("./studentId");
+Object.defineProperty(exports, "ensureStudentId", { enumerable: true, get: function () { return studentId_1.ensureStudentId; } });
 // ───────────────────────────────────────────────────────────
 // FUNCTION 1: updateSkillboard
 // Triggers on any post write — updates skillboard + ranks

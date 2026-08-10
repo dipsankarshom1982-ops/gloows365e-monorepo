@@ -64,32 +64,32 @@ export default function ContestLeaderboardScreen() {
       setIsEnded(!!(end && end < new Date()));
     }
 
-    // Build ranked list from completed participants only
+    // Build ranked list from completed participants only. `name` is read
+    // straight off the participant doc (denormalized there at join time by
+    // joinVidyastarContest, via the Admin SDK) — firestore.rules locks
+    // students/{uid} reads to the student's own uid, so a per-row fetch of
+    // another participant's student doc would always be denied and fall
+    // back to "Student" for everyone but the viewer.
     const completed = participantSnap.docs
       .filter((d) => d.data().completed)
       .map((d) => ({
         userId:    d.data().userId as string,
+        name:      d.data().name      ?? "Student",
         score:     d.data().score     ?? 0,
         timeBonus: d.data().timeBonus ?? 0,
         rank:      d.data().rank      ?? 999,
-        name:      "Student",
       }))
-      .sort((a, b) => a.rank - b.rank)
-      .slice(0, 50);
+      .sort((a, b) => a.rank - b.rank);
 
-    // Fetch names in parallel
-    const named: Row[] = await Promise.all(
-      completed.map(async (r) => {
-        try {
-          const snap = await getDoc(doc(db, "students", r.userId));
-          return { ...r, name: snap.exists() ? (snap.data()?.name ?? "Student") : "Student" };
-        } catch {
-          return r;
-        }
-      })
-    );
+    // The viewing student's own row always leads the list — regardless of
+    // their actual rank — so they never have to scroll to find their own
+    // score. Everyone else follows in rank order, same as before. Still
+    // capped at 50 rows total (self + up to 49 others) to match the
+    // previous "top 50" limit.
+    const selfRow = completed.find((r) => r.userId === userId);
+    const others  = completed.filter((r) => r.userId !== userId).slice(0, selfRow ? 49 : 50);
 
-    setRows(named);
+    setRows(selfRow ? [selfRow, ...others] : others);
   }, [contestId]);
 
   useEffect(() => {
@@ -160,17 +160,20 @@ export default function ContestLeaderboardScreen() {
           </View>
         )}
 
-        {/* Rows */}
-        {rows.map((row, i) => {
+        {/* Rows — "You" is always the first row (see load()'s selfRow
+            pinning above); medal/gold styling below keys off each row's
+            actual rank, not its position in the list, so a pinned "You"
+            row outside the top 3 doesn't get shown as if ranked #1. */}
+        {rows.map((row) => {
           const isMe = row.userId === userId;
           return (
             <View
               key={row.userId}
-              style={[S.row, isMe && S.rowMe, i === 0 && S.rowFirst]}
+              style={[S.row, isMe && S.rowMe, row.rank === 1 && S.rowFirst]}
             >
               {/* Rank */}
-              <Text style={[S.rankText, i === 0 && S.gold, i === 1 && S.silver, i === 2 && S.bronze]}>
-                {i < 3 ? MEDAL[i] : `#${row.rank}`}
+              <Text style={[S.rankText, row.rank === 1 && S.gold, row.rank === 2 && S.silver, row.rank === 3 && S.bronze]}>
+                {row.rank <= 3 ? MEDAL[row.rank - 1] : `#${row.rank}`}
               </Text>
 
               {/* Name */}

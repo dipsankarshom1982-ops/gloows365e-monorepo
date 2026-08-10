@@ -14,11 +14,12 @@ import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { solvePhotoQuestion, PhotoSolveSolution } from "@/services/photoSolveApi";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 
-const FREE_DAILY = 3;
+const FREE_DAILY = 1;
 
 type Phase = "pick" | "solving" | "result" | "limit" | "error";
 
@@ -33,7 +34,6 @@ export default function PhotoSolveScreen() {
   const text    = isDarkMode ? "#f1f5f9" : colors.text;
   const muted   = isDarkMode ? "#94a3b8" : colors.textSecondary;
   const dim     = isDarkMode ? "#64748b" : colors.textSecondary;
-  const backBg  = isDarkMode ? "rgba(255,255,255,0.08)" : colors.card;
 
   const classLevel = String(studentProfile?.class ?? "10");
   const board      = studentProfile?.board ?? "CBSE";
@@ -70,6 +70,9 @@ export default function PhotoSolveScreen() {
   };
 
   const solve = async (base64: string, mimeType: string) => {
+    // Client-side gate: once the free quota is used, show the upgrade
+    // screen immediately instead of calling the backend.
+    if (remaining <= 0) { setPhase("limit"); return; }
     setPhase("solving");
     setSolution(null);
     setErrMsg("");
@@ -95,22 +98,19 @@ export default function PhotoSolveScreen() {
     <View style={[S.root, { backgroundColor: bg }]}>
       {isDarkMode && <LinearGradient colors={["#060612", "#0a0a1a"]} style={StyleSheet.absoluteFillObject} />}
 
-      {/* Header */}
-      <Animated.View entering={FadeIn.duration(350)} style={[S.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[S.backBtn, { backgroundColor: backBg }]}>
-          <Ionicons name="chevron-back" size={22} color={muted} />
-        </TouchableOpacity>
-        <View style={S.headerCenter}>
-          <Text style={[S.headerTitle, { color: text }]}>📸 PhotoSolve AI</Text>
-          <Text style={[S.headerSub, { color: dim }]}>Snap any question for instant solution</Text>
-        </View>
-        <View style={[S.quotaBadge, { backgroundColor: surface, borderColor: remaining > 0 ? border : "rgba(239,68,68,0.4)" }]}>
-          <View style={[S.quotaDot, { backgroundColor: remaining > 0 ? "#10b981" : "#ef4444" }]} />
-          <Text style={[S.quotaText, { color: remaining > 0 ? "#10b981" : "#ef4444" }]}>
-            {remaining}/{FREE_DAILY}
-          </Text>
-        </View>
-      </Animated.View>
+      <AiGuruHeader
+        title="📸 PhotoSolve AI"
+        subtitle="Snap any question for instant solution"
+        showLanguageBadge
+        rightElement={
+          <View style={[S.quotaBadge, { backgroundColor: surface, borderColor: remaining > 0 ? border : "rgba(239,68,68,0.4)" }]}>
+            <View style={[S.quotaDot, { backgroundColor: remaining > 0 ? "#10b981" : "#ef4444" }]} />
+            <Text style={[S.quotaText, { color: remaining > 0 ? "#10b981" : "#ef4444" }]}>
+              {remaining}/{FREE_DAILY}
+            </Text>
+          </View>
+        }
+      />
 
       <ScrollView contentContainerStyle={[S.scroll, { paddingBottom: insets.bottom + 32 }]} showsVerticalScrollIndicator={false}>
 
@@ -256,7 +256,7 @@ export default function PhotoSolveScreen() {
             <Text style={S.limitEmoji}>⏰</Text>
             <Text style={[S.limitTitle, { color: text }]}>Daily limit reached</Text>
             <Text style={[S.limitBody, { color: muted }]}>
-              You've used all {FREE_DAILY} free photo solves today. Upgrade to Premium for 50 solves/day.
+              You've used your free photo solve for today. Upgrade to Premium for 50 solves/day.
             </Text>
             <TouchableOpacity style={S.upgradeWrap} onPress={() => router.push("/ai-guru/subscription" as any)}>
               <LinearGradient colors={["#92400e", "#d97706", "#fbbf24"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
@@ -286,11 +286,6 @@ export default function PhotoSolveScreen() {
 
 const S = StyleSheet.create({
   root:   { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, gap: 10 },
-  backBtn:{ width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  headerCenter: { flex: 1 },
-  headerTitle:  { fontSize: 17, fontWeight: "900" },
-  headerSub:    { fontSize: 11, marginTop: 1 },
   quotaBadge:   { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 20, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 5 },
   quotaDot:     { width: 7, height: 7, borderRadius: 4 },
   quotaText:    { fontSize: 11, fontWeight: "800" },

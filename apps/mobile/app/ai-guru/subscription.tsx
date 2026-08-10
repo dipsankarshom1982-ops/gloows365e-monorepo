@@ -24,11 +24,12 @@ try { WebBrowser = require("expo-web-browser"); } catch {}
 
 import { useAppConfig } from "@/context/AppConfigContext";
 import { useAppTranslation } from "@/context/LanguageContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { auth } from "@/lib/firebase";
 import { RAZORPAY_KEY_ID } from "@/lib/seekho/constants";
 import { isSubscribed } from "@/services/aiGuruFirestore";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 
 type Cycle = "monthly" | "annual";
 
@@ -50,7 +51,6 @@ export default function AiGuruSubscriptionScreen() {
   const borderCol = isDarkMode ? "#334155" : colors.border;
   const textMain  = isDarkMode ? "#f1f5f9" : colors.text;
   const textSec   = isDarkMode ? "#94a3b8" : colors.textSecondary;
-  const backBtnBg = isDarkMode ? "rgba(255,255,255,0.08)" : colors.card;
 
   // Filter to AI Guru paid plans — driven entirely from Firestore
   const aiGuruPlans = plans.filter(
@@ -199,7 +199,7 @@ export default function AiGuruSubscriptionScreen() {
   const isLoading = configLoading || checkingStatus;
 
   return (
-    <SafeAreaView style={[S.container, { backgroundColor: pageBg }]}>
+    <SafeAreaView style={[S.container, { backgroundColor: pageBg }]} edges={["bottom"]}>
       {isDarkMode && (
         <LinearGradient
           colors={["#060612", "#0d0d24", "#060612"]}
@@ -207,22 +207,16 @@ export default function AiGuruSubscriptionScreen() {
         />
       )}
 
-      {/* ── Header ── */}
-      <Animated.View entering={FadeIn.duration(350)} style={S.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={[S.backBtn, { backgroundColor: backBtnBg }]}
-        >
-          <Ionicons name="chevron-back" size={22} color={textSec} />
-        </TouchableOpacity>
-        <Text style={[S.headerTitle, { color: textMain }]}>AI Guru Premium</Text>
-        <View style={S.headerRight}>
+      <AiGuruHeader
+        title="AI Guru Premium"
+        showLanguageBadge
+        rightElement={
           <View style={S.aiBadge}>
             <Ionicons name="sparkles" size={12} color="#fbbf24" />
             <Text style={S.aiBadgeText}>PRO</Text>
           </View>
-        </View>
-      </Animated.View>
+        }
+      />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={S.scroll}>
 
@@ -401,10 +395,6 @@ export default function AiGuruSubscriptionScreen() {
 
 const S = StyleSheet.create({
   container:      { flex: 1 },
-  header:         { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
-  backBtn:        { width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  headerTitle:    { flex: 1, fontSize: 18, fontWeight: "900" },
-  headerRight:    { alignItems: "flex-end" },
   aiBadge:        { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(251,191,36,0.15)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, borderWidth: 1, borderColor: "#fbbf24" },
   aiBadgeText:    { color: "#fbbf24", fontSize: 10, fontWeight: "900" },
 

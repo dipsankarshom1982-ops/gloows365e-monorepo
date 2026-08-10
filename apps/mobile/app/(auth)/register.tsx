@@ -4,7 +4,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -28,12 +28,18 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
 import { auth, db, firebaseConfig } from "@/lib/firebase";
 import { ensureReferralCode } from "@/lib/initUser";
+import { ensureStudentId } from "@/services/studentIdService";
 import { applyReferral } from "@/services/referralService";
+import { creditVCoins } from "@/services/vCoinsService";
+import { VCOIN_SOURCES } from "@/utils/formatVCoins";
+import { TITLES } from "@/lib/avatars";
+import { PRIVACY_POLICY_VERSION } from "@/app/privacy";
 import { Ionicons } from "@expo/vector-icons";
 import { getApps, initializeApp } from "firebase/app";
 import { getAuth, inMemoryPersistence, initializeAuth, signInWithPhoneNumber } from "firebase/auth";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
+import RecaptchaModal, { type RecaptchaVerifierHandle } from "@/components/auth/RecaptchaModal";
 
 // ─── Restart Education full-screen block ──────────────────────────────────────
 // Shown only when user taps Continue and age >= 18
@@ -169,6 +175,7 @@ export default function StudentRegister() {
   const router = useRouter();
 
   const [name,              setName]              = useState("");
+  const [title,             setTitle]             = useState("");
   const [phone,             setPhone]             = useState("");
   const [pincode,           setPincode]           = useState("");
   const [school,            setSchool]            = useState("");
@@ -206,6 +213,8 @@ export default function StudentRegister() {
   const [verifyingOtp,        setVerifyingOtp]        = useState(false);
   const [parentPhoneVerified, setParentPhoneVerified] = useState(false);
   const [otpError,            setOtpError]            = useState("");
+  const [parentalConsent,     setParentalConsent]     = useState(false);
+  const recaptchaRef = useRef<RecaptchaVerifierHandle>(null);
 
   const boards       = ["CBSE", "ICSE", "State Board", "Other"];
   const classOptions = ["6", "7", "8", "9", "10", "11", "12"];
@@ -245,7 +254,13 @@ export default function StudentRegister() {
         aspect: [1, 1],
         quality: 0.7,
       });
-      if (!result.canceled) setProfilePic(result.assets[0].uri);
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) {
+        setError("Image too large — please choose one under 5MB.");
+        return;
+      }
+      setProfilePic(asset.uri);
     } catch { /* ignore */ }
   };
 
@@ -277,17 +292,37 @@ export default function StudentRegister() {
     setOtpError("");
     try {
       const phoneAuth = getPhoneVerifyAuth();
-      const result = await signInWithPhoneNumber(phoneAuth, `+91${phone}`, undefined as any);
+      // signInWithPhoneNumber requires a real ApplicationVerifier — the
+      // invisible reCAPTCHA WebView (see components/auth/RecaptchaModal.tsx)
+      // resolves an actual verification token here instead of `undefined`,
+      // which used to make every OTP send throw immediately.
+      const recaptchaToken = await recaptchaRef.current!.verify();
+      const appVerifier = { type: "recaptcha", verify: async () => recaptchaToken };
+      const result = await signInWithPhoneNumber(phoneAuth, `+91${phone}`, appVerifier as any);
       setConfirmResult(result);
       setOtpSent(true);
     } catch (err: any) {
-      const msg = err?.message ?? "";
-      if (msg.includes("TOO_SHORT") || msg.includes("INVALID_PHONE")) {
+      // Logged so a device's release-build logs (or Sentry/crash reporter,
+      // if wired to console.error) capture the real Firebase error code —
+      // the UI below only ever shows a friendly message, which previously
+      // made "OTP send failed" reports impossible to diagnose remotely.
+      console.error("handleSendOtp failed:", err?.code, err?.message);
+      const code = err?.code ?? "";
+      const msg  = err?.message ?? "";
+      if (code === "auth/invalid-phone-number" || msg.includes("TOO_SHORT") || msg.includes("INVALID_PHONE")) {
         setOtpError("Invalid phone number");
-      } else if (msg.includes("TOO_MANY_REQUESTS")) {
+      } else if (code === "auth/too-many-requests" || msg.includes("TOO_MANY_REQUESTS")) {
         setOtpError("Too many attempts. Try again later.");
+      } else if (code === "auth/quota-exceeded") {
+        setOtpError("SMS limit reached for today. Please try again tomorrow or contact support.");
+      } else if (code === "auth/captcha-check-failed" || code === "auth/invalid-app-credential") {
+        setOtpError("Verification check failed. Please check your internet connection and try again.");
+      } else if (msg.includes("cancelled")) {
+        setOtpError("Verification cancelled.");
       } else {
-        setOtpError("Failed to send OTP. Please try again.");
+        // Include the raw code so it can be reported back verbatim instead
+        // of "Failed to send OTP" with no other detail.
+        setOtpError(code ? `Failed to send OTP (${code}). Please try again.` : "Failed to send OTP. Please try again.");
       }
     } finally {
       setSendingOtp(false);
@@ -312,11 +347,12 @@ export default function StudentRegister() {
   // ── Validation (for normal student path only) ─────────────────────────────
 
   const validate = () => {
-    if (!name || !phone || !pincode || !school || !board || !dob || !studentClass || !preferredLanguage) {
+    if (!name || !title || !phone || !pincode || !school || !board || !dob || !studentClass || !preferredLanguage) {
       return "Please fill all required fields";
     }
     if (!/^[6-9]\d{9}$/.test(phone))         return "Invalid parent phone number";
     if (!parentPhoneVerified)                  return "Please verify parent phone number";
+    if (!parentalConsent)                      return "Parent/guardian consent is required to continue";
     if (!/^\d{6}$/.test(pincode))             return "Invalid pincode";
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(dob))  return "Invalid date of birth";
     const age = calculateAge(dob);
@@ -380,15 +416,21 @@ export default function StudentRegister() {
       }
 
       await setDoc(doc(db, "students", user.uid), {
-        name, phone, school, board, section,
+        name, title, phone, school, board, section,
         class: studentClass, preferredLanguage,
         profilePic: profilePicUrl,
         parentPhone: phone,
         parentPhoneVerified: true,
+        parentalConsent: {
+          granted: true,
+          grantedAt: serverTimestamp(),
+          parentPhone: phone,
+          policyVersion: PRIVACY_POLICY_VERSION,
+        },
         dob, age,
         location: { state: stateVal, district, area, pincode },
         interests: finalInterests,
-        stats:           { xp: 0, level: 1, coins: 200, streak: 0 },
+        stats:           { xp: 0, level: 1, streak: 0 },
         learningProfile: { goal: "Improve learning", dailyTarget: 30 },
         onboardingComplete: true,
         createdAt: serverTimestamp(),
@@ -397,9 +439,36 @@ export default function StudentRegister() {
       await setDoc(doc(db, "users", user.uid), {
         role: "student", roles: ["student"],
         profileType: "student",
-        coins: 200, onboardingComplete: true,
+        onboardingComplete: true,
         createdAt: serverTimestamp(),
       }, { merge: true });
+
+      // FIX (bug report — "200 v-coins not updated"): this used to just set
+      // users/{uid}.coins = 200 directly — a field nothing in the app ever
+      // reads (hooks/useVCoins.ts, the Wallet page, and the Drawer all read
+      // vCoinsBalance + vCoins, never `coins`). Routed through creditVCoins()
+      // instead — same atomic increment()-based pipeline every other reward
+      // uses — so it lands in vCoinsBalance and shows up in wallet history,
+      // not just the balance. referenceId is a fixed per-user key so this
+      // can only ever be credited once even if handleRegister somehow runs
+      // twice for the same uid.
+      try {
+        await creditVCoins({
+          uid: user.uid,
+          source: VCOIN_SOURCES.SIGNUP_BONUS,
+          amount: 200,
+          title: "Welcome Bonus",
+          description: "200 VCoins for completing registration",
+          referenceId: "signup_bonus",
+        });
+      } catch { /* non-fatal — a coin-credit hiccup must never block registration */ }
+
+      // Non-fatal — an ID-assignment hiccup must never block registration.
+      // The drawer lazily retries this for any account that still lacks
+      // one, so a failure here just means the badge shows up a bit later.
+      try {
+        await ensureStudentId();
+      } catch { /* non-fatal */ }
 
       await ensureReferralCode(user.uid);
 
@@ -461,7 +530,12 @@ export default function StudentRegister() {
           contentContainerStyle={S.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={S.brand}>Vidya<Text style={S.gold}>AI</Text></Text>
+          <Text style={S.brand}>
+            <Text style={S.brandGl}>Gl</Text>
+            <Text style={S.brandOows}>oows</Text>
+            <Text style={S.brand365}>365</Text>
+            <Text style={S.brandE}>E</Text>
+          </Text>
           <Text style={S.title}>Create Your Profile 🚀</Text>
 
           {/* Profile picture */}
@@ -481,6 +555,20 @@ export default function StudentRegister() {
             placeholderTextColor="#aaa" value={name} onChangeText={setName}
           />
 
+          {/* Title — drives the fallback avatar shown around the app until
+              a real photo is uploaded (see components/TitleAvatar.tsx). */}
+          <Text style={S.label}>Title *</Text>
+          <View style={S.row}>
+            {TITLES.map((t) => (
+              <TouchableOpacity
+                key={t} style={[S.chip, title === t && S.active]}
+                onPress={() => setTitle(t)}
+              >
+                <Text style={S.chipText}>{t}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           {/* Parent Phone + OTP */}
           <View style={S.phoneRow}>
             <TextInput
@@ -496,6 +584,7 @@ export default function StudentRegister() {
                 if (otpSent) setOtpSent(false);
                 setConfirmResult(null);
                 setOtp(""); setOtpError("");
+                setParentalConsent(false);
               }}
               editable={!parentPhoneVerified}
             />
@@ -517,6 +606,8 @@ export default function StudentRegister() {
               </TouchableOpacity>
             )}
           </View>
+
+          <RecaptchaModal ref={recaptchaRef} firebaseConfig={firebaseConfig} />
 
           {otpSent && !parentPhoneVerified && (
             <View style={S.otpSection}>
@@ -546,6 +637,31 @@ export default function StudentRegister() {
             </View>
           )}
           {otpError && !otpSent ? <Text style={S.otpError}>{otpError}</Text> : null}
+
+          {/* Parental consent — DPDP Act 2023 requires this to be a distinct,
+              explicit affirmation, separate from the OTP step (which only
+              proves phone ownership, not consent). */}
+          {parentPhoneVerified && (
+            <TouchableOpacity
+              style={S.consentRow}
+              onPress={() => setParentalConsent((v) => !v)}
+              activeOpacity={0.75}
+            >
+              <Ionicons
+                name={parentalConsent ? "checkbox" : "square-outline"}
+                size={20}
+                color={parentalConsent ? "#34D399" : "#c7d2fe"}
+              />
+              <Text style={S.consentText}>
+                I am the parent/legal guardian of this student and I consent to the
+                collection and processing of their personal data as described in the{" "}
+                <Text style={S.consentLink} onPress={() => router.push("/privacy" as any)}>
+                  Privacy Policy
+                </Text>
+                , in accordance with the Digital Personal Data Protection Act, 2023.
+              </Text>
+            </TouchableOpacity>
+          )}
 
           {/* Pincode */}
           <TextInput
@@ -715,6 +831,11 @@ export default function StudentRegister() {
               * Verify parent phone to enable registration
             </Text>
           )}
+          {parentPhoneVerified && !parentalConsent && (
+            <Text style={S.verifyNote}>
+              * Parent/guardian consent is required to enable registration
+            </Text>
+          )}
         </ScrollView>
       </LinearGradient>
     </SafeAreaView>
@@ -727,7 +848,10 @@ const S = StyleSheet.create({
   container:    { flex: 1 },
   scrollContent:{ padding: 20, maxWidth: 600, width: "100%", alignSelf: "center", paddingBottom: 40 },
   brand:        { fontSize: 34, fontWeight: "900", color: "#fff", textAlign: "center" },
-  gold:         { color: "#FFD700" },
+  brandGl:      { color: "#A5B4FC" },
+  brandOows:    { color: "#F1F5F9" },
+  brand365:     { color: "#818CF8" },
+  brandE:       { color: "#FBBF24" },
   title:        { fontSize: 20, color: "#c7d2fe", textAlign: "center", marginBottom: 20 },
   profilePicContainer:  { marginBottom: 20, borderRadius: 14, overflow: "hidden", height: 140 },
   profilePicPreview:    { width: "100%", height: "100%", borderRadius: 14 },
@@ -748,6 +872,9 @@ const S = StyleSheet.create({
   otpRow:        { flexDirection: "row", alignItems: "center", gap: 8 },
   otpInput:      { flex: 1, marginBottom: 0 },
   otpError:      { color: "#F87171", fontSize: 12, marginBottom: 8 },
+  consentRow:    { flexDirection: "row", alignItems: "flex-start", gap: 10, marginTop: 4, marginBottom: 14 },
+  consentText:   { color: "#c7d2fe", fontSize: 12, flex: 1, lineHeight: 18 },
+  consentLink:   { color: "#FFD700", fontWeight: "700" },
   auto:          { color: "#34D399", marginBottom: 10 },
   label:         { color: "#c7d2fe", marginTop: 10, marginBottom: 6 },
   row:           { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },

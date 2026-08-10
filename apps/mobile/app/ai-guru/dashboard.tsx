@@ -12,9 +12,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { FREE_DAILY_LESSONS, FREE_DAILY_FOLLOWUPS } from "@/lib/aiGuru/constants";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 import {
   fetchPersonalizedDashboard,
   type DashboardResponse,
@@ -105,7 +106,7 @@ function subjectGradient(subject: string): [string, string] {
 }
 
 const QUICK_ACTIONS = [
-  { emoji: "🤖", label: "Ask VidyaGuru",  gradient: ["#1e1b4b", "#6366f1"] as [string,string], route: "/ai-guru/vidyaguru" },
+  { emoji: "🎯", label: "Ask SkillGuru",  gradient: ["#1e1b4b", "#6366f1"] as [string,string], route: "/ai-guru/skillguru" },
   { emoji: "✨", label: "Generate Lesson", gradient: ["#312e81", "#4f46e5"] as [string,string], route: "/ai-guru/setup" },
   { emoji: "🧭", label: "Discover AI",    gradient: ["#064e3b", "#059669"] as [string,string], route: "/discover" },
   { emoji: "📚", label: "My Lessons",     gradient: ["#1e3a5f", "#0284c7"] as [string,string], route: "/ai-guru/my-lessons" },
@@ -121,9 +122,7 @@ export default function AIDashboardScreen() {
   const surfaceBg  = isDarkMode ? "#1e293b" : colors.card;
   const borderCol  = isDarkMode ? "#334155" : colors.border;
   const textMain   = isDarkMode ? "#f1f5f9" : colors.text;
-  const textSec    = isDarkMode ? "#94a3b8" : colors.textSecondary;
   const textDim    = isDarkMode ? "#64748b" : colors.textSecondary;
-  const backBtnBg  = isDarkMode ? "rgba(255,255,255,0.08)" : colors.card;
   const skeletonBg = isDarkMode ? "#1e293b" : "#e5e7eb";
 
   const [data, setData]       = useState<DashboardResponse | null>(null);
@@ -159,17 +158,16 @@ export default function AIDashboardScreen() {
         <LinearGradient colors={["#0a0a1a", "#0f172a"]} style={StyleSheet.absoluteFillObject} />
       )}
 
-      {/* Header */}
-      <View style={[S.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity style={[S.backBtn, { backgroundColor: backBtnBg }]} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={22} color={textSec} />
-        </TouchableOpacity>
-        <Text style={[S.headerTitle, { color: textMain }]}>AI Dashboard</Text>
-        <View style={S.headerBadge}>
-          <Ionicons name="sparkles" size={12} color="#fbbf24" />
-          <Text style={S.headerBadgeText}>AI</Text>
-        </View>
-      </View>
+      <AiGuruHeader
+        title="AI Dashboard"
+        showLanguageBadge
+        rightElement={
+          <View style={S.headerBadge}>
+            <Ionicons name="sparkles" size={12} color="#fbbf24" />
+            <Text style={S.headerBadgeText}>AI</Text>
+          </View>
+        }
+      />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -206,7 +204,7 @@ export default function AIDashboardScreen() {
             {[
               { icon: "✨", label: "Lessons",    used: data?.usageToday.lessonsGenerated ?? 0, max: FREE_DAILY_LESSONS },
               { icon: "💬", label: "Follow-ups", used: data?.usageToday.followUps ?? 0,        max: FREE_DAILY_FOLLOWUPS },
-              { icon: "🤖", label: "VidyaGuru",  used: data?.usageToday.vidyaGuruChats ?? 0,  max: 1 },
+              { icon: "🤖", label: "SkillGuru",  used: data?.usageToday.vidyaGuruChats ?? 0,  max: 1 },
             ].map((tile) => (
               <View key={tile.label} style={[S.usageTile, { backgroundColor: surfaceBg, borderColor: borderCol }]}>
                 <Text style={S.usageTileIcon}>{tile.icon}</Text>
@@ -418,9 +416,6 @@ const S = StyleSheet.create({
   scroll: { paddingHorizontal: 16, paddingTop: 8 },
 
   // Header
-  header:          { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
-  backBtn:         { width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  headerTitle:     { flex: 1, fontSize: 18, fontWeight: "900" },
   headerBadge:     { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(251,191,36,0.15)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, borderWidth: 1, borderColor: "#fbbf24" },
   headerBadgeText: { color: "#fbbf24", fontSize: 11, fontWeight: "900" },
 
