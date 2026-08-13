@@ -40,6 +40,9 @@ export const TTL = {
   seekhoCourses:   86400,  // 1 day
   vcoinBalance:    300,    // 5 min
 
+  // Daily Streak Quiz
+  dailyStreakQuizQuestion: 3600, // 1 hr — today's resolved question per student
+
   // Discover AI
   discoverQuery:    3600,  // 1 hr — per-query response cache
   discoverTrending: 86400, // 1 day
@@ -83,6 +86,10 @@ export const RK = {
                      `vcoin:lock:${uid}:${activity}:${suffix}`,
   vcoinCount:      (uid: string, activity: string, date: string) =>
                      `vcoin:count:${uid}:${activity}:${date}`,
+
+  // Daily Streak Quiz
+  streakQuizQuestion: (uid: string, date: string) => `streakquiz:q:${uid}:${date}`,
+  streakQuizSubmitLock: (uid: string, date: string) => `streakquiz:lock:${uid}:${date}`,
 
   // Discover AI
   discoverSearch:   (uid: string, date: string) => `discover:search:${uid}:${date}`,

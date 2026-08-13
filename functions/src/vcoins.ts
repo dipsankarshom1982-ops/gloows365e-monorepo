@@ -31,6 +31,11 @@ const ACTIVITIES: Record<string, ActivityDef> = {
   profile_complete:   { coins: 50,  daily: false, maxPerDay: 1  },
   first_post:         { coins: 25,  daily: false, maxPerDay: 1  },
   referral:           { coins: 100, daily: false, maxPerDay: 1  },
+  // Daily Streak Quiz — one correct answer per day. maxPerDay: 1 here is
+  // a belt-and-suspenders cap; the real "once per day" enforcement is the
+  // studentDailyStreakProgress/{uid}/days/{date} doc check in
+  // dailyStreakQuiz.ts's submitDailyStreakQuizAnswer, which runs first.
+  daily_streak_quiz:  { coins: 5,   daily: true,  maxPerDay: 1  },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
