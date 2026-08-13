@@ -22,10 +22,14 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import {
   collection,
+  doc,
+  getCountFromServer,
+  getDoc,
   getDocs,
   limit,
   orderBy,
-  query
+  query,
+  where,
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
@@ -54,7 +58,13 @@ const EARN_SOURCES = [
   { icon: "time-outline",         label: "Learning Time",  bg: "#EDE9FE", color: "#7C3AED" },
   { icon: "play-circle-outline",  label: "Watch Reels",    bg: "#FEF3C7", color: "#D97706" },
   { icon: "videocam-outline",     label: "Watch Videos",   bg: "#DBEAFE", color: "#2563EB" },
-  { icon: "sparkles-outline",     label: "AI Guru",        bg: "#F0FDF4", color: "#16A34A" },
+  // FIX (product decision — "V-Coins can not be earned from AI Guru, it's a
+  // subscription-based model"): swapped the AI Guru card for VidyaStar —
+  // completing a VidyaStar contest quiz genuinely credits V-Coins (see
+  // submitVidyastarContestQuiz.ts's awardContestVCoins), unlike AI Guru,
+  // which never had a working earn path (see vCoinsService.ts's removed
+  // rewardForAIGuruSubscription).
+  { icon: "star-outline",         label: "VidyaStar",      bg: "#EEF2FF", color: "#4F46E5" },
   { icon: "trophy-outline",       label: "SkillBattle",    bg: "#FEF9C3", color: "#CA8A04" },
 ];
 
@@ -70,6 +80,31 @@ interface RankEntry {
 const RANK_MEDALS: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
 const currentYear = new Date().getFullYear();
 const YEAR_FIELD  = `vCoinsYear_${currentYear}`;
+
+// FIX (bug report — "v-coins leaderboard needs student name"): this
+// leaderboard ranks by users/{uid}'s vCoinsYear_* field (that's the only
+// place VCoins totals live), but name/school/profilePic are NOT reliable
+// fields on users/{uid} — per StudentProfileContext, those are canonical
+// on students/{uid}. Reading them off the users doc silently fell back to
+// "Student" for virtually everyone. Fetch the matching students/{uid} doc
+// for each ranked entry and overlay its name/school/profilePic.
+async function hydrateWithStudentProfiles<T extends { uid: string; name: string; school: string; profilePic: string }>(
+  entries: T[],
+  fallbackName: string
+): Promise<T[]> {
+  const studentSnaps = await Promise.all(
+    entries.map((e) => getDoc(doc(db, "students", e.uid)).catch(() => null))
+  );
+  return entries.map((e, i) => {
+    const sd = studentSnaps[i]?.exists() ? studentSnaps[i]!.data() : null;
+    return {
+      ...e,
+      name:       sd?.name || fallbackName,
+      school:     sd?.school || "",
+      profilePic: sd?.profilePic || "",
+    };
+  });
+}
 
 export default function VCoinsWalletScreen() {
   const router   = useRouter();
@@ -103,14 +138,15 @@ export default function VCoinsWalletScreen() {
       );
       const snap = await getDocs(q);
       const uid  = auth.currentUser?.uid;
-      const entries: RankEntry[] = snap.docs.map((d, i) => ({
+      const rawEntries: RankEntry[] = snap.docs.map((d, i) => ({
         uid:       d.id,
-        name:      d.data().name || "Student",
-        school:    d.data().school || "",
-        profilePic: d.data().profilePic || "",
+        name:      "Student",
+        school:    "",
+        profilePic: "",
         yearCoins: d.data()[YEAR_FIELD] ?? 0,
         rank:      i + 1,
       }));
+      const entries = await hydrateWithStudentProfiles(rawEntries, "Student");
       setTopEntries(entries);
 
       // Check if current user appears in top 10
@@ -130,23 +166,18 @@ export default function VCoinsWalletScreen() {
     if (!uid) return;
     try {
       // Get user's yearCoins
-      const { getDoc, doc: docRef } = await import("firebase/firestore");
-      const snap = await getDoc(docRef(db, "users", uid));
+      const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) return;
       const myCoins = snap.data()[YEAR_FIELD] ?? 0;
       // Count users with more coins
-      const { getCountFromServer, query: q2, where } = await import("firebase/firestore");
       const countSnap = await getCountFromServer(
-        q2(collection(db, "users"), where(YEAR_FIELD, ">", myCoins))
+        query(collection(db, "users"), where(YEAR_FIELD, ">", myCoins))
       );
-      setMyEntry({
-        uid,
-        name:       snap.data().name || "You",
-        school:     snap.data().school || "",
-        profilePic: snap.data().profilePic || "",
-        yearCoins:  myCoins,
-        rank:       countSnap.data().count + 1,
-      });
+      const [hydrated] = await hydrateWithStudentProfiles(
+        [{ uid, name: "You", school: "", profilePic: "", yearCoins: myCoins, rank: countSnap.data().count + 1 }],
+        "You"
+      );
+      setMyEntry(hydrated);
     } catch (e) {
       console.warn("fetchMyRank error", e);
     }
@@ -163,14 +194,15 @@ export default function VCoinsWalletScreen() {
       );
       const snap = await getDocs(q);
       const uid  = auth.currentUser?.uid;
-      const all: RankEntry[] = snap.docs.map((d, i) => ({
+      const rawAll: RankEntry[] = snap.docs.map((d, i) => ({
         uid:       d.id,
-        name:      d.data().name || "Student",
-        school:    d.data().school || "",
-        profilePic: d.data().profilePic || "",
+        name:      "Student",
+        school:    "",
+        profilePic: "",
         yearCoins: d.data()[YEAR_FIELD] ?? 0,
         rank:      i + 1,
       }));
+      const all = await hydrateWithStudentProfiles(rawAll, "Student");
       setExtEntries(all);
       const inList = all.find((e) => e.uid === uid);
       if (inList) setMyEntry(inList);
