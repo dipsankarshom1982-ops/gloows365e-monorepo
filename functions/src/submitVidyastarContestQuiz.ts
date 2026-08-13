@@ -35,6 +35,16 @@ const LEADERBOARD_TABS = ["daily", "weekly", "monthly", "yearly"] as const;
 const VIDYASTAR_CONTEST_ENTRY = "VIDYASTAR_CONTEST_ENTRY";
 const DEFAULT_CONTEST_REWARD  = 50;
 
+// Mirrors the client's getDate — contest docs store either Firestore
+// Timestamps or ISO strings depending on how they were created.
+function getDate(t: any): Date | null {
+  if (!t) return null;
+  if (typeof t.toDate === "function") return t.toDate();
+  if (t.seconds) return new Date(t.seconds * 1000);
+  if (typeof t === "string" && t.length > 0) return new Date(t);
+  return null;
+}
+
 async function getContestRewardAmount(): Promise<number> {
   try {
     const snap = await db.doc(`vCoinRules/${VIDYASTAR_CONTEST_ENTRY}`).get();
@@ -51,14 +61,23 @@ async function syncToStarboard(uid: string, score: number): Promise<void> {
 
   let name = "Student";
   let state: string | undefined;
-  let studentClass: string | number | undefined;
+  let studentClass: string | undefined;
   try {
     const snap = await db.doc(`students/${uid}`).get();
     if (snap.exists) {
       const d = snap.data() as Record<string, any>;
-      name         = d.name || name;
-      state        = d.location?.state;
-      studentClass = d.class;
+      name  = d.name || name;
+      state = d.location?.state;
+      // FIX (bug report — "Starboard shows nothing even though contest
+      // already played"): students/{uid}.class is typed string | number
+      // (legacy data inconsistency — registration writes a string, but not
+      // every account went through that path). Both mobile and web's
+      // Starboard always filter with where("class", "==", String(...)) —
+      // see apps/mobile/app/starboard.tsx and apps/web's starboard page.
+      // Writing a number here made Firestore's type-strict equality never
+      // match that string filter, so the class-scoped query silently came
+      // back empty even though this entry existed with real points.
+      studentClass = d.class != null ? String(d.class) : undefined;
     }
   } catch { /* keep defaults */ }
 
@@ -145,6 +164,27 @@ export const submitVidyastarContestQuiz = functionsV1
     }
     if (participantSnap.data()?.completed) {
       throw new functionsV1.https.HttpsError("already-exists", "Quiz already submitted for this contest");
+    }
+
+    // Client screens (contest/lesson, contest/quiz) already refuse to open
+    // outside the contest's live window, but that's UI-only — this callable
+    // is the actual scoring/reward entry point, so it's the one that has to
+    // enforce it. Without this, a client that already has a quiz page open
+    // (e.g. left mid-contest, or replaying a captured request) could submit
+    // and get scored/rewarded after the contest ended, or before it started.
+    const contestSnap = await db.doc(`contests/${contestId}`).get();
+    if (contestSnap.exists) {
+      const contest = contestSnap.data() as Record<string, any>;
+      const now   = new Date();
+      const start = getDate(contest.startTime ?? contest.startDate);
+      const end   = getDate(contest.endTime ?? contest.endDate);
+      const isLive = !!(start && start <= now && (!end || end > now));
+      if (!isLive) {
+        throw new functionsV1.https.HttpsError(
+          "failed-precondition",
+          end && end < now ? "This contest has ended" : "This contest hasn't started yet"
+        );
+      }
     }
 
     // Backfill safety net: joinVidyastarContest denormalizes `name` onto
