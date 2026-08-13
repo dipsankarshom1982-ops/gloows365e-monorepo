@@ -24,11 +24,21 @@ async function verifyAuthToken(req: any): Promise<string> {
 
 // Mode-aware prompt builder
 // mode: "doubt" | "explain" | "notes" | "exam" | "summarize" | "tip" | "language"
+//
+// FEATURE (answer in chosen app language): a question written in a clearly
+// identifiable Indian language still gets answered in that same language
+// (unchanged) — but a question written in English, or one whose language
+// can't be confidently identified, now falls back to the student's chosen
+// app language (students/{uid}.preferredLanguage, looked up server-side —
+// see caller) instead of always defaulting to English. The explicit choice
+// only kicks in for that fallback case; it never overrides a question
+// clearly written in some other language.
 function buildPrompt(
   question: string,
   classLevel: string | number,
   board: string,
-  mode: string
+  mode: string,
+  preferredLanguage: string
 ): string {
   const base = `You are an expert AI tutor for Indian school students (${board}, Class ${classLevel}).
 
@@ -45,8 +55,8 @@ CRITICAL LANGUAGE RULE: Detect the language of the student's question and respon
 - Kannada question → Kannada answer
 - Punjabi question → Punjabi answer
 - Urdu question → Urdu answer
-- English question → simple English answer
-Do NOT translate. Write naturally in the student's language as a real teacher would.
+- English question, or a language you can't confidently identify → respond in ${preferredLanguage}, the student's chosen app language
+Do NOT translate. Write naturally in the answer language as a real teacher would.
 Do NOT start with "Sure," "Great question!" or "Of course!" — go directly to the content.
 Do NOT use markdown symbols like **, ##, or bullet points — plain text only.`;
 
@@ -72,7 +82,7 @@ Keep it sharp and exam-focused.`,
 
     tip: `Give one personalised daily study tip for a Class ${classLevel} ${board} student asking about: "${question}". Make it specific, actionable, and encouraging. 2–3 sentences maximum.`,
 
-    language: `The student wants to understand this in their own language. Detect their language from the question. Give a warm, teacher-like explanation in that language. Use simple everyday words — avoid technical jargon. 4–6 sentences.`,
+    language: `The student wants to understand this in their own language. Detect their language from the question — if the question is in English or the language isn't clear, use ${preferredLanguage}, the student's chosen app language, instead. Give a warm, teacher-like explanation in that language. Use simple everyday words — avoid technical jargon. 4–6 sentences.`,
   };
 
   const modeText = modeInstructions[mode] ?? modeInstructions.doubt;
@@ -117,6 +127,19 @@ export const askAiGuruQuestion = onRequest(
       return;
     }
 
+    // Looked up server-side (not trusted from the client) so the fallback
+    // language for English/ambiguous questions always matches whatever the
+    // student actually has set in Settings → Language, even if their local
+    // client state is stale. Defaults to English, same as the language
+    // picker's own fallback (see settings/language/page.tsx).
+    let preferredLanguage = "English";
+    try {
+      const studentSnap = await db.collection("students").doc(uid).get();
+      preferredLanguage = (studentSnap.data()?.preferredLanguage as string) || "English";
+    } catch (err: any) {
+      console.warn("[AskAiGuru] Could not read preferredLanguage, defaulting to English:", err?.message);
+    }
+
     // Usage check
     try {
       await checkAskGuruLimit(uid, db);
@@ -138,14 +161,17 @@ export const askAiGuruQuestion = onRequest(
       const questionStr = String(question).trim();
       const modeStr     = String(mode).trim() || "doubt";
 
-      // Cache key includes mode so different modes don't collide
+      // Cache key includes mode + preferredLanguage so different modes/fallback
+      // languages don't collide — two students asking the same English
+      // question with different chosen languages must not share a cached
+      // answer in the wrong language.
       let cached: string | null = null;
       let cacheKey = "";
       let redis;
       try {
         redis = getRedis();
         const cacheHash = createHash("sha256")
-          .update(`${questionStr.toLowerCase()}:${classLevel}:${board}:${modeStr}`)
+          .update(`${questionStr.toLowerCase()}:${classLevel}:${board}:${modeStr}:${preferredLanguage}`)
           .digest("hex")
           .slice(0, 16);
         cacheKey = RK.askGuruAnswer(cacheHash);
@@ -161,7 +187,7 @@ export const askAiGuruQuestion = onRequest(
         return;
       }
 
-      const prompt = buildPrompt(questionStr, classLevel, board, modeStr);
+      const prompt = buildPrompt(questionStr, classLevel, board, modeStr, preferredLanguage);
       const raw    = await callGeminiText(prompt);
       const answer = raw.replace(/^Answer:\s*/i, "").trim();
 
