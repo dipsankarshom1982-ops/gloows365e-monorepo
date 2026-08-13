@@ -5,11 +5,12 @@
 // The hook and UI components do NOT need to change when that migration happens.
 
 import { auth, db } from "@/lib/firebase";
-import { VCOIN_SOURCES, VCoinSource } from "@/utils/formatVCoins";
+import { VCOIN_SOURCES, VCoinSource, VCOIN_DIST_PCT } from "@/utils/formatVCoins";
 import {
   collection,
   doc,
   getDoc,
+  increment,
   onSnapshot,
   orderBy,
   query,
@@ -49,7 +50,11 @@ export interface VCoinRule {
 
 export interface CreditParams {
   uid:         string;
-  amount:      number;
+  // Optional: omit to use the admin-configured rewardAmount for `source`
+  // (see getRewardAmount below). Pass an explicit amount when the value is
+  // computed per-event (e.g. SkillBattle rank-based payout, contest score)
+  // rather than a flat reward.
+  amount?:     number;
   source:      string;
   title:       string;
   description: string;
@@ -76,11 +81,30 @@ const DEFAULT_DAILY_LIMITS: Record<string, number> = {
   [VCOIN_SOURCES.SKILLBATTLE_WINNER_REWARD]:        100,
   [VCOIN_SOURCES.SKILLBATTLE_RUNNER_UP_REWARD]:     100,
   [VCOIN_SOURCES.SKILLBATTLE_PARTICIPATION_REWARD]: 50,
-  [VCOIN_SOURCES.AI_GURU_MONTHLY_BONUS]:            1500,
-  [VCOIN_SOURCES.AI_GURU_YEARLY_BONUS]:             1500,
   [VCOIN_SOURCES.ADMIN_FAIR_USE_REWARD]:            9999,
   [VCOIN_SOURCES.VIDYASTAR_CONTEST_ENTRY]:          9999,
   [VCOIN_SOURCES.COURSE_DISCOUNT_REDEEM]:           9999,
+  // Daily Streak Quiz: 1 question/day, so this cap is really just a safety
+  // net — the real "once per day" rule is enforced server-side by the
+  // submitDailyStreakQuizAnswer Cloud Function (see
+  // docs/DAILY_STREAK_QUIZ_BACKEND.md), not by this client-side limit.
+  [VCOIN_SOURCES.DAILY_STREAK_QUIZ_CORRECT]:        5,
+  [VCOIN_SOURCES.SIGNUP_BONUS]:                     200,
+};
+
+// Per-action reward amount, admin-editable via admin's VCoinRules.tsx
+// (rewardAmount field on the same vCoinRules/{source} document as the
+// daily limit). Used as the fallback for callers that omit `amount` in
+// CreditParams — e.g. submitContestQuiz.ts's VIDYASTAR_CONTEST_ENTRY
+// credit. Reward functions in this file that compute a variable amount
+// (rewardForAppTime, rewardForSkillBattleWin's rank tiers, etc.) keep
+// passing an explicit amount and are unaffected by this.
+const DEFAULT_REWARD_AMOUNTS: Record<string, number> = {
+  [VCOIN_SOURCES.REEL_WATCH_REWARD]:       1,
+  [VCOIN_SOURCES.VIDEO_WATCH_REWARD]:      3,
+  [VCOIN_SOURCES.STORY_WATCH_REWARD]:      1,
+  [VCOIN_SOURCES.VIDYASTAR_CONTEST_ENTRY]: 50,
+  [VCOIN_SOURCES.SIGNUP_BONUS]:            200,
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -102,11 +126,33 @@ function lockDoc(uid: string, lockKey: string) {
   return doc(db, "users", uid, "vCoinActivityLocks", lockKey);
 }
 
+// Matches the exact field name app/(drawer)/_layout.tsx, vcoins/wallet.tsx,
+// and admin's VCoinLeaderboard.tsx already read/rank by — see creditVCoins
+// below, which is the only place this field is written.
+function yearField(): string {
+  return `vCoinsYear_${new Date().getFullYear()}`;
+}
+
 // ─── Read: get balance once ───────────────────────────────────────────────────
+//
+// FIX (bug report — "all updated v-coins must be shown in drawer and
+// v-coins page properly"): there are two separate, disconnected balance
+// fields on users/{uid} — vCoinsBalance (written by creditVCoins() below,
+// used for reels/videos/contests/registration/etc.) and vCoins (written by
+// a separate backend Cloud Function, claimVCoinReward, used by the Daily
+// Streak Quiz). Nothing reconciles them server-side. Both of these read
+// functions used to return vCoinsBalance alone, so VCoinsHeaderBadge (the
+// header pill, via subscribeToVCoinsBalance) and any getVCoinsBalance()
+// caller would under-report for a student who'd also earned coins through
+// the Daily Streak Quiz. Summing both here keeps this in sync with
+// hooks/useVCoins.ts (Wallet, LearnFun) and app/(drawer)/_layout.tsx,
+// which apply the same sum.
 
 export async function getVCoinsBalance(uid: string): Promise<number> {
   const snap = await getDoc(userRef(uid));
-  return snap.exists() ? (snap.data().vCoinsBalance ?? 0) : 0;
+  if (!snap.exists()) return 0;
+  const d = snap.data();
+  return (d.vCoinsBalance ?? 0) + (d.vCoins ?? 0);
 }
 
 // ─── Read: real-time balance subscription ─────────────────────────────────────
@@ -117,7 +163,8 @@ export function subscribeToVCoinsBalance(
 ): () => void {
   return onSnapshot(userRef(uid), (snap) => {
     if (snap.exists()) {
-      callback(snap.data().vCoinsBalance ?? 0);
+      const d = snap.data();
+      callback((d.vCoinsBalance ?? 0) + (d.vCoins ?? 0));
     } else {
       callback(0);
     }
@@ -163,6 +210,22 @@ async function getDailyLimit(source: string): Promise<number> {
   return DEFAULT_DAILY_LIMITS[source] ?? 9999;
 }
 
+// Reads the same vCoinRules/{source} document as getDailyLimit — admin
+// edits both fields together (see admin's VCoinRules.tsx), so one read
+// pattern here keeps them from drifting out of sync with each other.
+async function getRewardAmount(source: string): Promise<number> {
+  try {
+    const snap = await getDoc(doc(db, "vCoinRules", source));
+    if (snap.exists()) {
+      const rule = snap.data() as VCoinRule;
+      if (rule.isActive && typeof rule.rewardAmount === "number") return rule.rewardAmount;
+    }
+  } catch {
+    // fall through to default
+  }
+  return DEFAULT_REWARD_AMOUNTS[source] ?? 0;
+}
+
 // ─── Internal: check and read daily earned so far ────────────────────────────
 
 async function getDailyEarned(uid: string, source: string): Promise<number> {
@@ -204,7 +267,7 @@ export async function canRewardForContent({
 export async function creditVCoins(params: CreditParams): Promise<void> {
   const {
     uid,
-    amount,
+    amount: explicitAmount,
     source,
     title,
     description,
@@ -212,14 +275,20 @@ export async function creditVCoins(params: CreditParams): Promise<void> {
     metadata = {},
   } = params;
 
-  if (amount <= 0) return;
-
-  // 1. Duplicate check — if referenceId given, skip if already rewarded
+  // 1. Duplicate check — if referenceId given, skip if already rewarded.
+  // Checked before resolving amount below so a duplicate attempt costs one
+  // read instead of two.
   if (referenceId) {
     const contentKey = `${source}_${referenceId}`;
     const existing = await getDoc(lockDoc(uid, contentKey));
     if (existing.exists()) return; // already rewarded for this content
   }
+
+  // Flat per-action rewards (contest entry, etc.) omit `amount` and pull
+  // the admin-configured value here. Per-event rewards (SkillBattle rank
+  // tiers, app-time minutes, etc.) pass an explicit amount and skip this.
+  const amount = explicitAmount ?? await getRewardAmount(source);
+  if (amount <= 0) return;
 
   // 2. Daily limit check
   const dailyLimit  = await getDailyLimit(source);
@@ -249,26 +318,29 @@ export async function creditVCoins(params: CreditParams): Promise<void> {
     updatedAt:   now,
   });
 
-  // 3b. User document — increment balance fields
+  // 3b. User document — atomic increments
+  // FIX: previously read the user doc first to compute `current + amount`
+  // by hand, purely to decide batch.set(new doc) vs batch.update(existing
+  // doc) — a race condition if two credits land concurrently (e.g. a retry
+  // while offline sync catches up), and the mobile `else` branch's plain
+  // set() (no merge) would have silently wiped any other fields on the
+  // user doc if it existed without vCoinsBalance already set.
+  // Firestore's increment() is atomic and works whether the field/doc
+  // exists yet or not, so set(..., {merge:true}) with increment() values
+  // replaces the read entirely — one fewer read, no race window, and no
+  // risk of clobbering unrelated fields.
+  //
+  // Also now writes vCoinsYear_{year} via the same increment() — this field
+  // is what app/(drawer)/_layout.tsx, vcoins/wallet.tsx, and admin's
+  // VCoinLeaderboard.tsx all rank by, but nothing was ever writing it.
   const userDocRef = userRef(uid);
-  const userSnap   = await getDoc(userDocRef);
-  const current    = userSnap.exists() ? (userSnap.data().vCoinsBalance ?? 0) : 0;
-  const currentEarned = userSnap.exists() ? (userSnap.data().vCoinsLifetimeEarned ?? 0) : 0;
-
-  if (userSnap.exists()) {
-    batch.update(userDocRef, {
-      vCoinsBalance:        current + actualAmount,
-      vCoinsLifetimeEarned: currentEarned + actualAmount,
-      vCoinsUpdatedAt:      now,
-    });
-  } else {
-    batch.set(userDocRef, {
-      vCoinsBalance:        actualAmount,
-      vCoinsLifetimeEarned: actualAmount,
-      vCoinsLifetimeSpent:  0,
-      vCoinsUpdatedAt:      now,
-    });
-  }
+  batch.set(userDocRef, {
+    vCoinsBalance:        increment(actualAmount),
+    vCoinsLifetimeEarned: increment(actualAmount),
+    [yearField()]:        increment(actualAmount),
+    vCoinsLifetimeSpent:  increment(0), // no-op on existing value; ensures field exists for new docs
+    vCoinsUpdatedAt:      now,
+  }, { merge: true });
 
   // 3c. Content lock (prevents duplicate reward for same content)
   if (referenceId) {
@@ -283,23 +355,28 @@ export async function creditVCoins(params: CreditParams): Promise<void> {
   }
 
   // 3d. Daily lock (tracks daily total for this source)
+  // FIX: same race condition class as the balance write above (3b) — this
+  // read (dailyLockSnap) then write (earnedToday + actualAmount) was not
+  // atomic, so two concurrent credits for the same source/day could both
+  // read the same earnedToday, both add their amount, and the second
+  // commit would overwrite the first's contribution instead of stacking on
+  // top of it. increment() makes this atomic the same way it did for
+  // vCoinsBalance above.
+  //
+  // createdAt is intentionally left out of this write: with merge:true,
+  // including it would reset the field to "now" on every credit, not just
+  // the doc's first one. The lock key itself already encodes today's date
+  // (`${source}_day_${todayStr()}`), so a new day means a brand-new
+  // document, not a stale createdAt on a reused one — nothing reads
+  // createdAt to decide freshness, only the key does.
   const dailyKey      = `${source}_day_${todayStr()}`;
   const dailyLockRef  = lockDoc(uid, dailyKey);
-  const dailyLockSnap = await getDoc(dailyLockRef);
-  if (dailyLockSnap.exists()) {
-    batch.update(dailyLockRef, {
-      earnedToday:    (dailyLockSnap.data().earnedToday ?? 0) + actualAmount,
-      lastRewardedAt: now,
-    });
-  } else {
-    batch.set(dailyLockRef, {
-      source,
-      referenceId:    `day_${todayStr()}`,
-      earnedToday:    actualAmount,
-      lastRewardedAt: now,
-      createdAt:      now,
-    });
-  }
+  batch.set(dailyLockRef, {
+    source,
+    referenceId:    `day_${todayStr()}`,
+    earnedToday:    increment(actualAmount),
+    lastRewardedAt: now,
+  }, { merge: true });
 
   await batch.commit();
 }
@@ -325,7 +402,19 @@ export async function debitVCoins(params: DebitParams): Promise<void> {
   await runTransaction(db, async (tx) => {
     const userDocRef = userRef(uid);
     const userSnap   = await tx.get(userDocRef);
-    const current    = userSnap.exists() ? (userSnap.data().vCoinsBalance ?? 0) : 0;
+    // FIX: the displayed balance everywhere (useVCoins, getVCoinsBalance,
+    // subscribeToVCoinsBalance, header badge) is vCoinsBalance + vCoins —
+    // see the FIX comment on getVCoinsBalance above for why. Checking
+    // vCoinsBalance alone here would reject a spend the user can plainly
+    // see they can afford (e.g. vCoinsBalance=10, vCoins=500, displayed
+    // balance=510, but this would've thrown "Have 10, need X" on any
+    // amount over 10). vCoinsBalance is still what actually gets debited
+    // (see below) — vCoins is a separate pool written by an external
+    // Cloud Function this repo doesn't own, so we don't touch it directly
+    // — but the *eligibility check* must match what the user was shown.
+    const balancePart = userSnap.exists() ? (userSnap.data().vCoinsBalance ?? 0) : 0;
+    const streakPart  = userSnap.exists() ? (userSnap.data().vCoins ?? 0) : 0;
+    const current      = balancePart + streakPart;
 
     if (current < amount) {
       throw new Error(`Insufficient V-Coins balance. Have ${current}, need ${amount}.`);
@@ -349,10 +438,13 @@ export async function debitVCoins(params: DebitParams): Promise<void> {
       updatedAt:   now,
     });
 
-    // Deduct from balance
+    // Deduct from vCoinsBalance specifically (not the combined `current`
+    // used for the eligibility check above) — can go negative if amount
+    // exceeds balancePart alone; the combined total (which is what's
+    // displayed) still comes out correct since vCoins is untouched.
     if (userSnap.exists()) {
       tx.update(userDocRef, {
-        vCoinsBalance:       current - amount,
+        vCoinsBalance:       balancePart - amount,
         vCoinsLifetimeSpent: currentSpent + amount,
         vCoinsUpdatedAt:     now,
       });
@@ -447,39 +539,13 @@ export async function rewardForAppTime({
   });
 }
 
-// ─── rewardForAIGuruSubscription ──────────────────────────────────────────────
-// Call after AI Guru subscription purchase is confirmed.
-// planType: "monthly" | "yearly"
-// subscriptionId: unique payment/subscription ID (prevents duplicate reward)
-
-export async function rewardForAIGuruSubscription({
-  uid,
-  planType,
-  subscriptionId,
-}: {
-  uid:            string;
-  planType:       "monthly" | "yearly";
-  subscriptionId: string;
-}): Promise<void> {
-  const amount      = planType === "yearly" ? 1500 : 100;
-  const description = planType === "yearly"
-    ? "Bonus for yearly AI Guru subscription"
-    : "Bonus for monthly AI Guru subscription";
-
-  const source = planType === "yearly"
-    ? VCOIN_SOURCES.AI_GURU_YEARLY_BONUS
-    : VCOIN_SOURCES.AI_GURU_MONTHLY_BONUS;
-
-  await creditVCoins({
-    uid,
-    amount,
-    source,
-    title:       "AI Guru Subscription Bonus",
-    description,
-    referenceId: subscriptionId,
-    metadata:    { planType, subscriptionId },
-  });
-}
+// FIX (product decision — "V-Coins can not be earned from AI Guru, it's a
+// subscription-based model"): removed rewardForAIGuruSubscription (and its
+// AI_GURU_MONTHLY_BONUS/AI_GURU_YEARLY_BONUS sources in formatVCoins.ts,
+// VCoinRules.tsx). Was never actually wired up anywhere — no caller in
+// mobile, web, or the server-side aiGuruSubscription.ts purchase handler —
+// but it was listed in admin's VCoinRules.tsx alongside real, working
+// reward sources, misleadingly implying subscribing paid VCoins back out.
 
 // ─── rewardForSkillBattleWin ──────────────────────────────────────────────────
 // ⚡ CLOUD_FUNCTION_TODO: This should be triggered server-side when a SkillBattle
@@ -556,11 +622,15 @@ export interface SkillBattleClaimParams {
   };
 }
 
-const VCOIN_DIST_PCT_LOCAL = [30, 20, 14, 10, 8, 5, 4, 3, 3, 3] as const;
-
+// FIX: this used to be its own locally-declared copy of the same
+// percentages as VCOIN_DIST_PCT (utils/formatVCoins.ts) — two independent
+// copies of the same table is exactly how they drifted apart in the first
+// place (see the matching FIX in app/(drawer)/(tabs)/skillbattle.tsx, whose
+// reward *preview* had silently diverged from this, the actual payout
+// table). Now there's one source of truth.
 function getSkillBattleCoinForRank(baseCoins: number, rank: number): number {
   if (rank < 1 || rank > 10 || baseCoins <= 0) return 0;
-  return Math.round((baseCoins * (VCOIN_DIST_PCT_LOCAL[rank - 1] ?? 0)) / 100);
+  return Math.round((baseCoins * (VCOIN_DIST_PCT[rank - 1] ?? 0)) / 100);
 }
 
 function skillBattleSource(rank: number): string {
