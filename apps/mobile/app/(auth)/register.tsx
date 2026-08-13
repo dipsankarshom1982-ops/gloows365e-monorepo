@@ -621,6 +621,17 @@ export default function StudentRegister() {
                   placeholderTextColor="#aaa"
                   value={otp}
                   onChangeText={setOtp}
+                  // Best-effort autofill: iOS scans incoming Messages for a
+                  // code and offers it above the keyboard; Android's Autofill
+                  // framework can do the same via the SMS Retriever API, IF
+                  // the incoming SMS carries this app's retriever hash (not
+                  // guaranteed with Firebase's JS SDK phone auth, unlike the
+                  // native @react-native-firebase/auth SDK). Neither prop
+                  // requires a native module, so both are safe to leave on
+                  // even on platforms/SMS formats where they end up being a
+                  // no-op.
+                  textContentType="oneTimeCode"
+                  autoComplete={Platform.OS === "android" ? "sms-otp" : "one-time-code"}
                 />
                 <TouchableOpacity
                   style={[S.otpBtn, S.verifyBtn, verifyingOtp && { opacity: 0.6 }]}
