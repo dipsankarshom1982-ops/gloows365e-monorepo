@@ -10,6 +10,8 @@ export type TranslationSet = {
   dashboard: string;
   aiGuru: string;
   skillBoard: string;
+  myPrizes: string;
+  skillBoost: string;
   logout: string;
   // ── Settings ─────────────────────────────────────────────
   profileSettings: string;
@@ -107,6 +109,11 @@ export type TranslationSet = {
   instantAnswers: string;
   studyHelp: string;
   startChatting: string;
+  dailyChallenge: string;
+  dayStreak: string;
+  dailyStreakQuiz: string;
+  dailyStreakQuizSubtitle: string;
+  playTodaysQuiz: string;
   // ── AI Guru ────────────────────────────────────────────────
   premiumFeature: string;
   premiumUnlockMsg: string;
@@ -119,14 +126,14 @@ export type TranslationSet = {
   continueBtn: string;
   fillRequiredFields: string;
   fillRequiredFieldsDesc: string;
-  // ── VidyaGuru ──────────────────────────────────────────────
-  vidyaGuruAI: string;
-  personalAiTeacher: string;
+  // ── SkillGuru (renamed from VidyaGuru) ───────────────────────
+  skillGuruAI: string;
+  personalAiSkillsCoach: string;
   readyToHelp: string;
   thinking: string;
   speaking: string;
   listening: string;
-  paywallTitle: string;
+  paywallTitleSkillGuru: string;
   paywallBody: string;
   upgradeToPremium: string;
   // ── Seekho ─────────────────────────────────────────────────
@@ -189,8 +196,8 @@ export type TranslationSet = {
   menuAiDashboardSub?: string;
   menuDiscoverAI?: string;
   menuDiscoverAISub?: string;
-  menuVidyaGuruCard?: string;
-  menuVidyaGuruCardSub?: string;
+  menuSkillGuruCard?: string;
+  menuSkillGuruCardSub?: string;
   menuGenerateLesson?: string;
   menuGenerateLessonSub?: string;
   menuMyLessons?: string;
@@ -216,7 +223,7 @@ export type TranslationSet = {
   wantToGoDeeper?: string;
   generateLessonAction?: string;
   chatWithAIAction?: string;
-  chatWithVidyaGuruAction?: string;
+  chatWithSkillGuruAction?: string;
   askAnotherQuestion?: string;
   dailyLimitTitle?: string;
   dailyLimitMessage?: string;
@@ -225,10 +232,16 @@ export type TranslationSet = {
   tryAgainLabel?: string;
   leftLabel?: string;
   askAiGuruTitle?: string;
-  // ── VidyaGuru screen ─────────────────────────────────────────────
+  // ── SkillGuru screen (renamed from VidyaGuru) ─────────────────────
   respondingIn?: string;
   voiceMessage?: string;
   askSomethingPlaceholder?: string;
+  askSkillGuruInputPlaceholder?: string;
+  // SkillGuru rebuild (VidyaGuru → SkillGuru) — generic skills-coach
+  // greeting (no longer board/class-specific, since skills coaching
+  // isn't tied to a syllabus) and starter-prompts label.
+  skillGuruGreeting?: string;
+  tryAskingSkillGuru?: string;
   // ── Settings screen ───────────────────────────────────────────────
   themeDescDark?: string;
   themeDescLight?: string;
@@ -262,6 +275,24 @@ export type TranslationSet = {
   modeSummarize?: string;
   modeTip?: string;
   modeLanguage?: string;
+  // Ask AI Guru search redesign (new) — search-mode hints, search-state
+  // labels, suggested/related topics rail. See ask.tsx / web's
+  // ask/page.tsx for where these render.
+  askAiGuruTagline?: string;
+  modeDoubtHint?: string;
+  modeExplainHint?: string;
+  modeNotesHint?: string;
+  modeExamHint?: string;
+  modeSummarizeHint?: string;
+  modeTipHint?: string;
+  trySearchingFor?: string;
+  searching?: string;
+  resultsFor?: string;
+  relatedSearches?: string;
+  newSearch?: string;
+  writeInYourLanguage?: string;
+  notebook?: string;
+  practiceExam?: string;
   // Notebook screen
   notebookTitle?: string;
   notebookEmpty?: string;
@@ -357,7 +388,9 @@ export type TranslationSet = {
   referralTitle?: string;
   inviteFriendsEarn?: string;
   totalReferred?: string;
-  completed?: string;
+  // 'completed' already declared above (VidyaStar/Shikshastar screen) —
+  // removed duplicate here, both refer to the same general "Completed"
+  // status label and share that one field.
   yourReferralCode?: string;
   shareCode?: string;
   howItWorks?: string;
@@ -373,11 +406,21 @@ export type TranslationSet = {
 type Translations = Record<string, TranslationSet>;
 
 const translations: Translations = {
+  // ⚠️ REVIEW NEEDED: the 15 keys introduced for the Ask AI Guru search
+  // redesign (askAiGuruTagline, modeDoubtHint..modeTipHint,
+  // trySearchingFor, searching, resultsFor, relatedSearches, newSearch,
+  // writeInYourLanguage, notebook, practiceExam) were translated without
+  // native-speaker verification for every language except English. They
+  // are functionally correct (real strings, not missing keys) but should
+  // be reviewed by a native speaker of each language before being
+  // considered final — search this file for "NEW KEY" to find every
+  // line that needs that review.
+  //
   // ─────────────────────────── English ──────────────────────────────
   en: {
     home: "Home", leaderboard: "Leaderboard", wallet: "Wallet",
     settings: "Settings", dashboard: "Dashboard", aiGuru: "AI Guru",
-    skillBoard: "Skill Board", logout: "Logout",
+    skillBoard: "Skill Board", myPrizes: "My Prizes", skillBoost: "Skill Boost", logout: "Logout",
     profileSettings: "Profile Settings", language: "Language",
     changeLanguage: "Change app & content language",
     darkTheme: "Dark Theme", notifications: "Notifications",
@@ -417,11 +460,14 @@ const translations: Translations = {
     joinNow: "Join Now", participate: "Participate", reserveSpot: "Reserve Spot",
     startsSoon: "Starts Soon", all: "All", upcoming: "Upcoming",
     aiGuruSubtitle: "Your personal learning assistant", askAnything: "Ask Anything", instantAnswers: "Instant Answers", studyHelp: "Study Help", startChatting: "Start Chatting →",
+    dailyChallenge: "Daily Challenge", dayStreak: "Day Streak", dailyStreakQuiz: "Daily Streak Quiz", dailyStreakQuizSubtitle: "Answer today's question — keep your streak alive", playTodaysQuiz: "Play Today's Quiz →",
     premiumFeature: "Premium Feature", premiumUnlockMsg: "Upgrade to AI Guru Premium to unlock this feature.", maybeLater: "Maybe Later", upgrade: "Upgrade",
     aiClassroom: "Your personal AI classroom\npowered by Gemini", freeLessonsLeft: "free lessons left today", unlimitedAccess: "Unlimited Premium Access Active",
     lessonSetup: "Lesson Setup", continueBtn: "Continue →", fillRequiredFields: "Fill Required Fields", fillRequiredFieldsDesc: "Please select a subject and enter chapter name.",
-    vidyaGuruAI: "VidyaGuru AI", personalAiTeacher: "Your personal AI teacher", readyToHelp: "Ready to help!", thinking: "Thinking...", speaking: "Speaking...", listening: "Listening...",
-    paywallTitle: "Continue with VidyaGuru?", paywallBody: "You've used your free question for today. Upgrade to Premium for unlimited conversations!", upgradeToPremium: "Upgrade to Premium",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "Your personal AI skills coach", readyToHelp: "Ready to help!", thinking: "Thinking...", speaking: "Speaking...", listening: "Listening...",
+    skillGuruGreeting: "I'm SkillGuru, your personal AI skills coach. I can help you with your resume, interview prep, communication, coding basics, and soft skills like teamwork and time management. Pick a skill area below or just tell me what you're working on — I can answer in {{language}} too!",
+    tryAskingSkillGuru: "OR TRY ASKING",
+    paywallTitleSkillGuru: "Continue with SkillGuru?", paywallBody: "You've used your free question for today. Upgrade to Premium for unlimited conversations!", upgradeToPremium: "Upgrade to Premium",
     seekhoSignIn: "Sign in to access Seekho", curriculumAligned: "Curriculum-aligned learning", subjects: "Subjects", continueLearning: "Continue Learning", resumeLearning: "Resume where you left off",
     revisionDue: "Revision Due!", revisionReady: "concepts ready for review", unlockCurriculum: "Unlock Full Curriculum",
     pendingReview: "Pending Review", inReview: "In Review", approved: "Approved", rejected: "Rejected", limitReached: "Limit Reached", limitReachedDesc: "You've reached the upload limit for this battle.",
@@ -441,7 +487,7 @@ const translations: Translations = {
     aiGuruTagline: "India's Most Useful AI Guru",
     menuAiDashboard: "AI Dashboard", menuAiDashboardSub: "Your personalised AI learning hub",
     menuDiscoverAI: "Discover AI", menuDiscoverAISub: "Explore careers, colleges & scholarships",
-    menuVidyaGuruCard: "VidyaGuru AI", menuVidyaGuruCardSub: "Chat with your personal AI teacher",
+    menuSkillGuruCard: "Ask AI SkillGuru", menuSkillGuruCardSub: "Coach for resume, interview & skills",
     menuGenerateLesson: "Generate Lesson", menuGenerateLessonSub: "AI creates a full lesson for you",
     menuMyLessons: "My AI Lessons", menuMyLessonsSub: "Resume or review past lessons",
     menuRevisionReels: "Revision Reels", menuRevisionReelsSub: "Short video revision sessions",
@@ -457,10 +503,10 @@ const translations: Translations = {
     thinkingLabel: "Thinking...",
     wantToGoDeeper: "Want to go deeper?",
     generateLessonAction: "✨ Generate Lesson", chatWithAIAction: "🤖 Chat with AI",
-    chatWithVidyaGuruAction: "🤖 Chat with VidyaGuru instead",
+    chatWithSkillGuruAction: "🎯 Chat with SkillGuru instead",
     askAnotherQuestion: "Ask another question",
     dailyLimitTitle: "Daily limit reached",
-    dailyLimitMessage: "You've used all {{count}} free questions for today. Come back tomorrow or upgrade to Premium.",
+    dailyLimitMessage: "You've reached today's free question limit. Come back tomorrow or upgrade to Premium.",
     generateFullLessonAction: "✨ Generate Full Lesson",
     somethingWentWrong: "Something went wrong", tryAgainLabel: "Try again",
     leftLabel: "left", askAiGuruTitle: "Ask AI Guru",
@@ -483,6 +529,15 @@ const translations: Translations = {
     modeExplain: "Explain a Concept", modeNotes: "Make Notes", modeExam: "Prepare for Exam",
     modeDoubt: "Solve My Doubt", modeSummarize: "Summarize Chapter", modeTip: "Daily Study Tip",
     modeLanguage: "Explain in My Language",
+    askAiGuruTagline: "Search anything about your studies, skills, or general knowledge",
+    modeDoubtHint: "Search anything…", modeExplainHint: "Explain a concept…",
+    modeNotesHint: "Make notes on…", modeExamHint: "Help me prepare for…",
+    modeSummarizeHint: "Summarize chapter…", modeTipHint: "Give me a study tip for…",
+    trySearchingFor: "TRY SEARCHING FOR", searching: "Searching…",
+    resultsFor: "Results for", relatedSearches: "RELATED SEARCHES",
+    newSearch: "New search",
+    writeInYourLanguage: "Write in your language — AI answers in the same language",
+    notebook: "Notebook", practiceExam: "Practice Exam",
     notebookTitle: "My AI Notebook", notebookEmpty: "Notebook is empty",
     notebookEmptyDesc: "Save any AI answer by tapping \"Save to Notebook\"",
     savedToNotebook: "Saved to Notebook", saveToNotebook: "Save to Notebook",
@@ -528,7 +583,7 @@ const translations: Translations = {
     seeTop100: "See Top 100", showLess: "Show Less",
     yourRank: "Your Rank", updatedDaily: "Updated Daily",
     referralTitle: "Refer & Earn", inviteFriendsEarn: "Invite friends, earn VCoins!",
-    totalReferred: "Total referred", completed: "Completed",
+    totalReferred: "Total referred",
     yourReferralCode: "Your referral code", shareCode: "Share this code with friends. They enter it during signup.",
     howItWorks: "How it works", referralHistory: "Referral history",
     shareEarn: "Share & Earn", pendingLabel: "Pending", joinedLabel: "Joined",
@@ -540,7 +595,7 @@ const translations: Translations = {
   hi: {
     home: "होम", leaderboard: "लीडरबोर्ड", wallet: "वॉलेट",
     settings: "सेटिंग्स", dashboard: "डैशबोर्ड", aiGuru: "AI गुरु",
-    skillBoard: "स्किल बोर्ड", logout: "लॉगआउट",
+    skillBoard: "स्किल बोर्ड", myPrizes: "मेरे पुरस्कार", skillBoost: "स्किल बूस्ट", logout: "लॉगआउट",
     profileSettings: "प्रोफ़ाइल सेटिंग्स", language: "भाषा",
     changeLanguage: "ऐप और सामग्री की भाषा बदलें",
     darkTheme: "डार्क थीम", notifications: "सूचनाएं",
@@ -580,11 +635,14 @@ const translations: Translations = {
     joinNow: "अभी जुड़ें", participate: "भाग लें", reserveSpot: "सीट बुक करें",
     startsSoon: "जल्द शुरू होगा", all: "सभी", upcoming: "आगामी",
     aiGuruSubtitle: "आपका व्यक्तिगत शिक्षण सहायक", askAnything: "कुछ भी पूछें", instantAnswers: "तत्काल उत्तर", studyHelp: "पढ़ाई में मदद", startChatting: "बात शुरू करें →",
+    dailyChallenge: "दैनिक चुनौती", dayStreak: "दिन स्ट्रीक", dailyStreakQuiz: "डेली स्ट्रीक क्विज़", dailyStreakQuizSubtitle: "आज का सवाल जवाब दें — अपनी स्ट्रीक बनाए रखें", playTodaysQuiz: "आज का क्विज़ खेलें →",
     premiumFeature: "प्रीमियम फीचर", premiumUnlockMsg: "इस फीचर को अनलॉक करने के लिए AI Guru Premium अपग्रेड करें।", maybeLater: "बाद में", upgrade: "अपग्रेड करें",
     aiClassroom: "आपकी व्यक्तिगत AI क्लासरूम\nGemini द्वारा संचालित", freeLessonsLeft: "आज के मुफ़्त पाठ शेष", unlimitedAccess: "असीमित प्रीमियम एक्सेस सक्रिय",
     lessonSetup: "पाठ सेटअप", continueBtn: "जारी रखें →", fillRequiredFields: "आवश्यक फ़ील्ड भरें", fillRequiredFieldsDesc: "कृपया विषय चुनें और अध्याय का नाम दर्ज करें।",
-    vidyaGuruAI: "विद्यागुरु AI", personalAiTeacher: "आपके व्यक्तिगत AI शिक्षक", readyToHelp: "मदद के लिए तैयार!", thinking: "सोच रहा हूँ...", speaking: "बोल रहा हूँ...", listening: "सुन रहा हूँ...",
-    paywallTitle: "विद्यागुरु के साथ जारी रखें?", paywallBody: "आज का मुफ़्त प्रश्न समाप्त। असीमित बातचीत के लिए प्रीमियम अपग्रेड करें!", upgradeToPremium: "प्रीमियम में अपग्रेड करें",
+    skillGuruAI: "स्किलगुरु AI", personalAiSkillsCoach: "आपका व्यक्तिगत AI स्किल कोच", readyToHelp: "मदद के लिए तैयार!", thinking: "सोच रहा हूँ...", speaking: "बोल रहा हूँ...", listening: "सुन रहा हूँ...",
+    skillGuruGreeting: "मैं स्किलगुरु हूँ, आपका व्यक्तिगत AI स्किल कोच। मैं आपके रिज़्यूमे, इंटरव्यू की तैयारी, संचार कौशल, कोडिंग की बुनियाद और टीमवर्क व समय-प्रबंधन जैसे सॉफ्ट स्किल्स में मदद कर सकता हूँ। नीचे से एक स्किल क्षेत्र चुनें या बताएं कि आप किस पर काम कर रहे हैं — मैं {{language}} में भी जवाब दे सकता हूँ!",
+    tryAskingSkillGuru: "या यह पूछ कर देखें",
+    paywallTitleSkillGuru: "स्किलगुरु के साथ जारी रखें?", paywallBody: "आज का मुफ़्त प्रश्न समाप्त। असीमित बातचीत के लिए प्रीमियम अपग्रेड करें!", upgradeToPremium: "प्रीमियम में अपग्रेड करें",
     seekhoSignIn: "Seekho एक्सेस करने के लिए लॉगिन करें", curriculumAligned: "पाठ्यक्रम-आधारित शिक्षण", subjects: "विषय", continueLearning: "सीखना जारी रखें", resumeLearning: "जहाँ छोड़ा था वहाँ से शुरू करें",
     revisionDue: "रिवीजन करें!", revisionReady: "अवधारणाएं समीक्षा के लिए तैयार", unlockCurriculum: "पूरा पाठ्यक्रम अनलॉक करें",
     pendingReview: "समीक्षा प्रतीक्षित", inReview: "जांच में", approved: "स्वीकृत", rejected: "अस्वीकृत", limitReached: "सीमा पहुंच गई", limitReachedDesc: "आपने इस बैटल की अपलोड सीमा पार कर ली है।",
@@ -604,7 +662,7 @@ const translations: Translations = {
     aiGuruTagline: "भारत का सबसे उपयोगी AI गुरु",
     menuAiDashboard: "AI डैशबोर्ड", menuAiDashboardSub: "आपका व्यक्तिगत AI लर्निंग हब",
     menuDiscoverAI: "डिस्कवर AI", menuDiscoverAISub: "करियर, कॉलेज और छात्रवृत्ति खोजें",
-    menuVidyaGuruCard: "विद्यागुरु AI", menuVidyaGuruCardSub: "अपने AI शिक्षक से बात करें",
+    menuSkillGuruCard: "स्किलगुरु से पूछें", menuSkillGuruCardSub: "रिज़्यूमे, इंटरव्यू और स्किल्स के लिए कोच",
     menuGenerateLesson: "पाठ बनाएं", menuGenerateLessonSub: "AI आपके लिए पूरा पाठ बनाता है",
     menuMyLessons: "मेरे AI पाठ", menuMyLessonsSub: "पिछले पाठ देखें या दोबारा पढ़ें",
     menuRevisionReels: "रिवीजन रील्स", menuRevisionReelsSub: "शॉर्ट वीडियो रिवीजन सेशन",
@@ -620,10 +678,10 @@ const translations: Translations = {
     thinkingLabel: "सोच रहा हूँ...",
     wantToGoDeeper: "और गहराई से सीखना चाहते हैं?",
     generateLessonAction: "✨ पाठ बनाएं", chatWithAIAction: "🤖 AI से बात करें",
-    chatWithVidyaGuruAction: "🤖 विद्यागुरु से बात करें",
+    chatWithSkillGuruAction: "🎯 स्किलगुरु से बात करें",
     askAnotherQuestion: "एक और प्रश्न पूछें",
     dailyLimitTitle: "दैनिक सीमा समाप्त",
-    dailyLimitMessage: "आपने आज के सभी {{count}} मुफ़्त प्रश्न उपयोग कर लिए। कल वापस आएं या प्रीमियम अपग्रेड करें।",
+    dailyLimitMessage: "आज की मुफ़्त प्रश्न सीमा समाप्त हो गई है। कल वापस आएं या प्रीमियम अपग्रेड करें।",
     generateFullLessonAction: "✨ पूरा पाठ बनाएं",
     somethingWentWrong: "कुछ गड़बड़ हुई", tryAgainLabel: "फिर से कोशिश करें",
     leftLabel: "शेष", askAiGuruTitle: "AI गुरु से पूछें",
@@ -646,6 +704,16 @@ const translations: Translations = {
     modeExplain: "अवधारणा समझाएं", modeNotes: "नोट्स बनाएं", modeExam: "परीक्षा तैयारी",
     modeDoubt: "संदेह हल करें", modeSummarize: "अध्याय सारांश", modeTip: "दैनिक अध्ययन टिप",
     modeLanguage: "अपनी भाषा में समझाएं",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "अपनी पढ़ाई, कौशल या सामान्य ज्ञान के बारे में कुछ भी खोजें",
+    modeDoubtHint: "कुछ भी खोजें…", modeExplainHint: "एक अवधारणा समझाएं…",
+    modeNotesHint: "नोट्स बनाएं…", modeExamHint: "मेरी तैयारी में मदद करें…",
+    modeSummarizeHint: "अध्याय का सारांश दें…", modeTipHint: "मुझे पढ़ाई की एक टिप दें…",
+    trySearchingFor: "यह खोजने की कोशिश करें", searching: "खोज रहे हैं…",
+    resultsFor: "इसके लिए परिणाम", relatedSearches: "संबंधित खोजें",
+    newSearch: "नई खोज",
+    writeInYourLanguage: "अपनी भाषा में लिखें — AI उसी भाषा में जवाब देगा",
+    notebook: "नोटबुक", practiceExam: "अभ्यास परीक्षा",
     notebookTitle: "मेरी AI नोटबुक", notebookEmpty: "नोटबुक खाली है",
     notebookEmptyDesc: "\"नोटबुक में सहेजें\" दबाकर AI उत्तर सहेजें",
     savedToNotebook: "नोटबुक में सहेजा गया", saveToNotebook: "नोटबुक में सहेजें",
@@ -691,7 +759,7 @@ const translations: Translations = {
     seeTop100: "टॉप 100 देखें", showLess: "कम दिखाएं",
     yourRank: "आपकी रैंक", updatedDaily: "रोज़ अपडेट",
     referralTitle: "रेफर करें और कमाएं", inviteFriendsEarn: "दोस्तों को आमंत्रित करें, VCoins कमाएं!",
-    totalReferred: "कुल रेफर", completed: "पूर्ण",
+    totalReferred: "कुल रेफर",
     yourReferralCode: "आपका रेफरल कोड", shareCode: "यह कोड दोस्तों के साथ शेयर करें।",
     howItWorks: "यह कैसे काम करता है", referralHistory: "रेफरल इतिहास",
     shareEarn: "शेयर करें और कमाएं", pendingLabel: "लंबित", joinedLabel: "जुड़े",
@@ -703,7 +771,7 @@ const translations: Translations = {
   bn: {
     home: "হোম", leaderboard: "লিডারবোর্ড", wallet: "ওয়ালেট",
     settings: "সেটিংস", dashboard: "ড্যাশবোর্ড", aiGuru: "AI গুরু",
-    skillBoard: "স্কিল বোর্ড", logout: "লগআউট",
+    skillBoard: "স্কিল বোর্ড", myPrizes: "আমার পুরস্কার", skillBoost: "স্কিল বুস্ট", logout: "লগআউট",
     profileSettings: "প্রোফাইল সেটিংস", language: "ভাষা",
     changeLanguage: "অ্যাপ ও কন্টেন্টের ভাষা পরিবর্তন করুন",
     darkTheme: "ডার্ক থিম", notifications: "বিজ্ঞপ্তি",
@@ -743,11 +811,14 @@ const translations: Translations = {
     joinNow: "এখনই যোগ দিন", participate: "অংশগ্রহণ করুন", reserveSpot: "জায়গা বুক করুন",
     startsSoon: "শীঘ্রই শুরু হবে", all: "সব", upcoming: "আসন্ন",
     aiGuruSubtitle: "আপনার ব্যক্তিগত শিক্ষা সহায়ক", askAnything: "যেকোনো কিছু জিজ্ঞেস করুন", instantAnswers: "তাৎক্ষণিক উত্তর", studyHelp: "পড়াশুনায় সাহায্য", startChatting: "চ্যাট শুরু করুন →",
+    dailyChallenge: "দৈনিক চ্যালেঞ্জ", dayStreak: "দিনের স্ট্রিক", dailyStreakQuiz: "ডেইলি স্ট্রিক কুইজ", dailyStreakQuizSubtitle: "আজকের প্রশ্নের উত্তর দিন — আপনার স্ট্রিক ধরে রাখুন", playTodaysQuiz: "আজকের কুইজ খেলুন →",
     premiumFeature: "প্রিমিয়াম ফিচার", premiumUnlockMsg: "এই ফিচার আনলক করতে AI Guru Premium আপগ্রেড করুন।", maybeLater: "পরে", upgrade: "আপগ্রেড",
     aiClassroom: "আপনার ব্যক্তিগত AI ক্লাসরুম\nGemini দ্বারা চালিত", freeLessonsLeft: "আজকের বিনামূল্যে পাঠ বাকি", unlimitedAccess: "সীমাহীন প্রিমিয়াম অ্যাক্সেস সক্রিয়",
     lessonSetup: "পাঠ সেটআপ", continueBtn: "চালিয়ে যান →", fillRequiredFields: "প্রয়োজনীয় তথ্য পূরণ করুন", fillRequiredFieldsDesc: "অনুগ্রহ করে বিষয় নির্বাচন করুন এবং অধ্যায়ের নাম লিখুন।",
-    vidyaGuruAI: "বিদ্যাগুরু AI", personalAiTeacher: "আপনার ব্যক্তিগত AI শিক্ষক", readyToHelp: "সাহায্যের জন্য প্রস্তুত!", thinking: "ভাবছি...", speaking: "বলছি...", listening: "শুনছি...",
-    paywallTitle: "বিদ্যাগুরুর সাথে চালিয়ে যান?", paywallBody: "আজকের বিনামূল্যে প্রশ্ন শেষ। সীমাহীন কথোপকথনের জন্য প্রিমিয়াম আপগ্রেড করুন!", upgradeToPremium: "প্রিমিয়ামে আপগ্রেড করুন",
+    skillGuruAI: "স্কিলগুরু AI", personalAiSkillsCoach: "আপনার ব্যক্তিগত AI স্কিল কোচ", readyToHelp: "সাহায্যের জন্য প্রস্তুত!", thinking: "ভাবছি...", speaking: "বলছি...", listening: "শুনছি...",
+    skillGuruGreeting: "আমি স্কিলগুরু, তোমার ব্যক্তিগত AI স্কিল কোচ। আমি তোমার রিজিউমে, ইন্টারভিউ প্রস্তুতি, কমিউনিকেশন, কোডিং-এর বুনিয়াদ এবং টিমওয়ার্ক ও সময় ব্যবস্থাপনার মতো সফট স্কিলে সাহায্য করতে পারি। নিচে থেকে একটি স্কিল এরিয়া বেছে নাও বা বলো তুমি কী নিয়ে কাজ করছো — আমি {{language}}-তেও উত্তর দিতে পারি!",
+    tryAskingSkillGuru: "নাহলে এটা জিজ্ঞেস করে দেখো",
+    paywallTitleSkillGuru: "স্কিলগুরুর সাথে চালিয়ে যান?", paywallBody: "আজকের বিনামূল্যে প্রশ্ন শেষ। সীমাহীন কথোপকথনের জন্য প্রিমিয়াম আপগ্রেড করুন!", upgradeToPremium: "প্রিমিয়ামে আপগ্রেড করুন",
     seekhoSignIn: "Seekho অ্যাক্সেস করতে লগইন করুন", curriculumAligned: "পাঠ্যক্রম-ভিত্তিক শিক্ষা", subjects: "বিষয়সমূহ", continueLearning: "শেখা চালিয়ে যান", resumeLearning: "যেখানে ছেড়েছিলেন সেখান থেকে শুরু করুন",
     revisionDue: "রিভিশন করুন!", revisionReady: "ধারণাসমূহ পুনরালোচনার জন্য প্রস্তুত", unlockCurriculum: "সম্পূর্ণ পাঠ্যক্রম আনলক করুন",
     pendingReview: "পর্যালোচনা বাকি", inReview: "পর্যালোচনায়", approved: "অনুমোদিত", rejected: "প্রত্যাখ্যাত", limitReached: "সীমা পৌঁছেছে", limitReachedDesc: "আপনি এই ব্যাটেলের আপলোড সীমায় পৌঁছে গেছেন।",
@@ -767,7 +838,7 @@ const translations: Translations = {
     aiGuruTagline: "ভারতের সবচেয়ে উপকারী AI গুরু",
     menuAiDashboard: "AI ড্যাশবোর্ড", menuAiDashboardSub: "আপনার ব্যক্তিগত AI লার্নিং হাব",
     menuDiscoverAI: "ডিসকভার AI", menuDiscoverAISub: "ক্যারিয়ার, কলেজ ও বৃত্তি আবিষ্কার করুন",
-    menuVidyaGuruCard: "বিদ্যাগুরু AI", menuVidyaGuruCardSub: "আপনার AI শিক্ষকের সাথে কথা বলুন",
+    menuSkillGuruCard: "স্কিলগুরুকে জিজ্ঞাসা করুন", menuSkillGuruCardSub: "রিজিউমে, ইন্টারভিউ ও স্কিলের কোচ",
     menuGenerateLesson: "পাঠ তৈরি করুন", menuGenerateLessonSub: "AI আপনার জন্য সম্পূর্ণ পাঠ তৈরি করে",
     menuMyLessons: "আমার AI পাঠ", menuMyLessonsSub: "পূর্ববর্তী পাঠ পর্যালোচনা করুন",
     menuRevisionReels: "রিভিশন রিলস", menuRevisionReelsSub: "সংক্ষিপ্ত ভিডিও রিভিশন সেশন",
@@ -783,10 +854,10 @@ const translations: Translations = {
     thinkingLabel: "ভাবছি...",
     wantToGoDeeper: "আরও গভীরে যেতে চান?",
     generateLessonAction: "✨ পাঠ তৈরি করুন", chatWithAIAction: "🤖 AI-এর সাথে কথা বলুন",
-    chatWithVidyaGuruAction: "🤖 বিদ্যাগুরুর সাথে কথা বলুন",
+    chatWithSkillGuruAction: "🎯 স্কিলগুরুর সাথে কথা বলুন",
     askAnotherQuestion: "আরেকটি প্রশ্ন করুন",
     dailyLimitTitle: "দৈনিক সীমা শেষ",
-    dailyLimitMessage: "আজকের সব {{count}} বিনামূল্যে প্রশ্ন ব্যবহার হয়ে গেছে। কাল ফিরে আসুন বা প্রিমিয়াম আপগ্রেড করুন।",
+    dailyLimitMessage: "আজকের বিনামূল্যে প্রশ্নের সীমা শেষ। কাল ফিরে আসুন বা প্রিমিয়াম আপগ্রেড করুন।",
     generateFullLessonAction: "✨ সম্পূর্ণ পাঠ তৈরি করুন",
     somethingWentWrong: "কিছু ভুল হয়েছে", tryAgainLabel: "আবার চেষ্টা করুন",
     leftLabel: "বাকি", askAiGuruTitle: "AI গুরুকে জিজ্ঞেস করুন",
@@ -809,6 +880,16 @@ const translations: Translations = {
     modeExplain: "ধারণা বুঝুন", modeNotes: "নোট তৈরি করুন", modeExam: "পরীক্ষার প্রস্তুতি",
     modeDoubt: "সন্দেহ দূর করুন", modeSummarize: "অধ্যায় সারাংশ", modeTip: "দৈনিক পড়ার টিপস",
     modeLanguage: "আমার ভাষায় বুঝিয়ে দিন",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "তোমার পড়াশোনা, দক্ষতা বা সাধারণ জ্ঞান সম্পর্কে যা খুশি খোঁজো",
+    modeDoubtHint: "যা খুশি খোঁজো…", modeExplainHint: "একটি ধারণা ব্যাখ্যা করো…",
+    modeNotesHint: "নোট তৈরি করো…", modeExamHint: "আমাকে প্রস্তুতিতে সাহায্য করো…",
+    modeSummarizeHint: "অধ্যায়ের সারাংশ দাও…", modeTipHint: "আমাকে একটি পড়ার টিপ দাও…",
+    trySearchingFor: "এটি খুঁজে দেখো", searching: "খোঁজা হচ্ছে…",
+    resultsFor: "এর জন্য ফলাফল", relatedSearches: "সম্পর্কিত অনুসন্ধান",
+    newSearch: "নতুন অনুসন্ধান",
+    writeInYourLanguage: "তোমার ভাষায় লেখো — AI সেই ভাষায় উত্তর দেবে",
+    notebook: "নোটবুক", practiceExam: "অনুশীলন পরীক্ষা",
     notebookTitle: "আমার AI নোটবুক", notebookEmpty: "নোটবুক খালি",
     notebookEmptyDesc: "\"নোটবুকে সংরক্ষণ করুন\" চাপ দিয়ে AI উত্তর সংরক্ষণ করুন",
     savedToNotebook: "নোটবুকে সংরক্ষিত", saveToNotebook: "নোটবুকে সংরক্ষণ করুন",
@@ -854,25 +935,10 @@ const translations: Translations = {
     seeTop100: "টপ ১০০ দেখো", showLess: "কম দেখাও",
     yourRank: "তোমার র‌্যাংক", updatedDaily: "দৈনিক আপডেট",
     referralTitle: "রেফার করো & আয় করো", inviteFriendsEarn: "বন্ধুদের আমন্ত্রণ করো, VCoins আয় করো!",
-    totalReferred: "মোট রেফার", completed: "সম্পন্ন",
+    totalReferred: "মোট রেফার",
     yourReferralCode: "তোমার রেফারেল কোড", shareCode: "এই কোড বন্ধুদের সাথে শেয়ার করো।",
     howItWorks: "এটি কীভাবে কাজ করে", referralHistory: "রেফারেল ইতিহাস",
     shareEarn: "শেয়ার করো & আয় করো", pendingLabel: "অপেক্ষমান", joinedLabel: "যোগ দিয়েছে",
-    stepLabel: "ধাপ", moreReferralsToUnlock: "আরো রেফারেল আনলক করতে",
-    nextReward: "পরবর্তী পুরস্কার",
-    vCoinsBalance: "V-Coins ব্যালেন্স", totalEarned: "মোট উপার্জন",
-    totalSpent: "মোট খরচ", thisMonth: "এই মাসে",
-    earnVCoins: "V-Coins উপার্জন করুন", transactionHistory: "লেনদেন ইতিহাস",
-    noTransactionsYet: "এখনো কোনো লেনদেন নেই",
-    noTransactionsSub: "V-Coins উপার্জনের জন্য ভিডিও দেখুন এবং শিখুন!",
-    walletLabel: "ওয়ালেট", leaderboardLabel: "লিডারবোর্ড",
-    seeTop100: "টপ ১০০ দেখুন", showLess: "কম দেখান",
-    yourRank: "আপনার র‌্যাংক", updatedDaily: "দৈনিক আপডেট",
-    referralTitle: "রেফার করুন ও উপার্জন করুন", inviteFriendsEarn: "বন্ধুদের আমন্ত্রণ জানান, VCoins উপার্জন করুন!",
-    totalReferred: "মোট রেফার", completed: "সম্পন্ন",
-    yourReferralCode: "আপনার রেফারেল কোড", shareCode: "এই কোড বন্ধুদের সাথে শেয়ার করুন।",
-    howItWorks: "এটি কীভাবে কাজ করে", referralHistory: "রেফারেল ইতিহাস",
-    shareEarn: "শেয়ার করুন ও উপার্জন করুন", pendingLabel: "অপেক্ষমান", joinedLabel: "যোগ দিয়েছে",
     stepLabel: "ধাপ", moreReferralsToUnlock: "আরো রেফারেল আনলক করতে",
     nextReward: "পরবর্তী পুরস্কার",
   },
@@ -881,7 +947,7 @@ const translations: Translations = {
   ta: {
     home: "முகப்பு", leaderboard: "லீடர்போர்ட்", wallet: "வாலட்",
     settings: "அமைப்புகள்", dashboard: "டாஷ்போர்ட்", aiGuru: "AI குரு",
-    skillBoard: "திறன் பலகை", logout: "வெளியேறு",
+    skillBoard: "திறன் பலகை", myPrizes: "எனது பரிசுகள்", skillBoost: "திறன் மேம்பாடு", logout: "வெளியேறு",
     profileSettings: "சுயவிவர அமைப்புகள்", language: "மொழி",
     changeLanguage: "பயன்பாடு மற்றும் உள்ளடக்க மொழியை மாற்றுக",
     darkTheme: "இருண்ட தீம்", notifications: "அறிவிப்புகள்",
@@ -921,11 +987,17 @@ const translations: Translations = {
     joinNow: "இப்போது சேர்", participate: "பங்கேற்கவும்", reserveSpot: "இடம் முதல்",
     startsSoon: "விரைவில் தொடங்கும்", all: "அனைத்தும்", upcoming: "வரவிருக்கும்",
     aiGuruSubtitle: "உங்கள் தனிப்பட்ட கற்றல் உதவியாளர்", askAnything: "எதையும் கேளுங்கள்", instantAnswers: "உடனடி பதில்கள்", studyHelp: "படிப்பு உதவி", startChatting: "பேசத் தொடங்கு →",
+    dailyChallenge: "தினசரி சவால்", dayStreak: "நாள் தொடர்", dailyStreakQuiz: "தினசரி தொடர் வினாடி வினா", dailyStreakQuizSubtitle: "இன்றைய கேள்விக்கு பதிலளிக்கவும் — உங்கள் தொடரை தக்கவைக்கவும்", playTodaysQuiz: "இன்றைய வினாடி வினாவை விளையாடுங்கள் →",
     premiumFeature: "பிரீமியம் அம்சம்", premiumUnlockMsg: "இந்த அம்சத்தை திறக்க AI Guru Premium க்கு மேம்படுத்துங்கள்.", maybeLater: "பிறகு பார்க்கலாம்", upgrade: "மேம்படுத்து",
     aiClassroom: "உங்கள் தனிப்பட்ட AI வகுப்பறை\nGemini ஆல் இயக்கப்படுகிறது", freeLessonsLeft: "இன்று இலவச பாடங்கள் மீதம்", unlimitedAccess: "வரம்பற்ற பிரீமியம் அணுகல் செயலில்",
     lessonSetup: "பாட அமைப்பு", continueBtn: "தொடரவும் →", fillRequiredFields: "தேவையான தகவல்களை நிரப்பவும்", fillRequiredFieldsDesc: "பாடத்தை தேர்வு செய்து அத்தியாயம் பெயர் உள்ளிடவும்.",
-    vidyaGuruAI: "VidyaGuru AI", personalAiTeacher: "உங்கள் தனிப்பட்ட AI ஆசிரியர்", readyToHelp: "உதவ தயாராக இருக்கிறேன்!", thinking: "யோசிக்கிறேன்...", speaking: "பேசுகிறேன்...", listening: "கேட்கிறேன்...",
-    paywallTitle: "VidyaGuru உடன் தொடரவும்?", paywallBody: "இன்றைய இலவச கேள்வி முடிந்தது. வரம்பற்ற உரையாடலுக்கு பிரீமியம் மேம்படுத்துங்கள்!", upgradeToPremium: "பிரீமியத்திற்கு மேம்படுத்து",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "உங்கள் தனிப்பட்ட AI திறன் பயிற்சியாளர்", readyToHelp: "உதவ தயாராக இருக்கிறேன்!", thinking: "யோசிக்கிறேன்...", speaking: "பேசுகிறேன்...", listening: "கேட்கிறேன்...",
+    // NEW KEY — needs native speaker review
+    respondingIn: "{{lang}}-இல் பதிலளிக்கிறேன்", voiceMessage: "🎤 குரல் செய்தி",
+    askSomethingPlaceholder: "ஏதேனும் கேளுங்கள்...", helloGreet: "வணக்கம்",
+    skillGuruGreeting: "நான் SkillGuru, உங்கள் தனிப்பட்ட AI திறன் பயிற்சியாளர். உங்கள் ரெஸ்யூமே, நேர்காணல் தயாரிப்பு, தொடர்பு திறன், அடிப்படை குறியீட்டு (coding) திறன்கள், மற்றும் குழுப்பணி & நேர மேலாண்மை போன்ற மென்திறன்களில் உதவ முடியும். கீழே ஒரு திறன் பிரிவைத் தேர்ந்து கொள்ளுங்கள் அல்லது நீங்கள் என்ன வேலை செய்கிறீர்கள் என்று கூறுங்கள் — நான் {{language}}-இலும் பதிலளிக்க முடியும்!",
+    tryAskingSkillGuru: "அல்லது இதைக் கேளுங்கள்",
+    paywallTitleSkillGuru: "SkillGuru உடன் தொடரவும்?", paywallBody: "இன்றைய இலவச கேள்வி முடிந்தது. வரம்பற்ற உரையாடலுக்கு பிரீமியம் மேம்படுத்துங்கள்!", upgradeToPremium: "பிரீமியத்திற்கு மேம்படுத்து",
     seekhoSignIn: "Seekho அணுக உள்நுழையவும்", curriculumAligned: "பாடத்திட்டம் சார்ந்த கற்றல்", subjects: "பாடங்கள்", continueLearning: "கற்றலை தொடரவும்", resumeLearning: "நிறுத்திய இடத்திலிருந்து தொடர்",
     revisionDue: "மீட்டுரைவு தேவை!", revisionReady: "கருத்துகள் மதிப்பாய்விற்கு தயார்", unlockCurriculum: "முழு பாடத்திட்டத்தை திறக்கவும்",
     pendingReview: "மதிப்பாய்வு நிலுவையில்", inReview: "மதிப்பாய்வில்", approved: "அனுமதிக்கப்பட்டது", rejected: "நிராகரிக்கப்பட்டது", limitReached: "வரம்பை அடைந்தது", limitReachedDesc: "இந்த போரில் உங்கள் பதிவேற்ற வரம்பை அடைந்தீர்கள்.",
@@ -936,6 +1008,16 @@ const translations: Translations = {
     modeExplain: "கருத்தை விளக்கு", modeNotes: "குறிப்புகள் எழுது", modeExam: "தேர்வு தயாரிப்பு",
     modeDoubt: "சந்தேகம் தீர்", modeSummarize: "அத்தியாயம் சுருக்கம்", modeTip: "தினசரி படிப்பு குறிப்பு",
     modeLanguage: "என் மொழியில் விளக்கு",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "உங்கள் படிப்பு, திறமைகள் அல்லது பொது அறிவு பற்றி எதையும் தேடுங்கள்",
+    modeDoubtHint: "எதையும் தேடுங்கள்…", modeExplainHint: "ஒரு கருத்தை விளக்கு…",
+    modeNotesHint: "குறிப்புகள் தயாரிக்கவும்…", modeExamHint: "தயாராக உதவுங்கள்…",
+    modeSummarizeHint: "அத்தியாயத்தை சுருக்கவும்…", modeTipHint: "ஒரு படிப்பு குறிப்பு கொடுங்கள்…",
+    trySearchingFor: "இதைத் தேடிப் பாருங்கள்", searching: "தேடுகிறது…",
+    resultsFor: "இதற்கான முடிவுகள்", relatedSearches: "தொடர்புடைய தேடல்கள்",
+    newSearch: "புதிய தேடல்",
+    writeInYourLanguage: "உங்கள் மொழியில் எழுதுங்கள் — AI அதே மொழியில் பதிலளிக்கும்",
+    notebook: "நோட்புக்", practiceExam: "பயிற்சி தேர்வு",
     notebookTitle: "என் AI நோட்புக்", notebookEmpty: "நோட்புக் காலியாக உள்ளது",
     savedToNotebook: "நோட்புக்கில் சேமிக்கப்பட்டது", saveToNotebook: "நோட்புக்கில் சேமி",
     viewNotebook: "நோட்புக் பார்", pinned: "பின் செய்யப்பட்டது",
@@ -989,7 +1071,7 @@ const translations: Translations = {
     seeTop100: "டாப் 100 பாருங்கள்", showLess: "குறைவாக காட்டுங்கள்",
     yourRank: "உங்கள் தரவரிசை", updatedDaily: "தினமும் புதுப்பிக்கப்படும்",
     referralTitle: "பரிந்துரை செய் & சம்பாதி", inviteFriendsEarn: "நண்பர்களை அழையுங்கள், VCoins சம்பாதியுங்கள்!",
-    totalReferred: "மொத்த பரிந்துரை", completed: "முடிந்தது",
+    totalReferred: "மொத்த பரிந்துரை",
     yourReferralCode: "உங்கள் பரிந்துரை குறியீடு", shareCode: "இந்த குறியீட்டை நண்பர்களுடன் பகிரவும்.",
     howItWorks: "இது எப்படி வேலை செய்கிறது", referralHistory: "பரிந்துரை வரலாறு",
     shareEarn: "பகிர் & சம்பாதி", pendingLabel: "நிலுவையில்", joinedLabel: "சேர்ந்தனர்",
@@ -1001,7 +1083,7 @@ const translations: Translations = {
   te: {
     home: "హోమ్", leaderboard: "లీడర్‌బోర్డ్", wallet: "వాలెట్",
     settings: "సెట్టింగులు", dashboard: "డాష్‌బోర్డ్", aiGuru: "AI గురు",
-    skillBoard: "స్కిల్ బోర్డ్", logout: "లాగ్అవుట్",
+    skillBoard: "స్కిల్ బోర్డ్", myPrizes: "నా బహుమతులు", skillBoost: "స్కిల్ బూస్ట్", logout: "లాగ్అవుట్",
     profileSettings: "ప్రొఫైల్ సెట్టింగులు", language: "భాష",
     changeLanguage: "యాప్ మరియు కంటెంట్ భాషను మార్చండి",
     darkTheme: "డార్క్ థీమ్", notifications: "నోటిఫికేషన్లు",
@@ -1041,11 +1123,17 @@ const translations: Translations = {
     joinNow: "ఇప్పుడే చేరండి", participate: "పాల్గొనండి", reserveSpot: "సీటు బుక్ చేయండి",
     startsSoon: "త్వరలో ప్రారంభమవుతుంది", all: "అన్నీ", upcoming: "రాబోయే",
     aiGuruSubtitle: "మీ వ్యక్తిగత అభ్యాస సహాయకుడు", askAnything: "ఏదైనా అడగండి", instantAnswers: "తక్షణ సమాధానాలు", studyHelp: "చదువులో సహాయం", startChatting: "చాటింగ్ ప్రారంభించండి →",
+    dailyChallenge: "రోజువారీ సవాలు", dayStreak: "రోజు స్ట్రీక్", dailyStreakQuiz: "డైలీ స్ట్రీక్ క్విజ్", dailyStreakQuizSubtitle: "ఈరోజు ప్రశ్నకు సమాధానం ఇవ్వండి — మీ స్ట్రీక్‌ను కొనసాగించండి", playTodaysQuiz: "ఈరోజు క్విజ్ ఆడండి →",
     premiumFeature: "ప్రీమియం ఫీచర్", premiumUnlockMsg: "ఈ ఫీచర్ అన్‌లాక్ చేయడానికి AI Guru Premium కి అప్‌గ్రేడ్ చేయండి.", maybeLater: "తర్వాత", upgrade: "అప్‌గ్రేడ్",
     aiClassroom: "మీ వ్యక్తిగత AI తరగతిగది\nGemini ద్వారా నడుపబడింది", freeLessonsLeft: "ఈరోజు ఉచిత పాఠాలు మిగిలాయి", unlimitedAccess: "అపరిమిత ప్రీమియం యాక్సెస్ సక్రియంగా ఉంది",
     lessonSetup: "పాఠం సెటప్", continueBtn: "కొనసాగించండి →", fillRequiredFields: "అవసరమైన ఫీల్డ్‌లు పూరించండి", fillRequiredFieldsDesc: "దయచేసి సబ్జెక్ట్ ఎంచుకుని అధ్యాయం పేరు నమోదు చేయండి.",
-    vidyaGuruAI: "VidyaGuru AI", personalAiTeacher: "మీ వ్యక్తిగత AI ఉపాధ్యాయుడు", readyToHelp: "సహాయానికి సిద్ధంగా ఉన్నాను!", thinking: "ఆలోచిస్తున్నాను...", speaking: "మాట్లాడుతున్నాను...", listening: "వింటున్నాను...",
-    paywallTitle: "VidyaGuru తో కొనసాగించాలా?", paywallBody: "ఈరోజు ఉచిత ప్రశ్న ఉపయోగించారు. అపరిమిత సంభాషణల కోసం ప్రీమియం కి అప్‌గ్రేడ్ చేయండి!", upgradeToPremium: "ప్రీమియం కి అప్‌గ్రేడ్ చేయండి",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "మీ వ్యక్తిగత AI స్కిల్ కోచ్", readyToHelp: "సహాయానికి సిద్ధంగా ఉన్నాను!", thinking: "ఆలోచిస్తున్నాను...", speaking: "మాట్లాడుతున్నాను...", listening: "వింటున్నాను...",
+    // NEW KEY — needs native speaker review
+    respondingIn: "{{lang}}లో సమాధానం ఇస్తున్నాను", voiceMessage: "🎤 వాయిస్ మెసేజ్",
+    askSomethingPlaceholder: "ఏదైనా అడగండి...", helloGreet: "నమస్కారం",
+    skillGuruGreeting: "నేను SkillGuru, మీ వ్యక్తిగత AI స్కిల్ కోచ్. మీ రెజ్యూమె, ఇంటర్వ్యూ ప్రిపరేషన్, కమ్యూనికేషన్, కోడింగ్ బేసిక్స్, మరియు టీమ్‌వర్క్ & టైమ్ మేనేజ్‌మెంట్ వంటి సాఫ్ట్ స్కిల్స్‌లో సహాయం చేయగలను. దిగువ నుండి ఒక స్కిల్ ఏరియాను ఎంచుకోండి లేదా మీరు ఏమి చేస్తున్నారో చెప్పండి — నేను {{language}}లో కూడా సమాధానం ఇవ్వగలను!",
+    tryAskingSkillGuru: "లేదా ఇది అడగండి",
+    paywallTitleSkillGuru: "SkillGuru తో కొనసాగించాలా?", paywallBody: "ఈరోజు ఉచిత ప్రశ్న ఉపయోగించారు. అపరిమిత సంభాషణల కోసం ప్రీమియం కి అప్‌గ్రేడ్ చేయండి!", upgradeToPremium: "ప్రీమియం కి అప్‌గ్రేడ్ చేయండి",
     seekhoSignIn: "Seekho యాక్సెస్ చేయడానికి లాగిన్ అవ్వండి", curriculumAligned: "పాఠ్యప్రణాళిక-ఆధారిత అభ్యాసం", subjects: "విషయాలు", continueLearning: "నేర్చుకోవడం కొనసాగించండి", resumeLearning: "మీరు ఆగిన చోట నుండి కొనసాగించండి",
     revisionDue: "సమీక్ష అవసరం!", revisionReady: "భావనలు సమీక్షకు సిద్ధంగా ఉన్నాయి", unlockCurriculum: "పూర్తి పాఠ్యప్రణాళికను అన్‌లాక్ చేయండి",
     pendingReview: "సమీక్ష నిలబడ్డది", inReview: "సమీక్షలో", approved: "ఆమోదించబడింది", rejected: "తిరస్కరించబడింది", limitReached: "పరిమితి చేరుకుంది", limitReachedDesc: "ఈ బ్యాటిల్ కోసం అప్‌లోడ్ పరిమితిని చేరుకున్నారు.",
@@ -1056,6 +1144,16 @@ const translations: Translations = {
     modeExplain: "భావన వివరించండి", modeNotes: "నోట్స్ తయారు చేయండి", modeExam: "పరీక్ష సన్నాహం",
     modeDoubt: "సందేహం నివృత్తి", modeSummarize: "అధ్యాయ సారాంశం", modeTip: "రోజువారీ చదువు చిట్కా",
     modeLanguage: "నా భాషలో వివరించండి",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "మీ చదువు, నైపుణ్యాలు లేదా సాధారణ జ్ఞానం గురించి ఏదైనా వెతకండి",
+    modeDoubtHint: "ఏదైనా వెతకండి…", modeExplainHint: "ఒక భావనను వివరించండి…",
+    modeNotesHint: "నోట్స్ తయారు చేయండి…", modeExamHint: "నన్ను సిద్ధం చేయడంలో సహాయపడండి…",
+    modeSummarizeHint: "అధ్యాయాన్ని సంగ్రహించండి…", modeTipHint: "ఒక చదువు చిట్కా ఇవ్వండి…",
+    trySearchingFor: "దీన్ని వెతకడానికి ప్రయత్నించండి", searching: "వెతుకుతోంది…",
+    resultsFor: "దీని కోసం ఫలితాలు", relatedSearches: "సంబంధిత శోధనలు",
+    newSearch: "కొత్త శోధన",
+    writeInYourLanguage: "మీ భాషలో రాయండి — AI అదే భాషలో సమాధానం ఇస్తుంది",
+    notebook: "నోట్‌బుక్", practiceExam: "ప్రాక్టీస్ పరీక్ష",
     notebookTitle: "నా AI నోట్‌బుక్", notebookEmpty: "నోట్‌బుక్ ఖాళీగా ఉంది",
     savedToNotebook: "నోట్‌బుక్‌లో సేవ్ అయింది", saveToNotebook: "నోట్‌బుక్‌లో సేవ్ చేయండి",
     viewNotebook: "నోట్‌బుక్ చూడండి", pinned: "పిన్ చేయబడింది",
@@ -1109,7 +1207,7 @@ const translations: Translations = {
     seeTop100: "టాప్ 100 చూడండి", showLess: "తక్కువ చూపించు",
     yourRank: "మీ ర్యాంక్", updatedDaily: "రోజూ అప్‌డేట్",
     referralTitle: "రెఫర్ చేయండి & సంపాదించండి", inviteFriendsEarn: "స్నేహితులను ఆహ్వానించండి, VCoins సంపాదించండి!",
-    totalReferred: "మొత్తం రెఫర్", completed: "పూర్తయింది",
+    totalReferred: "మొత్తం రెఫర్",
     yourReferralCode: "మీ రెఫరల్ కోడ్", shareCode: "ఈ కోడ్‌ని స్నేహితులతో పంచుకోండి.",
     howItWorks: "ఇది ఎలా పని చేస్తుంది", referralHistory: "రెఫరల్ చరిత్ర",
     shareEarn: "షేర్ చేయండి & సంపాదించండి", pendingLabel: "పెండింగ్", joinedLabel: "చేరారు",
@@ -1121,7 +1219,7 @@ const translations: Translations = {
   kn: {
     home: "ಮನೆ", leaderboard: "ಲೀಡರ್‌ಬೋರ್ಡ್", wallet: "ವ್ಯಾಲೆಟ್",
     settings: "ಸೆಟ್ಟಿಂಗ್‌ಗಳು", dashboard: "ಡ್ಯಾಶ್‌ಬೋರ್ಡ್", aiGuru: "AI ಗುರು",
-    skillBoard: "ಕೌಶಲ ಬೋರ್ಡ್", logout: "ಲಾಗ್‌ಔಟ್",
+    skillBoard: "ಕೌಶಲ ಬೋರ್ಡ್", myPrizes: "ನನ್ನ ಬಹುಮಾನಗಳು", skillBoost: "ಕೌಶಲ ಬೂಸ್ಟ್", logout: "ಲಾಗ್‌ಔಟ್",
     profileSettings: "ಪ್ರೊಫೈಲ್ ಸೆಟ್ಟಿಂಗ್‌ಗಳು", language: "ಭಾಷೆ",
     changeLanguage: "ಅಪ್ಲಿಕೇಶನ್ ಮತ್ತು ವಿಷಯದ ಭಾಷೆ ಬದಲಾಯಿಸಿ",
     darkTheme: "ಡಾರ್ಕ್ ಥೀಮ್", notifications: "ಅಧಿಸೂಚನೆಗಳು",
@@ -1161,11 +1259,17 @@ const translations: Translations = {
     joinNow: "ಈಗ ಸೇರಿ", participate: "ಭಾಗವಹಿಸಿ", reserveSpot: "ಸ್ಥಾನ ಕಾಯ್ದಿರಿಸಿ",
     startsSoon: "ಶೀಘ್ರದಲ್ಲೇ ಪ್ರಾರಂಭವಾಗುತ್ತದೆ", all: "ಎಲ್ಲಾ", upcoming: "ಮುಂಬರುವ",
     aiGuruSubtitle: "ನಿಮ್ಮ ವೈಯಕ್ತಿಕ ಕಲಿಕೆ ಸಹಾಯಕ", askAnything: "ಯಾವುದನ್ನಾದರೂ ಕೇಳಿ", instantAnswers: "ತಕ್ಷಣದ ಉತ್ತರಗಳು", studyHelp: "ಅಧ್ಯಯನ ಸಹಾಯ", startChatting: "ಚಾಟ್ ಪ್ರಾರಂಭಿಸಿ →",
+    dailyChallenge: "ದೈನಂದಿನ ಸವಾಲು", dayStreak: "ದಿನದ ಸ್ಟ್ರೀಕ್", dailyStreakQuiz: "ಡೈಲಿ ಸ್ಟ್ರೀಕ್ ಕ್ವಿಜ್", dailyStreakQuizSubtitle: "ಇಂದಿನ ಪ್ರಶ್ನೆಗೆ ಉತ್ತರಿಸಿ — ನಿಮ್ಮ ಸ್ಟ್ರೀಕ್ ಅನ್ನು ಮುಂದುವರಿಸಿ", playTodaysQuiz: "ಇಂದಿನ ಕ್ವಿಜ್ ಆಡಿ →",
     premiumFeature: "ಪ್ರೀಮಿಯಂ ವೈಶಿಷ್ಟ್ಯ", premiumUnlockMsg: "ಈ ವೈಶಿಷ್ಟ್ಯ ಅನ್‌ಲಾಕ್ ಮಾಡಲು AI Guru Premium ಗೆ ಅಪ್‌ಗ್ರೇಡ್ ಮಾಡಿ.", maybeLater: "ನಂತರ", upgrade: "ಅಪ್‌ಗ್ರೇಡ್",
     aiClassroom: "ನಿಮ್ಮ ವೈಯಕ್ತಿಕ AI ತರಗತಿ\nGemini ಮೂಲಕ ನಡೆಸಲ್ಪಡುತ್ತಿದೆ", freeLessonsLeft: "ಇಂದು ಉಚಿತ ಪಾಠಗಳು ಉಳಿದಿವೆ", unlimitedAccess: "ಅಮಿತ ಪ್ರೀಮಿಯಂ ಪ್ರವೇಶ ಸಕ್ರಿಯ",
     lessonSetup: "ಪಾಠ ಸೆಟಪ್", continueBtn: "ಮುಂದುವರಿಸಿ →", fillRequiredFields: "ಅಗತ್ಯ ಮಾಹಿತಿ ತುಂಬಿ", fillRequiredFieldsDesc: "ದಯವಿಟ್ಟು ವಿಷಯ ಆಯ್ಕೆ ಮಾಡಿ ಮತ್ತು ಅಧ್ಯಾಯ ಹೆಸರು ನಮೂದಿಸಿ.",
-    vidyaGuruAI: "VidyaGuru AI", personalAiTeacher: "ನಿಮ್ಮ ವೈಯಕ್ತಿಕ AI ಶಿಕ್ಷಕ", readyToHelp: "ಸಹಾಯ ಮಾಡಲು ಸಿದ್ಧ!", thinking: "ಯೋಚಿಸುತ್ತಿದ್ದೇನೆ...", speaking: "ಮಾತನಾಡುತ್ತಿದ್ದೇನೆ...", listening: "ಕೇಳುತ್ತಿದ್ದೇನೆ...",
-    paywallTitle: "VidyaGuru ಜೊತೆ ಮುಂದುವರಿಯಬೇಕೆ?", paywallBody: "ಇಂದಿನ ಉಚಿತ ಪ್ರಶ್ನೆ ಬಳಸಿದ್ದೀರಿ. ಅಮಿತ ಸಂಭಾಷಣೆಗೆ ಪ್ರೀಮಿಯಂ ಅಪ್‌ಗ್ರೇಡ್ ಮಾಡಿ!", upgradeToPremium: "ಪ್ರೀಮಿಯಂ ಗೆ ಅಪ್‌ಗ್ರೇಡ್ ಮಾಡಿ",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "ನಿಮ್ಮ ವೈಯಕ್ತಿಕ AI ಸ್ಕಿಲ್ ಕೋಚ್", readyToHelp: "ಸಹಾಯ ಮಾಡಲು ಸಿದ್ಧ!", thinking: "ಯೋಚಿಸುತ್ತಿದ್ದೇನೆ...", speaking: "ಮಾತನಾಡುತ್ತಿದ್ದೇನೆ...", listening: "ಕೇಳುತ್ತಿದ್ದೇನೆ...",
+    // NEW KEY — needs native speaker review
+    respondingIn: "{{lang}}ನಲ್ಲಿ ಉತ್ತರಿಸುತ್ತಿದ್ದೇನೆ", voiceMessage: "🎤 ವಾಯ್ಸ್ ಮೆಸೇಜ್",
+    askSomethingPlaceholder: "ಏನನ್ನಾದರೂ ಕೇಳಿ...", helloGreet: "ನಮಸ್ಕಾರ",
+    skillGuruGreeting: "ನಾನು SkillGuru, ನಿಮ್ಮ ವೈಯಕ್ತಿಕ AI ಸ್ಕಿಲ್ ಕೋಚ್. ನಿಮ್ಮ ರೆಸ್ಯೂಮ್, ಸಂದರ್ಶನದ ತಯಾರಿ, ಸಂವಹನ, ಕೋಡಿಂಗ್ ಮೂಲಭೂತಗಳು, ಮತ್ತು ತಂಡಕಾರ್ಯ ಹಾಗೂ ಸಮಯ ನಿರ್ವಹಣೆಯಂತಹ ಸಾಫ್ಟ್ ಸ್ಕಿಲ್‌ಗಳಲ್ಲಿ ನಾನು ಸಹಾಯ ಮಾಡಬಲ್ಲೆ. ಕೆಳಗಿನಿಂದ ಒಂದು ಸ್ಕಿಲ್ ಕ್ಷೇತ್ರವನ್ನು ಆಯ್ಕೆಮಾಡಿ ಅಥವಾ ನೀವು ಏನು ಕೆಲಸ ಮಾಡುತ್ತಿದ್ದೀರಿ ಎಂದು ತಿಳಿಸಿ — ನಾನು {{language}}ನಲ್ಲಿಯೂ ಉತ್ತರಿಸಬಲ್ಲೆ!",
+    tryAskingSkillGuru: "ಅಥವಾ ಇದನ್ನು ಕೇಳಿ",
+    paywallTitleSkillGuru: "SkillGuru ಜೊತೆ ಮುಂದುವರಿಯಬೇಕೆ?", paywallBody: "ಇಂದಿನ ಉಚಿತ ಪ್ರಶ್ನೆ ಬಳಸಿದ್ದೀರಿ. ಅಮಿತ ಸಂಭಾಷಣೆಗೆ ಪ್ರೀಮಿಯಂ ಅಪ್‌ಗ್ರೇಡ್ ಮಾಡಿ!", upgradeToPremium: "ಪ್ರೀಮಿಯಂ ಗೆ ಅಪ್‌ಗ್ರೇಡ್ ಮಾಡಿ",
     seekhoSignIn: "Seekho ಪ್ರವೇಶಿಸಲು ಲಾಗಿನ್ ಮಾಡಿ", curriculumAligned: "ಪಠ್ಯಕ್ರಮ-ಆಧಾರಿತ ಕಲಿಕೆ", subjects: "ವಿಷಯಗಳು", continueLearning: "ಕಲಿಕೆ ಮುಂದುವರಿಸಿ", resumeLearning: "ನಿಲ್ಲಿಸಿದ ಕಡೆಯಿಂದ ಪ್ರಾರಂಭಿಸಿ",
     revisionDue: "ಪುನರಾವರ್ತನೆ ಬೇಕು!", revisionReady: "ಪರಿಕಲ್ಪನೆಗಳು ಮರು ಪರಿಶೀಲನೆಗೆ ಸಿದ್ಧ", unlockCurriculum: "ಸಂಪೂರ್ಣ ಪಠ್ಯಕ್ರಮ ಅನ್‌ಲಾಕ್ ಮಾಡಿ",
     pendingReview: "ಪರಿಶೀಲನೆ ಬಾಕಿ", inReview: "ಪರಿಶೀಲನೆಯಲ್ಲಿ", approved: "ಅನುಮೋದಿಸಲಾಗಿದೆ", rejected: "ತಿರಸ್ಕರಿಸಲಾಗಿದೆ", limitReached: "ಮಿತಿ ತಲುಪಿದೆ", limitReachedDesc: "ಈ ಬ್ಯಾಟಲ್‌ಗೆ ಅಪ್‌ಲೋಡ್ ಮಿತಿ ತಲುಪಿದ್ದೀರಿ.",
@@ -1176,6 +1280,16 @@ const translations: Translations = {
     modeExplain: "ಪರಿಕಲ್ಪನೆ ವಿವರಿಸಿ", modeNotes: "ಟಿಪ್ಪಣಿಗಳು ಮಾಡಿ", modeExam: "ಪರೀಕ್ಷಾ ತಯಾರಿ",
     modeDoubt: "ಸಂಶಯ ನಿವಾರಣೆ", modeSummarize: "ಅಧ್ಯಾಯ ಸಾರಾಂಶ", modeTip: "ದೈನಂದಿನ ಅಧ್ಯಯನ ಸಲಹೆ",
     modeLanguage: "ನನ್ನ ಭಾಷೆಯಲ್ಲಿ ವಿವರಿಸಿ",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "ನಿಮ್ಮ ಅಧ್ಯಯನ, ಕೌಶಲ್ಯ ಅಥವಾ ಸಾಮಾನ್ಯ ಜ್ಞಾನದ ಬಗ್ಗೆ ಏನನ್ನಾದರೂ ಹುಡುಕಿ",
+    modeDoubtHint: "ಏನನ್ನಾದರೂ ಹುಡುಕಿ…", modeExplainHint: "ಒಂದು ಪರಿಕಲ್ಪನೆಯನ್ನು ವಿವರಿಸಿ…",
+    modeNotesHint: "ನೋಟ್ಸ್ ತಯಾರಿಸಿ…", modeExamHint: "ತಯಾರಿಗೆ ಸಹಾಯ ಮಾಡಿ…",
+    modeSummarizeHint: "ಅಧ್ಯಾಯವನ್ನು ಸಂಗ್ರಹಿಸಿ…", modeTipHint: "ಅಧ್ಯಯನ ಸಲಹೆ ನೀಡಿ…",
+    trySearchingFor: "ಇದನ್ನು ಹುಡುಕಲು ಪ್ರಯತ್ನಿಸಿ", searching: "ಹುಡುಕುತ್ತಿದೆ…",
+    resultsFor: "ಇದಕ್ಕಾಗಿ ಫಲಿತಾಂಶಗಳು", relatedSearches: "ಸಂಬಂಧಿತ ಹುಡುಕಾಟಗಳು",
+    newSearch: "ಹೊಸ ಹುಡುಕಾಟ",
+    writeInYourLanguage: "ನಿಮ್ಮ ಭಾಷೆಯಲ್ಲಿ ಬರೆಯಿರಿ — AI ಅದೇ ಭಾಷೆಯಲ್ಲಿ ಉತ್ತರಿಸುತ್ತದೆ",
+    notebook: "ನೋಟ್‌ಬುಕ್", practiceExam: "ಅಭ್ಯಾಸ ಪರೀಕ್ಷೆ",
     notebookTitle: "ನನ್ನ AI ನೋಟ್‌ಬುಕ್", notebookEmpty: "ನೋಟ್‌ಬುಕ್ ಖಾಲಿಯಾಗಿದೆ",
     savedToNotebook: "ನೋಟ್‌ಬುಕ್‌ಗೆ ಉಳಿಸಲಾಗಿದೆ", saveToNotebook: "ನೋಟ್‌ಬುಕ್‌ಗೆ ಉಳಿಸಿ",
     viewNotebook: "ನೋಟ್‌ಬುಕ್ ನೋಡಿ", pinned: "ಪಿನ್ ಮಾಡಲಾಗಿದೆ",
@@ -1229,7 +1343,7 @@ const translations: Translations = {
     seeTop100: "ಟಾಪ್ 100 ನೋಡಿ", showLess: "ಕಡಿಮೆ ತೋರಿಸಿ",
     yourRank: "ನಿಮ್ಮ ಶ್ರೇಯಾಂಕ", updatedDaily: "ದೈನಂದಿನ ನವೀಕರಣ",
     referralTitle: "ಉಲ್ಲೇಖಿಸಿ & ಗಳಿಸಿ", inviteFriendsEarn: "ಸ್ನೇಹಿತರನ್ನು ಆಹ್ವಾನಿಸಿ, VCoins ಗಳಿಸಿ!",
-    totalReferred: "ಒಟ್ಟು ಉಲ್ಲೇಖ", completed: "ಪೂರ್ಣಗೊಂಡಿದೆ",
+    totalReferred: "ಒಟ್ಟು ಉಲ್ಲೇಖ",
     yourReferralCode: "ನಿಮ್ಮ ರೆಫರಲ್ ಕೋಡ್", shareCode: "ಈ ಕೋಡ್ ಅನ್ನು ಸ್ನೇಹಿತರೊಂದಿಗೆ ಹಂಚಿ.",
     howItWorks: "ಇದು ಹೇಗೆ ಕೆಲಸ ಮಾಡುತ್ತದೆ", referralHistory: "ರೆಫರಲ್ ಇತಿಹಾಸ",
     shareEarn: "ಹಂಚಿ & ಗಳಿಸಿ", pendingLabel: "ಬಾಕಿ", joinedLabel: "ಸೇರಿದ್ದಾರೆ",
@@ -1241,7 +1355,7 @@ const translations: Translations = {
   ml: {
     home: "ഹോം", leaderboard: "ലീഡർബോർഡ്", wallet: "വാലറ്റ്",
     settings: "ക്രമീകരണങ്ങൾ", dashboard: "ഡാഷ്‌ബോർഡ്", aiGuru: "AI ഗുരു",
-    skillBoard: "സ്കിൽ ബോർഡ്", logout: "ലോഗ്ഔട്ട്",
+    skillBoard: "സ്കിൽ ബോർഡ്", myPrizes: "എന്റെ സമ്മാനങ്ങൾ", skillBoost: "സ്കിൽ ബൂസ്റ്റ്", logout: "ലോഗ്ഔട്ട്",
     profileSettings: "പ്രൊഫൈൽ ക്രമീകരണങ്ങൾ", language: "ഭാഷ",
     changeLanguage: "ആപ്പ് & ഉള്ളടക്ക ഭാഷ മാറ്റുക",
     darkTheme: "ഡാർക്ക് തീം", notifications: "അറിയിപ്പുകൾ",
@@ -1281,11 +1395,17 @@ const translations: Translations = {
     joinNow: "ഇപ്പോൾ ചേരുക", participate: "പങ്കെടുക്കുക", reserveSpot: "സ്ഥലം ബുക്ക് ചെയ്യുക",
     startsSoon: "ഉടൻ ആരംഭിക്കും", all: "എല്ലാം", upcoming: "വരാനിരിക്കുന്നത്",
     aiGuruSubtitle: "നിങ്ങളുടെ വ്യക്തിഗത പഠന സഹായി", askAnything: "എന്തും ചോദിക്കൂ", instantAnswers: "തൽക്ഷണ ഉത്തരങ്ങൾ", studyHelp: "പഠന സഹായം", startChatting: "ചാറ്റ് ആരംഭിക്കൂ →",
+    dailyChallenge: "ദിന വെല്ലുവിളി", dayStreak: "ദിന സ്ട്രീക്", dailyStreakQuiz: "ഡെയ്‌ലി സ്ട്രീക് ക്വിസ്", dailyStreakQuizSubtitle: "ഇന്നത്തെ ചോദ്യത്തിന് ഉത്തരം നൽകൂ — നിങ്ങളുടെ സ്ട്രീക് നിലനിർത്തൂ", playTodaysQuiz: "ഇന്നത്തെ ക്വിസ് കളിക്കൂ →",
     premiumFeature: "പ്രീമിയം ഫീച്ചർ", premiumUnlockMsg: "ഈ ഫീച്ചർ അൺലോക്ക് ചെയ്യാൻ AI Guru Premium ലേക്ക് അപ്‌ഗ്രേഡ് ചെയ്യൂ.", maybeLater: "പിന്നീട്", upgrade: "അപ്‌ഗ്രേഡ്",
     aiClassroom: "നിങ്ങളുടെ വ്യക്തിഗത AI ക്ലാസ്‌റൂം\nGemini ഉപയോഗിച്ച് പ്രവർത്തിക്കുന്നു", freeLessonsLeft: "ഇന്ന് ഉള്ള സൗജന്യ പാഠങ്ങൾ ബാക്കി", unlimitedAccess: "പരിധിയില്ലാത്ത പ്രീമിയം ആക്‌സസ് സജീവം",
     lessonSetup: "പാഠ സജ്ജീകരണം", continueBtn: "തുടരുക →", fillRequiredFields: "ആവശ്യമായ ഫീൽഡുകൾ പൂരിപ്പിക്കൂ", fillRequiredFieldsDesc: "ദയവായി വിഷയം തിരഞ്ഞെടുക്കുക, അദ്ധ്യായ നാമം നൽകുക.",
-    vidyaGuruAI: "VidyaGuru AI", personalAiTeacher: "നിങ്ങളുടെ വ്യക്തിഗത AI അദ്ധ്യാപകൻ", readyToHelp: "സഹായിക്കാൻ തയ്യാർ!", thinking: "ആലോചിക്കുന്നു...", speaking: "സംസാരിക്കുന്നു...", listening: "ശ്രദ്ധിക്കുന്നു...",
-    paywallTitle: "VidyaGuru ഉപയോഗിച്ച് തുടരണോ?", paywallBody: "ഇന്നത്തെ സൗജന്യ ചോദ്യം ഉപയോഗിച്ചു. പരിധിയില്ലാത്ത സംഭാഷണത്തിന് പ്രീമിയം അപ്‌ഗ്രേഡ് ചെയ്യൂ!", upgradeToPremium: "പ്രീമിയത്തിലേക്ക് അപ്‌ഗ്രേഡ് ചെയ്യൂ",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "നിങ്ങളുടെ വ്യക്തിഗത AI സ്കിൽ കോച്ച്", readyToHelp: "സഹായിക്കാൻ തയ്യാർ!", thinking: "ആലോചിക്കുന്നു...", speaking: "സംസാരിക്കുന്നു...", listening: "ശ്രദ്ധിക്കുന്നു...",
+    // NEW KEY — needs native speaker review
+    respondingIn: "{{lang}} ൽ മറുപടി നൽകുന്നു", voiceMessage: "🎤 വോയ്സ് സന്ദേശം",
+    askSomethingPlaceholder: "എന്തെങ്കിലും ചോദിക്കൂ...", helloGreet: "നമസ്കാരം",
+    skillGuruGreeting: "ഞാൻ SkillGuru, നിങ്ങളുടെ വ്യക്തിഗത AI സ്കിൽ കോച്ച്. നിങ്ങളുടെ റെസ്യൂമെ, ഇന്റർവ്യൂ തയ്യാറെടുപ്പ്, ആശയവിനിമയം, കോഡിംഗ് അടിസ്ഥാനങ്ങൾ, ടീംവർക്ക്, സമയ മാനേജ്മെന്റ് പോലുള്ള സോഫ്റ്റ് സ്കിൽസ് എന്നിവയിൽ സഹായിക്കാൻ കഴിയും. താഴെ നിന്ന് ഒരു സ്കിൽ ഏരിയ തിരഞ്ഞെടുക്കൂ അല്ലെങ്കിൽ നിങ്ങൾ എന്തിലാണ് പ്രവർത്തിക്കുന്നതെന്ന് പറയൂ — എനിക്ക് {{language}} ലും മറുപടി നൽകാൻ കഴിയും!",
+    tryAskingSkillGuru: "അല്ലെങ്കിൽ ഇത് ചോദിക്കൂ",
+    paywallTitleSkillGuru: "SkillGuru ഉപയോഗിച്ച് തുടരണോ?", paywallBody: "ഇന്നത്തെ സൗജന്യ ചോദ്യം ഉപയോഗിച്ചു. പരിധിയില്ലാത്ത സംഭാഷണത്തിന് പ്രീമിയം അപ്‌ഗ്രേഡ് ചെയ്യൂ!", upgradeToPremium: "പ്രീമിയത്തിലേക്ക് അപ്‌ഗ്രേഡ് ചെയ്യൂ",
     seekhoSignIn: "Seekho ആക്‌സസ് ചെയ്യാൻ ലോഗിൻ ചെയ്യൂ", curriculumAligned: "പാഠ്യക്രമ-അടിസ്ഥാനിത പഠനം", subjects: "വിഷയങ്ങൾ", continueLearning: "പഠിക്കൽ തുടരൂ", resumeLearning: "നിർത്തിയ ഇടത്ത് നിന്ന് തുടരുക",
     revisionDue: "റിവിഷൻ വേണം!", revisionReady: "ആശയങ്ങൾ അവലോകനത്തിന് തയ്യാർ", unlockCurriculum: "പൂർണ്ണ പാഠ്യക്രമം അൺലോക്ക് ചെയ്യൂ",
     pendingReview: "അവലോകനം ബാക്കി", inReview: "അവലോകനത്തിൽ", approved: "അംഗീകരിച്ചു", rejected: "നിരസിച്ചു", limitReached: "പരിധി എത്തി", limitReachedDesc: "ഈ ബാറ്റിലിനായുള്ള അപ്‌ലോഡ് പരിധി കഴിഞ്ഞു.",
@@ -1296,6 +1416,16 @@ const translations: Translations = {
     modeExplain: "ആശയം വിശദീകരിക്കൂ", modeNotes: "നോട്ടുകൾ ഉണ്ടാക്കൂ", modeExam: "പരീക്ഷ തയ്യാറെടുക്കൽ",
     modeDoubt: "സംശയം തീർക്കൂ", modeSummarize: "അധ്യായ സംഗ്രഹം", modeTip: "ദൈനന്ദിന പഠന ടിപ്",
     modeLanguage: "എന്റെ ഭാഷയിൽ വിശദീകരിക്കൂ",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "നിങ്ങളുടെ പഠനം, കഴിവുകൾ അല്ലെങ്കിൽ പൊതുവിജ്ഞാനത്തെക്കുറിച്ച് എന്തും തിരയുക",
+    modeDoubtHint: "എന്തും തിരയുക…", modeExplainHint: "ഒരു ആശയം വിശദീകരിക്കൂ…",
+    modeNotesHint: "നോട്ടുകൾ തയ്യാറാക്കൂ…", modeExamHint: "തയ്യാറെടുപ്പിന് സഹായിക്കൂ…",
+    modeSummarizeHint: "അധ്യായം സംഗ്രഹിക്കൂ…", modeTipHint: "ഒരു പഠന ടിപ്പ് നൽകൂ…",
+    trySearchingFor: "ഇത് തിരയാൻ ശ്രമിക്കുക", searching: "തിരയുന്നു…",
+    resultsFor: "ഇതിനായുള്ള ഫലങ്ങൾ", relatedSearches: "ബന്ധപ്പെട്ട തിരയലുകൾ",
+    newSearch: "പുതിയ തിരയൽ",
+    writeInYourLanguage: "നിങ്ങളുടെ ഭാഷയിൽ എഴുതുക — AI അതേ ഭാഷയിൽ മറുപടി നൽകും",
+    notebook: "നോട്ട്ബുക്ക്", practiceExam: "പരിശീലന പരീക്ഷ",
     notebookTitle: "എന്റെ AI നോട്ട്ബുക്ക്", notebookEmpty: "നോട്ട്ബുക്ക് ശൂന്യം",
     savedToNotebook: "നോട്ട്ബുക്കിൽ സേവ് ചെയ്തു", saveToNotebook: "നോട്ട്ബുക്കിൽ സേവ് ചെയ്യൂ",
     viewNotebook: "നോട്ട്ബുക്ക് കാണൂ", pinned: "പിൻ ചെയ്തു",
@@ -1336,7 +1466,7 @@ const translations: Translations = {
     seeTop100: "ടോപ്പ് 100 കാണൂ", showLess: "കുറവ് കാണൂ",
     yourRank: "നിങ്ങളുടെ റാങ്ക്", updatedDaily: "ദൈനംദിന അപ്‌ഡേറ്റ്",
     referralTitle: "റഫർ ചെയ്ത് നേടൂ", inviteFriendsEarn: "സുഹൃത്തുക്കളെ ക്ഷണിക്കൂ, VCoins നേടൂ!",
-    totalReferred: "ആകെ റഫർ", completed: "പൂർത്തിയായി",
+    totalReferred: "ആകെ റഫർ",
     yourReferralCode: "നിങ്ങളുടെ റഫറൽ കോഡ്", shareCode: "ഈ കോഡ് സുഹൃത്തുക്കളുമായി പങ്കിടൂ.",
     howItWorks: "ഇത് എങ്ങനെ പ്രവർത്തിക്കുന്നു", referralHistory: "റഫറൽ ചരിത്രം",
     shareEarn: "ഷെയർ ചെയ്ത് നേടൂ", pendingLabel: "കാത്തിരിക്കുന്നു", joinedLabel: "ചേർന്നു",
@@ -1348,7 +1478,7 @@ const translations: Translations = {
   mr: {
     home: "मुख्यपृष्ठ", leaderboard: "लीडरबोर्ड", wallet: "पाकीट",
     settings: "सेटिंग्ज", dashboard: "डॅशबोर्ड", aiGuru: "AI गुरू",
-    skillBoard: "कौशल्य बोर्ड", logout: "लॉगआउट",
+    skillBoard: "कौशल्य बोर्ड", myPrizes: "माझी बक्षिसे", skillBoost: "कौशल्य बूस्ट", logout: "लॉगआउट",
     profileSettings: "प्रोफाईल सेटिंग्ज", language: "भाषा",
     changeLanguage: "अॅप आणि सामग्रीची भाषा बदला",
     darkTheme: "डार्क थीम", notifications: "सूचना",
@@ -1388,11 +1518,17 @@ const translations: Translations = {
     joinNow: "आत्ता सामील व्हा", participate: "भाग घ्या", reserveSpot: "जागा राखून ठेवा",
     startsSoon: "लवकरच सुरू होईल", all: "सर्व", upcoming: "येणारे",
     aiGuruSubtitle: "तुमचा वैयक्तिक शिक्षण सहाय्यक", askAnything: "काहीही विचारा", instantAnswers: "तत्काळ उत्तरे", studyHelp: "अभ्यासात मदत", startChatting: "चॅट सुरू करा →",
+    dailyChallenge: "दैनंदिन आव्हान", dayStreak: "दिवसाची स्ट्रीक", dailyStreakQuiz: "डेली स्ट्रीक क्विझ", dailyStreakQuizSubtitle: "आजच्या प्रश्नाचे उत्तर द्या — तुमची स्ट्रीक कायम ठेवा", playTodaysQuiz: "आजचा क्विझ खेळा →",
     premiumFeature: "प्रीमियम वैशिष्ट्य", premiumUnlockMsg: "हे वैशिष्ट्य अनलॉक करण्यासाठी AI Guru Premium अपग्रेड करा.", maybeLater: "नंतर", upgrade: "अपग्रेड करा",
     aiClassroom: "तुमचा वैयक्तिक AI वर्गखोली\nGemini द्वारे चालवले", freeLessonsLeft: "आजचे मोफत धडे बाकी", unlimitedAccess: "असीमित प्रीमियम ऍक्सेस सक्रिय",
     lessonSetup: "धडा सेटअप", continueBtn: "पुढे जा →", fillRequiredFields: "आवश्यक माहिती भरा", fillRequiredFieldsDesc: "कृपया विषय निवडा आणि अध्यायाचे नाव टाका.",
-    vidyaGuruAI: "VidyaGuru AI", personalAiTeacher: "तुमचे वैयक्तिक AI शिक्षक", readyToHelp: "मदत करण्यासाठी तयार!", thinking: "विचार करतोय...", speaking: "बोलतोय...", listening: "ऐकतोय...",
-    paywallTitle: "VidyaGuru सोबत चालू ठेवायचे?", paywallBody: "आजचा मोफत प्रश्न वापरला. असीमित संभाषणासाठी प्रीमियम अपग्रेड करा!", upgradeToPremium: "प्रीमियमवर अपग्रेड करा",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "तुमचे वैयक्तिक AI स्किल कोच", readyToHelp: "मदत करण्यासाठी तयार!", thinking: "विचार करतोय...", speaking: "बोलतोय...", listening: "ऐकतोय...",
+    // NEW KEY — needs native speaker review
+    respondingIn: "{{lang}} मध्ये उत्तर देत आहे", voiceMessage: "🎤 व्हॉइस मेसेज",
+    askSomethingPlaceholder: "काहीही विचारा...", helloGreet: "नमस्कार",
+    skillGuruGreeting: "मी SkillGuru, तुमचे वैयक्तिक AI स्किल कोच. मी तुम्हाला रिज्युमे, मुलाखतीची तयारी, संवाद कौशल्य, कोडिंगची मूलतत्त्वे, आणि टीमवर्क व वेळ व्यवस्थापन यासारख्या सॉफ्ट स्किल्समध्ये मदत करू शकतो. खालून एक स्किल क्षेत्र निवडा किंवा तुम्ही कशावर काम करत आहात ते सांगा — मी {{language}} मध्येही उत्तर देऊ शकतो!",
+    tryAskingSkillGuru: "किंवा हे विचारून पहा",
+    paywallTitleSkillGuru: "SkillGuru सोबत चालू ठेवायचे?", paywallBody: "आजचा मोफत प्रश्न वापरला. असीमित संभाषणासाठी प्रीमियम अपग्रेड करा!", upgradeToPremium: "प्रीमियमवर अपग्रेड करा",
     seekhoSignIn: "Seekho ऍक्सेस करण्यासाठी लॉगिन करा", curriculumAligned: "अभ्यासक्रम-आधारित शिक्षण", subjects: "विषय", continueLearning: "शिकणे चालू ठेवा", resumeLearning: "सोडलेल्या ठिकाणाहून सुरू करा",
     revisionDue: "उजळणी करा!", revisionReady: "संकल्पना पुनरावलोकनासाठी तयार", unlockCurriculum: "पूर्ण अभ्यासक्रम अनलॉक करा",
     pendingReview: "पुनरावलोकन प्रतीक्षेत", inReview: "पुनरावलोकनात", approved: "मंजूर", rejected: "नाकारले", limitReached: "मर्यादा पोहोचली", limitReachedDesc: "तुम्ही या बॅटलची अपलोड मर्यादा गाठली आहे.",
@@ -1403,6 +1539,16 @@ const translations: Translations = {
     modeExplain: "संकल्पना समजावा", modeNotes: "नोट्स तयार करा", modeExam: "परीक्षेची तयारी",
     modeDoubt: "शंका निरसन", modeSummarize: "प्रकरण सारांश", modeTip: "दैनंदिन अभ्यास टिप",
     modeLanguage: "माझ्या भाषेत समजावा",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "तुमच्या अभ्यास, कौशल्ये किंवा सामान्य ज्ञानाबद्दल काहीही शोधा",
+    modeDoubtHint: "काहीही शोधा…", modeExplainHint: "एक संकल्पना समजावा…",
+    modeNotesHint: "नोट्स तयार करा…", modeExamHint: "तयारीसाठी मदत करा…",
+    modeSummarizeHint: "धड्याचा सारांश द्या…", modeTipHint: "अभ्यासाची एक टिप द्या…",
+    trySearchingFor: "हे शोधण्याचा प्रयत्न करा", searching: "शोधत आहे…",
+    resultsFor: "यासाठी परिणाम", relatedSearches: "संबंधित शोध",
+    newSearch: "नवीन शोध",
+    writeInYourLanguage: "तुमच्या भाषेत लिहा — AI त्याच भाषेत उत्तर देईल",
+    notebook: "नोटबुक", practiceExam: "सराव परीक्षा",
     notebookTitle: "माझी AI नोटबुक", notebookEmpty: "नोटबुक रिकामी आहे",
     savedToNotebook: "नोटबुकमध्ये जतन केले", saveToNotebook: "नोटबुकमध्ये जतन करा",
     viewNotebook: "नोटबुक पहा", pinned: "पिन केलेले",
@@ -1443,7 +1589,7 @@ const translations: Translations = {
     seeTop100: "टॉप 100 पाहा", showLess: "कमी दाखवा",
     yourRank: "तुमची रँक", updatedDaily: "दररोज अपडेट",
     referralTitle: "रेफर करा & कमवा", inviteFriendsEarn: "मित्रांना आमंत्रित करा, VCoins कमवा!",
-    totalReferred: "एकूण रेफर", completed: "पूर्ण",
+    totalReferred: "एकूण रेफर",
     yourReferralCode: "तुमचा रेफरल कोड", shareCode: "हा कोड मित्रांसोबत शेअर करा.",
     howItWorks: "हे कसे काम करते", referralHistory: "रेफरल इतिहास",
     shareEarn: "शेअर करा & कमवा", pendingLabel: "प्रलंबित", joinedLabel: "जोडले",
@@ -1455,7 +1601,7 @@ const translations: Translations = {
   gu: {
     home: "હોમ", leaderboard: "લીડરબોર્ડ", wallet: "વૉલેટ",
     settings: "સેટિંગ્સ", dashboard: "ડૅશબોર્ડ", aiGuru: "AI ગુરુ",
-    skillBoard: "કૌશલ્ય બોર્ડ", logout: "લૉગઆઉટ",
+    skillBoard: "કૌશલ્ય બોર્ડ", myPrizes: "મારા ઈનામો", skillBoost: "કૌશલ્ય બૂસ્ટ", logout: "લૉગઆઉટ",
     profileSettings: "પ્રોફાઇલ સેટિંગ્સ", language: "ભાષા",
     changeLanguage: "એપ અને સામગ્રીની ભાષા બદલો",
     darkTheme: "ડાર્ક થીમ", notifications: "સૂચનાઓ",
@@ -1495,11 +1641,17 @@ const translations: Translations = {
     joinNow: "હવે જોડાઓ", participate: "ભાગ લો", reserveSpot: "સ્થાન અનામત કરો",
     startsSoon: "ટૂંક સમયમાં શરૂ", all: "બધા", upcoming: "આગામી",
     aiGuruSubtitle: "તમારો વ્યક્તિગત શિક્ષણ સહાયક", askAnything: "ગમે તે પૂછો", instantAnswers: "તત્કાળ જવાબો", studyHelp: "અભ્યાસ સહાય", startChatting: "ચેટ શરૂ કરો →",
+    dailyChallenge: "દૈનિક પડકાર", dayStreak: "દિવસની સ્ટ્રીક", dailyStreakQuiz: "ડેઇલી સ્ટ્રીક ક્વિઝ", dailyStreakQuizSubtitle: "આજના પ્રશ્નનો જવાબ આપો — તમારી સ્ટ્રીક જાળવી રાખો", playTodaysQuiz: "આજની ક્વિઝ રમો →",
     premiumFeature: "પ્રીમિયમ સુવિધા", premiumUnlockMsg: "આ સુવિધા અનલૉક કરવા AI Guru Premium અપગ્રેડ કરો.", maybeLater: "પછી", upgrade: "અપગ્રેડ",
     aiClassroom: "તમારો વ્યક્તિગત AI ક્લાસ\nGemini દ્વારા સંચાલિત", freeLessonsLeft: "આજના મફત પાઠ બાકી", unlimitedAccess: "અમર્યાદિત પ્રીમિયમ ઍક્સેસ સક્રિય",
     lessonSetup: "પાઠ સેટઅપ", continueBtn: "ચાલુ રાખો →", fillRequiredFields: "જરૂરી માહિતી ભરો", fillRequiredFieldsDesc: "કૃપા કરીને વિષય પસંદ કરો અને અધ્યાયનું નામ દાખલ કરો.",
-    vidyaGuruAI: "VidyaGuru AI", personalAiTeacher: "તમારા વ્યક્તિગત AI શિક્ષક", readyToHelp: "મદદ માટે તૈયાર!", thinking: "વિચારી રહ્યો છું...", speaking: "બોલી રહ્યો છું...", listening: "સાંભળી રહ્યો છું...",
-    paywallTitle: "VidyaGuru સાથે ચાલુ રાખો?", paywallBody: "આજનો મફત પ્રશ્ન વાપર્યો. અમર્યાદિત વાર્તાલાપ માટે પ્રીમિયમ અપગ્રેડ કરો!", upgradeToPremium: "પ્રીમિયમ પર અપગ્રેડ કરો",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "તમારા વ્યક્તિગત AI સ્કિલ કોચ", readyToHelp: "મદદ માટે તૈયાર!", thinking: "વિચારી રહ્યો છું...", speaking: "બોલી રહ્યો છું...", listening: "સાંભળી રહ્યો છું...",
+    // NEW KEY — needs native speaker review
+    respondingIn: "{{lang}} માં જવાબ આપી રહ્યો છું", voiceMessage: "🎤 વોઇસ મેસેજ",
+    askSomethingPlaceholder: "કંઈપણ પૂછો...", helloGreet: "નમસ્તે",
+    skillGuruGreeting: "હું SkillGuru છું, તમારા વ્યક્તિગત AI સ્કિલ કોચ. હું તમારા રિઝ્યુમ, ઇન્ટરવ્યૂની તૈયારી, કમ્યુનિકેશન, કોડિંગની પાયાની બાબતો, અને ટીમવર્ક તથા સમય વ્યવસ્થાપન જેવા સોફ્ટ સ્કિલ્સમાં મદદ કરી શકું છું. નીચેથી એક સ્કિલ ક્ષેત્ર પસંદ કરો અથવા તમે શું કરી રહ્યા છો તે જણાવો — હું {{language}} માં પણ જવાબ આપી શકું છું!",
+    tryAskingSkillGuru: "અથવા આ પૂછી જુઓ",
+    paywallTitleSkillGuru: "SkillGuru સાથે ચાલુ રાખો?", paywallBody: "આજનો મફત પ્રશ્ન વાપર્યો. અમર્યાદિત વાર્તાલાપ માટે પ્રીમિયમ અપગ્રેડ કરો!", upgradeToPremium: "પ્રીમિયમ પર અપગ્રેડ કરો",
     seekhoSignIn: "Seekho ઍક્સેસ કરવા લૉગિન કરો", curriculumAligned: "અભ્યાસક્રમ-આધારિત શિક્ષણ", subjects: "વિષયો", continueLearning: "શીખવાનું ચાલુ રાખો", resumeLearning: "છોડ્યા ત્યાંથી ચાલુ કરો",
     revisionDue: "પુનઃ અભ્યાસ કરો!", revisionReady: "ખ્યાલો સમીક્ષા માટે તૈયાર", unlockCurriculum: "સંપૂર્ણ અભ્યાસક્રમ અનલૉક કરો",
     pendingReview: "સમીક્ષા બાકી", inReview: "સમીક્ષામાં", approved: "મંજૂર", rejected: "નામંજૂર", limitReached: "મર્યાદા પહોંચી", limitReachedDesc: "તમે આ બૅટલ માટે અપલોડ મર્યાદા પૂરી કરી દીધી.",
@@ -1510,6 +1662,16 @@ const translations: Translations = {
     modeExplain: "વિભાવના સમજાવો", modeNotes: "નોટ્સ બનાવો", modeExam: "પરીક્ષાની તૈયારી",
     modeDoubt: "શંકા દૂર કરો", modeSummarize: "પ્રકરણ સારાંશ", modeTip: "રોજ નો અભ્યાસ ટિપ",
     modeLanguage: "મારી ભાષામાં સમજાવો",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "તમારા અભ્યાસ, કૌશલ્યો અથવા સામાન્ય જ્ઞાન વિશે કંઈપણ શોધો",
+    modeDoubtHint: "કંઈપણ શોધો…", modeExplainHint: "એક ખ્યાલ સમજાવો…",
+    modeNotesHint: "નોંધ બનાવો…", modeExamHint: "તૈયારીમાં મદદ કરો…",
+    modeSummarizeHint: "પ્રકરણનો સારાંશ આપો…", modeTipHint: "અભ્યાસ માટે એક ટિપ આપો…",
+    trySearchingFor: "આ શોધવાનો પ્રયાસ કરો", searching: "શોધી રહ્યું છે…",
+    resultsFor: "આના માટેના પરિણામો", relatedSearches: "સંબંધિત શોધો",
+    newSearch: "નવી શોધ",
+    writeInYourLanguage: "તમારી ભાષામાં લખો — AI એ જ ભાષામાં જવાબ આપશે",
+    notebook: "નોટબુક", practiceExam: "પ્રેક્ટિસ પરીક્ષા",
     notebookTitle: "મારી AI નોટબુક", notebookEmpty: "નોટબુક ખાલી છે",
     savedToNotebook: "નોટબુકમાં સેવ થઈ ગયું", saveToNotebook: "નોટબુકમાં સેવ કરો",
     viewNotebook: "નોટબુક જુઓ", pinned: "પિન કર્યું",
@@ -1550,7 +1712,7 @@ const translations: Translations = {
     seeTop100: "ટૉપ 100 જુઓ", showLess: "ઓછું દેખાડો",
     yourRank: "તમારો ક્રમ", updatedDaily: "રોજ અપડેટ",
     referralTitle: "રેફર કરો & કમાઓ", inviteFriendsEarn: "મિત્રોને આમંત્રિત કરો, VCoins કમાઓ!",
-    totalReferred: "કુલ રેફર", completed: "પૂર્ણ",
+    totalReferred: "કુલ રેફર",
     yourReferralCode: "તમારો રેફરલ કોડ", shareCode: "આ કોડ મિત્રો સાથે શૅર કરો.",
     howItWorks: "આ કેવી રીતે કામ કરે છે", referralHistory: "રેફરલ ઇતિહાસ",
     shareEarn: "શૅર કરો & કમાઓ", pendingLabel: "પ્રતીક્ષામાં", joinedLabel: "જોડાયા",
@@ -1562,7 +1724,7 @@ const translations: Translations = {
   pa: {
     home: "ਘਰ", leaderboard: "ਲੀਡਰਬੋਰਡ", wallet: "ਵਾਲਿਟ",
     settings: "ਸੈਟਿੰਗਾਂ", dashboard: "ਡੈਸ਼ਬੋਰਡ", aiGuru: "AI ਗੁਰੂ",
-    skillBoard: "ਕੌਸ਼ਲ ਬੋਰਡ", logout: "ਲੌਗਆਉਟ",
+    skillBoard: "ਕੌਸ਼ਲ ਬੋਰਡ", myPrizes: "ਮੇਰੇ ਇਨਾਮ", skillBoost: "ਕੌਸ਼ਲ ਬੂਸਟ", logout: "ਲੌਗਆਉਟ",
     profileSettings: "ਪ੍ਰੋਫਾਈਲ ਸੈਟਿੰਗਾਂ", language: "ਭਾਸ਼ਾ",
     changeLanguage: "ਐਪ ਅਤੇ ਸਮੱਗਰੀ ਦੀ ਭਾਸ਼ਾ ਬਦਲੋ",
     darkTheme: "ਡਾਰਕ ਥੀਮ", notifications: "ਸੂਚਨਾਵਾਂ",
@@ -1602,11 +1764,17 @@ const translations: Translations = {
     joinNow: "ਹੁਣੇ ਸ਼ਾਮਲ ਹੋਵੋ", participate: "ਭਾਗ ਲਵੋ", reserveSpot: "ਜਗ੍ਹਾ ਰਾਖਵੀਂ ਕਰੋ",
     startsSoon: "ਜਲਦੀ ਸ਼ੁਰੂ", all: "ਸਾਰੇ", upcoming: "ਆਉਣ ਵਾਲੇ",
     aiGuruSubtitle: "ਤੁਹਾਡਾ ਨਿੱਜੀ ਸਿੱਖਣ ਸਹਾਇਕ", askAnything: "ਕੁਝ ਵੀ ਪੁੱਛੋ", instantAnswers: "ਤੁਰੰਤ ਜਵਾਬ", studyHelp: "ਪੜ੍ਹਾਈ ਵਿੱਚ ਮਦਦ", startChatting: "ਗੱਲਬਾਤ ਸ਼ੁਰੂ ਕਰੋ →",
+    dailyChallenge: "ਰੋਜ਼ਾਨਾ ਚੁਣੌਤੀ", dayStreak: "ਦਿਨ ਦੀ ਸਟ੍ਰੀਕ", dailyStreakQuiz: "ਡੇਲੀ ਸਟ੍ਰੀਕ ਕੁਇਜ਼", dailyStreakQuizSubtitle: "ਅੱਜ ਦੇ ਸਵਾਲ ਦਾ ਜਵਾਬ ਦਿਓ — ਆਪਣੀ ਸਟ੍ਰੀਕ ਬਣਾਈ ਰੱਖੋ", playTodaysQuiz: "ਅੱਜ ਦਾ ਕੁਇਜ਼ ਖੇਡੋ →",
     premiumFeature: "ਪ੍ਰੀਮਿਅਮ ਸੁਵਿਧਾ", premiumUnlockMsg: "ਇਹ ਸੁਵਿਧਾ ਅਨਲਾਕ ਕਰਨ ਲਈ AI Guru Premium ਅਪਗ੍ਰੇਡ ਕਰੋ।", maybeLater: "ਬਾਅਦ ਵਿੱਚ", upgrade: "ਅਪਗ੍ਰੇਡ",
     aiClassroom: "ਤੁਹਾਡੀ ਨਿੱਜੀ AI ਕਲਾਸਰੂਮ\nGemini ਦੁਆਰਾ ਸੰਚਾਲਿਤ", freeLessonsLeft: "ਅੱਜ ਮੁਫ਼ਤ ਪਾਠ ਬਾਕੀ", unlimitedAccess: "ਅਸੀਮਿਤ ਪ੍ਰੀਮਿਅਮ ਐਕਸੈੱਸ ਸਕਿਰਿਅ",
     lessonSetup: "ਪਾਠ ਸੈੱਟਅੱਪ", continueBtn: "ਜਾਰੀ ਰੱਖੋ →", fillRequiredFields: "ਲੋੜੀਂਦੀ ਜਾਣਕਾਰੀ ਭਰੋ", fillRequiredFieldsDesc: "ਕਿਰਪਾ ਕਰਕੇ ਵਿਸ਼ਾ ਚੁਣੋ ਅਤੇ ਅਧਿਆਏ ਦਾ ਨਾਮ ਦਾਖਲ ਕਰੋ।",
-    vidyaGuruAI: "VidyaGuru AI", personalAiTeacher: "ਤੁਹਾਡੇ ਨਿੱਜੀ AI ਅਧਿਆਪਕ", readyToHelp: "ਮਦਦ ਲਈ ਤਿਆਰ!", thinking: "ਸੋਚ ਰਿਹਾ ਹਾਂ...", speaking: "ਬੋਲ ਰਿਹਾ ਹਾਂ...", listening: "ਸੁਣ ਰਿਹਾ ਹਾਂ...",
-    paywallTitle: "VidyaGuru ਨਾਲ ਜਾਰੀ ਰੱਖਣਾ ਹੈ?", paywallBody: "ਅੱਜ ਦਾ ਮੁਫ਼ਤ ਸਵਾਲ ਵਰਤਿਆ। ਅਸੀਮਿਤ ਗੱਲਬਾਤ ਲਈ ਪ੍ਰੀਮਿਅਮ ਅਪਗ੍ਰੇਡ ਕਰੋ!", upgradeToPremium: "ਪ੍ਰੀਮਿਅਮ ਤੇ ਅਪਗ੍ਰੇਡ ਕਰੋ",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "ਤੁਹਾਡੇ ਨਿੱਜੀ AI ਸਕਿੱਲ ਕੋਚ", readyToHelp: "ਮਦਦ ਲਈ ਤਿਆਰ!", thinking: "ਸੋਚ ਰਿਹਾ ਹਾਂ...", speaking: "ਬੋਲ ਰਿਹਾ ਹਾਂ...", listening: "ਸੁਣ ਰਿਹਾ ਹਾਂ...",
+    // NEW KEY — needs native speaker review
+    respondingIn: "{{lang}} ਵਿੱਚ ਜਵਾਬ ਦੇ ਰਿਹਾ ਹਾਂ", voiceMessage: "🎤 ਵੌਇਸ ਮੈਸੇਜ",
+    askSomethingPlaceholder: "ਕੁਝ ਵੀ ਪੁੱਛੋ...", helloGreet: "ਸਤ ਸ੍ਰੀ ਅਕਾਲ",
+    skillGuruGreeting: "ਮੈਂ SkillGuru ਹਾਂ, ਤੁਹਾਡੇ ਨਿੱਜੀ AI ਸਕਿੱਲ ਕੋਚ। ਮੈਂ ਤੁਹਾਡੇ ਰੈਜ਼ਿਊਮੇ, ਇੰਟਰਵਿਊ ਦੀ ਤਿਆਰੀ, ਸੰਚਾਰ, ਕੋਡਿੰਗ ਦੀਆਂ ਬੁਨਿਆਦਾਂ, ਅਤੇ ਟੀਮਵਰਕ ਤੇ ਸਮਾਂ ਪ੍ਰਬੰਧਨ ਵਰਗੇ ਸਾਫਟ ਸਕਿੱਲਾਂ ਵਿੱਚ ਮਦਦ ਕਰ ਸਕਦਾ ਹਾਂ। ਹੇਠੋਂ ਇੱਕ ਸਕਿੱਲ ਖੇਤਰ ਚੁਣੋ ਜਾਂ ਦੱਸੋ ਕਿ ਤੁਸੀਂ ਕਿਸ 'ਤੇ ਕੰਮ ਕਰ ਰਹੇ ਹੋ — ਮੈਂ {{language}} ਵਿੱਚ ਵੀ ਜਵਾਬ ਦੇ ਸਕਦਾ ਹਾਂ!",
+    tryAskingSkillGuru: "ਜਾਂ ਇਹ ਪੁੱਛ ਕੇ ਦੇਖੋ",
+    paywallTitleSkillGuru: "SkillGuru ਨਾਲ ਜਾਰੀ ਰੱਖਣਾ ਹੈ?", paywallBody: "ਅੱਜ ਦਾ ਮੁਫ਼ਤ ਸਵਾਲ ਵਰਤਿਆ। ਅਸੀਮਿਤ ਗੱਲਬਾਤ ਲਈ ਪ੍ਰੀਮਿਅਮ ਅਪਗ੍ਰੇਡ ਕਰੋ!", upgradeToPremium: "ਪ੍ਰੀਮਿਅਮ ਤੇ ਅਪਗ੍ਰੇਡ ਕਰੋ",
     seekhoSignIn: "Seekho ਐਕਸੈੱਸ ਕਰਨ ਲਈ ਲੌਗਇਨ ਕਰੋ", curriculumAligned: "ਪਾਠਕ੍ਰਮ-ਆਧਾਰਿਤ ਸਿੱਖਿਆ", subjects: "ਵਿਸ਼ੇ", continueLearning: "ਸਿੱਖਣਾ ਜਾਰੀ ਰੱਖੋ", resumeLearning: "ਜਿੱਥੇ ਛੱਡਿਆ ਸੀ ਉੱਥੋਂ ਸ਼ੁਰੂ ਕਰੋ",
     revisionDue: "ਦੁਹਰਾਓ!", revisionReady: "ਸੰਕਲਪ ਸਮੀਖਿਆ ਲਈ ਤਿਆਰ", unlockCurriculum: "ਪੂਰਾ ਪਾਠਕ੍ਰਮ ਅਨਲਾਕ ਕਰੋ",
     pendingReview: "ਸਮੀਖਿਆ ਬਾਕੀ", inReview: "ਸਮੀਖਿਆ ਵਿੱਚ", approved: "ਮਨਜ਼ੂਰ", rejected: "ਰੱਦ", limitReached: "ਸੀਮਾ ਪਹੁੰਚ ਗਈ", limitReachedDesc: "ਤੁਸੀਂ ਇਸ ਬੈਟਲ ਦੀ ਅਪਲੋਡ ਸੀਮਾ ਤੇ ਪਹੁੰਚ ਗਏ ਹੋ।",
@@ -1617,6 +1785,16 @@ const translations: Translations = {
     modeExplain: "ਧਾਰਨਾ ਸਮਝਾਓ", modeNotes: "ਨੋਟਸ ਬਣਾਓ", modeExam: "ਪ੍ਰੀਖਿਆ ਤਿਆਰੀ",
     modeDoubt: "ਸ਼ੱਕ ਦੂਰ ਕਰੋ", modeSummarize: "ਅਧਿਆਇ ਸਾਰ", modeTip: "ਰੋਜ਼ਾਨਾ ਪੜ੍ਹਾਈ ਟਿਪ",
     modeLanguage: "ਮੇਰੀ ਭਾਸ਼ਾ ਵਿੱਚ ਸਮਝਾਓ",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "ਆਪਣੀ ਪੜ੍ਹਾਈ, ਹੁਨਰ ਜਾਂ ਆਮ ਗਿਆਨ ਬਾਰੇ ਕੁਝ ਵੀ ਖੋਜੋ",
+    modeDoubtHint: "ਕੁਝ ਵੀ ਖੋਜੋ…", modeExplainHint: "ਇੱਕ ਸੰਕਲਪ ਸਮਝਾਓ…",
+    modeNotesHint: "ਨੋਟਸ ਬਣਾਓ…", modeExamHint: "ਤਿਆਰੀ ਵਿੱਚ ਮਦਦ ਕਰੋ…",
+    modeSummarizeHint: "ਅਧਿਆਇ ਦਾ ਸਾਰ ਦਿਓ…", modeTipHint: "ਪੜ੍ਹਾਈ ਲਈ ਇੱਕ ਟਿਪ ਦਿਓ…",
+    trySearchingFor: "ਇਹ ਖੋਜਣ ਦੀ ਕੋਸ਼ਿਸ਼ ਕਰੋ", searching: "ਖੋਜ ਰਿਹਾ ਹੈ…",
+    resultsFor: "ਇਸ ਲਈ ਨਤੀਜੇ", relatedSearches: "ਸੰਬੰਧਿਤ ਖੋਜਾਂ",
+    newSearch: "ਨਵੀਂ ਖੋਜ",
+    writeInYourLanguage: "ਆਪਣੀ ਭਾਸ਼ਾ ਵਿੱਚ ਲਿਖੋ — AI ਉਸੀ ਭਾਸ਼ਾ ਵਿੱਚ ਜਵਾਬ ਦੇਵੇਗਾ",
+    notebook: "ਨੋਟਬੁੱਕ", practiceExam: "ਅਭਿਆਸ ਪ੍ਰੀਖਿਆ",
     notebookTitle: "ਮੇਰੀ AI ਨੋਟਬੁੱਕ", notebookEmpty: "ਨੋਟਬੁੱਕ ਖਾਲੀ ਹੈ",
     savedToNotebook: "ਨੋਟਬੁੱਕ ਵਿੱਚ ਸੇਵ ਹੋ ਗਿਆ", saveToNotebook: "ਨੋਟਬੁੱਕ ਵਿੱਚ ਸੇਵ ਕਰੋ",
     viewNotebook: "ਨੋਟਬੁੱਕ ਦੇਖੋ", pinned: "ਪਿੰਨ ਕੀਤਾ",
@@ -1657,7 +1835,7 @@ const translations: Translations = {
     seeTop100: "ਟਾਪ 100 ਦੇਖੋ", showLess: "ਘੱਟ ਦਿਖਾਓ",
     yourRank: "ਤੁਹਾਡੀ ਰੈਂਕ", updatedDaily: "ਰੋਜ਼ ਅਪਡੇਟ",
     referralTitle: "ਰੈਫਰ ਕਰੋ & ਕਮਾਓ", inviteFriendsEarn: "ਦੋਸਤਾਂ ਨੂੰ ਬੁਲਾਓ, VCoins ਕਮਾਓ!",
-    totalReferred: "ਕੁੱਲ ਰੈਫਰ", completed: "ਪੂਰਾ",
+    totalReferred: "ਕੁੱਲ ਰੈਫਰ",
     yourReferralCode: "ਤੁਹਾਡਾ ਰੈਫਰਲ ਕੋਡ", shareCode: "ਇਹ ਕੋਡ ਦੋਸਤਾਂ ਨਾਲ ਸਾਂਝਾ ਕਰੋ।",
     howItWorks: "ਇਹ ਕਿਵੇਂ ਕੰਮ ਕਰਦਾ ਹੈ", referralHistory: "ਰੈਫਰਲ ਇਤਿਹਾਸ",
     shareEarn: "ਸਾਂਝਾ ਕਰੋ & ਕਮਾਓ", pendingLabel: "ਬਾਕੀ", joinedLabel: "ਜੁੜੇ",
@@ -1669,7 +1847,7 @@ const translations: Translations = {
   or: {
     home: "ହୋମ", leaderboard: "ଲିଡ଼ରବୋର୍ଡ", wallet: "ୱାଲେଟ",
     settings: "ସେଟିଂ", dashboard: "ଡ୍ୟାଶ୍‌ବୋର୍ଡ", aiGuru: "AI ଗୁରୁ",
-    skillBoard: "ଦକ୍ଷତା ବୋର୍ଡ", logout: "ଲଗ୍‌ଆଉଟ",
+    skillBoard: "ଦକ୍ଷତା ବୋର୍ଡ", myPrizes: "ମୋର ପୁରସ୍କାର", skillBoost: "ଦକ୍ଷତା ବୁଷ୍ଟ", logout: "ଲଗ୍‌ଆଉଟ",
     profileSettings: "ପ୍ରୋଫାଇଲ ସେଟିଂ", language: "ଭାଷା",
     changeLanguage: "ଆପ ଏବଂ ବିଷୟ ଭାଷା ପରିବର୍ତ୍ତନ କରନ୍ତୁ",
     darkTheme: "ଡାର୍କ ଥିମ", notifications: "ବିଜ୍ଞପ୍ତି",
@@ -1709,11 +1887,17 @@ const translations: Translations = {
     joinNow: "ଏବେ ଯୋଗ ଦିଅନ୍ତୁ", participate: "ଭାଗ ନିଅନ୍ତୁ", reserveSpot: "ସ୍ଥାନ ସଂରକ୍ଷଣ",
     startsSoon: "ଶୀଘ୍ର ଆରମ୍ଭ", all: "ସବୁ", upcoming: "ଆସୁଥିବା",
     aiGuruSubtitle: "ଆପଣଙ୍କ ବ୍ୟକ୍ତିଗତ ଶିକ୍ଷଣ ସହାୟକ", askAnything: "ଯାହା ଇଚ୍ଛା ପଚାର", instantAnswers: "ତୁରନ୍ତ ଉତ୍ତର", studyHelp: "ପଢ଼ାରେ ସାହାଯ୍ୟ", startChatting: "ଚ୍ୟାଟ ଆରମ୍ଭ କରନ୍ତୁ →",
+    dailyChallenge: "ଦୈନିକ ଆହ୍ୱାନ", dayStreak: "ଦିନ ସ୍ଟ୍ରୀକ", dailyStreakQuiz: "ଡେଲି ସ୍ଟ୍ରୀକ କୁଇଜ", dailyStreakQuizSubtitle: "ଆଜିର ପ୍ରଶ୍ନର ଉତ୍ତର ଦିଅନ୍ତୁ — ଆପଣଙ୍କ ସ୍ଟ୍ରୀକ ଜାରି ରଖନ୍ତୁ", playTodaysQuiz: "ଆଜିର କୁଇଜ ଖେଳନ୍ତୁ →",
     premiumFeature: "ପ୍ରିମିଅମ ବୈଶିଷ୍ଟ୍ୟ", premiumUnlockMsg: "ଏହି ବୈଶିଷ୍ଟ୍ୟ ଅନ୍‌ଲକ ପାଇଁ AI Guru Premium ଅପଗ୍ରେଡ କରନ୍ତୁ।", maybeLater: "ପରେ", upgrade: "ଅପଗ୍ରେଡ",
     aiClassroom: "ଆପଣଙ୍କ ବ୍ୟକ୍ତିଗତ AI ଶ୍ରେଣୀ\nGemini ଦ୍ୱାରା ପରିଚାଳିତ", freeLessonsLeft: "ଆଜି ମୁଫ୍ ପାଠ ବାକି", unlimitedAccess: "ଅସୀମ ପ୍ରିମିଅମ ପ୍ରବେଶ ସକ୍ରିୟ",
     lessonSetup: "ପାଠ ସେଟଅପ", continueBtn: "ଜାରି ରଖନ୍ତୁ →", fillRequiredFields: "ଆବଶ୍ୟକ ତଥ୍ୟ ପୂରଣ କରନ୍ତୁ", fillRequiredFieldsDesc: "ଦୟାକରି ବିଷୟ ଚୟନ କରନ୍ତୁ ଓ ଅଧ୍ୟାୟ ନାମ ଦିଅନ୍ତୁ।",
-    vidyaGuruAI: "VidyaGuru AI", personalAiTeacher: "ଆପଣଙ୍କ ବ୍ୟକ୍ତିଗତ AI ଶିକ୍ଷକ", readyToHelp: "ସାହାଯ୍ୟ ପାଇଁ ପ୍ରସ୍ତୁତ!", thinking: "ଚିନ୍ତା କରୁଛି...", speaking: "କଥା କହୁଛି...", listening: "ଶୁଣୁଛି...",
-    paywallTitle: "VidyaGuru ସହ ଜାରି ରଖନ୍ତୁ?", paywallBody: "ଆଜିର ମୁଫ ପ୍ରଶ୍ନ ଶେଷ। ଅସୀମ ବାର୍ତ୍ତା ପାଇଁ ପ୍ରିମିଅମ ଅପଗ୍ରେଡ କରନ୍ତୁ!", upgradeToPremium: "ପ୍ରିମିଅମକୁ ଅପଗ୍ରେଡ",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "ଆପଣଙ୍କ ବ୍ୟକ୍ତିଗତ AI ସ୍କିଲ୍ କୋଚ୍", readyToHelp: "ସାହାଯ୍ୟ ପାଇଁ ପ୍ରସ୍ତୁତ!", thinking: "ଚିନ୍ତା କରୁଛି...", speaking: "କଥା କହୁଛି...", listening: "ଶୁଣୁଛି...",
+    // NEW KEY — needs native speaker review
+    respondingIn: "{{lang}} ରେ ଉତ୍ତର ଦେଉଛି", voiceMessage: "🎤 ଭଏସ ମେସେଜ",
+    askSomethingPlaceholder: "କିଛି ପଚାରନ୍ତୁ...", helloGreet: "ନମସ୍କାର",
+    skillGuruGreeting: "ମୁଁ SkillGuru, ଆପଣଙ୍କ ବ୍ୟକ୍ତିଗତ AI ସ୍କିଲ୍ କୋଚ୍। ମୁଁ ଆପଣଙ୍କ ରିଜୁମେ, ଇଣ୍ଟରଭିଉ ପ୍ରସ୍ତୁତି, ଯୋଗାଯୋଗ, କୋଡିଂ ମୌଳିକତା, ଏବଂ ଟିମ୍‌ୱର୍କ ଓ ସମୟ ପରିଚାଳନା ଭଳି ସଫ୍ଟ ସ୍କିଲ୍‌ରେ ସାହାଯ୍ୟ କରିପାରିବି। ତଳୁ ଗୋଟିଏ ସ୍କିଲ୍ କ୍ଷେତ୍ର ବାଛନ୍ତୁ ବା ଆପଣ କଣ କରୁଛନ୍ତି ତାହା କୁହନ୍ତୁ — ମୁଁ {{language}} ରେ ମଧ୍ୟ ଉତ୍ତର ଦେଇ ପାରିବି!",
+    tryAskingSkillGuru: "କିମ୍ବା ଏହା ପଚାରି ଦେଖନ୍ତୁ",
+    paywallTitleSkillGuru: "SkillGuru ସହ ଜାରି ରଖନ୍ତୁ?", paywallBody: "ଆଜିର ମୁଫ ପ୍ରଶ୍ନ ଶେଷ। ଅସୀମ ବାର୍ତ୍ତା ପାଇଁ ପ୍ରିମିଅମ ଅପଗ୍ରେଡ କରନ୍ତୁ!", upgradeToPremium: "ପ୍ରିମିଅମକୁ ଅପଗ୍ରେଡ",
     seekhoSignIn: "Seekho ପ୍ରବେଶ ପାଇଁ ଲଗଇନ", curriculumAligned: "ପାଠ୍ୟକ୍ରମ-ଆଧାରିତ ଶିକ୍ଷଣ", subjects: "ବିଷୟ", continueLearning: "ଶିଖିବା ଜାରି ରଖନ୍ତୁ", resumeLearning: "ଯେଉଁ ଠାରେ ଛାଡ଼ିଥିଲେ ସେଠୁ ଆରମ୍ଭ",
     revisionDue: "ପୁନଃ ଅଧ୍ୟୟନ କରନ୍ତୁ!", revisionReady: "ଧାରଣା ସମୀକ୍ଷା ପାଇଁ ପ୍ରସ୍ତୁତ", unlockCurriculum: "ସମ୍ପୂର୍ଣ ପାଠ୍ୟକ୍ରମ ଅନ୍‌ଲକ",
     pendingReview: "ସମୀକ୍ଷା ଅପେକ୍ଷା", inReview: "ସମୀକ୍ଷାଧୀନ", approved: "ଅନୁମୋଦିତ", rejected: "ପ୍ରତ୍ୟାଖ୍ୟାନ", limitReached: "ସୀମା ସ୍ପର୍ଶ", limitReachedDesc: "ଆପଣ ଏହି ଯୁଦ୍ଧ ପାଇଁ ଅପଲୋଡ ସୀମା ଛୁଇଁ ଗଲେ।",
@@ -1724,6 +1908,16 @@ const translations: Translations = {
     modeExplain: "ଧାରଣା ବୁଝାନ୍ତୁ", modeNotes: "ନୋଟ ତିଆରି କରନ୍ତୁ", modeExam: "ପରୀକ୍ଷା ପ୍ରସ୍ତୁତି",
     modeDoubt: "ସନ୍ଦେହ ଦୂର କରନ୍ତୁ", modeSummarize: "ଅଧ୍ୟାୟ ସାରାଂଶ", modeTip: "ଦୈନିକ ପଢ଼ା ଟିପ",
     modeLanguage: "ମୋ ଭାଷାରେ ବୁଝାନ୍ତୁ",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "ତୁମର ପଢ଼ା, ଦକ୍ଷତା କିମ୍ବା ସାଧାରଣ ଜ୍ଞାନ ବିଷୟରେ ଯାହା ଚାହିଁଁ ଖୋଜ",
+    modeDoubtHint: "ଯାହା ଚାହିଁ ଖୋଜ…", modeExplainHint: "ଗୋଟିଏ ଧାରଣା ବୁଝାଅ…",
+    modeNotesHint: "ନୋଟ୍ସ ତିଆରି କର…", modeExamHint: "ପ୍ରସ୍ତୁତିରେ ସାହାଯ୍ୟ କର…",
+    modeSummarizeHint: "ଅଧ୍ୟାୟର ସାରାଂଶ ଦିଅ…", modeTipHint: "ଏକ ପଢ଼ା ଟିପ୍ସ ଦିଅ…",
+    trySearchingFor: "ଏହାକୁ ଖୋଜିବାକୁ ଚେଷ୍ଟା କର", searching: "ଖୋଜୁଛି…",
+    resultsFor: "ଏହା ପାଇଁ ଫଲାଫଲ", relatedSearches: "ସମ୍ବନ୍ଧିତ ଖୋଜ",
+    newSearch: "ନୂଆ ଖୋଜ",
+    writeInYourLanguage: "ତୁମ ଭାଷାରେ ଲେଖ — AI ସେହି ଭାଷାରେ ଉତ୍ତର ଦେବ",
+    notebook: "ନୋଟବୁକ୍", practiceExam: "ଅଭ୍ୟାସ ପରୀକ୍ଷା",
     notebookTitle: "ମୋ AI ନୋଟବୁକ", notebookEmpty: "ନୋଟବୁକ ଖାଲି",
     savedToNotebook: "ନୋଟବୁକରେ ସଞ୍ଚୟ ହୋଇଗଲା", saveToNotebook: "ନୋଟବୁକରେ ସଞ୍ଚୟ କରନ୍ତୁ",
     viewNotebook: "ନୋଟବୁକ ଦେଖନ୍ତୁ", pinned: "ପିନ ହୋଇଛି",
@@ -1764,7 +1958,7 @@ const translations: Translations = {
     seeTop100: "ଟପ 100 ଦେଖନ୍ତୁ", showLess: "କମ ଦେଖାନ୍ତୁ",
     yourRank: "ଆପଣଙ୍କ ରୌ‌ଁ‍କ", updatedDaily: "ଦୈନିକ ଅପଡ଼େଟ",
     referralTitle: "ରେଫର ଏବଂ ଅର୍ଜନ", inviteFriendsEarn: "ବନ୍ଧୁ ଆମନ୍ତ୍ରଣ, VCoins ଅର୍ଜନ!",
-    totalReferred: "ମୋଟ ରେଫର", completed: "ସମ୍ପୂର୍ଣ",
+    totalReferred: "ମୋଟ ରେଫର",
     yourReferralCode: "ଆପଣଙ୍କ ରେଫରଲ କୋଡ", shareCode: "ଏହି କୋଡ ବନ୍ଧୁମାନଙ୍କ ସହ ଶେୟାର କରନ୍ତୁ।",
     howItWorks: "ଏହା କିପରି କାର୍ଯ୍ୟ କରେ", referralHistory: "ରେଫରଲ ଇତିହାସ",
     shareEarn: "ଶେୟାର ଏବଂ ଅର୍ଜନ", pendingLabel: "ଅପେକ୍ଷାରତ", joinedLabel: "ଯୋଗ ଦେଲେ",
@@ -1776,7 +1970,7 @@ const translations: Translations = {
   ur: {
     home: "ہوم", leaderboard: "لیڈربورڈ", wallet: "والیٹ",
     settings: "ترتیبات", dashboard: "ڈیش بورڈ", aiGuru: "AI گرو",
-    skillBoard: "مہارت بورڈ", logout: "لاگ آؤٹ",
+    skillBoard: "مہارت بورڈ", myPrizes: "میرے انعامات", skillBoost: "مہارت بوسٹ", logout: "لاگ آؤٹ",
     profileSettings: "پروفائل ترتیبات", language: "زبان",
     changeLanguage: "ایپ اور مواد کی زبان تبدیل کریں",
     darkTheme: "ڈارک تھیم", notifications: "اطلاعات",
@@ -1816,11 +2010,17 @@ const translations: Translations = {
     joinNow: "ابھی شامل ہوں", participate: "حصہ لیں", reserveSpot: "جگہ محفوظ کریں",
     startsSoon: "جلد شروع", all: "تمام", upcoming: "آنے والے",
     aiGuruSubtitle: "آپ کا ذاتی سیکھنے کا معاون", askAnything: "کچھ بھی پوچھیں", instantAnswers: "فوری جوابات", studyHelp: "تعلیمی مدد", startChatting: "چیٹ شروع کریں →",
+    dailyChallenge: "روزانہ چیلنج", dayStreak: "دن کی سٹریک", dailyStreakQuiz: "ڈیلی سٹریک کوئز", dailyStreakQuizSubtitle: "آج کے سوال کا جواب دیں — اپنی سٹریک برقرار رکھیں", playTodaysQuiz: "آج کا کوئز کھیلیں →",
     premiumFeature: "پریمیئم فیچر", premiumUnlockMsg: "یہ فیچر کھولنے کے لیے AI Guru Premium اپگریڈ کریں۔", maybeLater: "بعد میں", upgrade: "اپگریڈ",
     aiClassroom: "آپ کی ذاتی AI کلاس روم\nGemini کے ذریعے چلائی جاتی ہے", freeLessonsLeft: "آج کے مفت اسباق باقی", unlimitedAccess: "لامحدود پریمیئم رسائی فعال",
     lessonSetup: "سبق کا اعداد و شمار", continueBtn: "جاری رکھیں →", fillRequiredFields: "ضروری فیلڈز بھریں", fillRequiredFieldsDesc: "براہ کرم موضوع منتخب کریں اور باب کا نام درج کریں۔",
-    vidyaGuruAI: "VidyaGuru AI", personalAiTeacher: "آپ کا ذاتی AI استاد", readyToHelp: "مدد کے لیے تیار!", thinking: "سوچ رہا ہوں...", speaking: "بول رہا ہوں...", listening: "سن رہا ہوں...",
-    paywallTitle: "VidyaGuru کے ساتھ جاری رکھیں؟", paywallBody: "آج کا مفت سوال استعمال ہو گیا۔ لامحدود گفتگو کے لیے پریمیئم اپگریڈ کریں!", upgradeToPremium: "پریمیئم پر اپگریڈ کریں",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "آپ کا ذاتی AI سکل کوچ", readyToHelp: "مدد کے لیے تیار!", thinking: "سوچ رہا ہوں...", speaking: "بول رہا ہوں...", listening: "سن رہا ہوں...",
+    // NEW KEY — needs native speaker review
+    respondingIn: "{{lang}} میں جواب دے رہا ہوں", voiceMessage: "🎤 وائس میسج",
+    askSomethingPlaceholder: "کچھ بھی پوچھیں...", helloGreet: "السلام علیکم",
+    skillGuruGreeting: "میں SkillGuru ہوں، آپ کا ذاتی AI سکل کوچ۔ میں آپ کے ریزیومے، انٹرویو کی تیاری، رابطے کی صلاحیت، کوڈنگ کی بنیادی باتوں، اور ٹیم ورک و وقت کے انتظام جیسے سافٹ سکلز میں مدد کر سکتا ہوں۔ نیچے سے کوئی سکل ایریا منتخب کریں یا بتائیں آپ کس پر کام کر رہے ہیں — میں {{language}} میں بھی جواب دے سکتا ہوں!",
+    tryAskingSkillGuru: "یا یہ پوچھ کر دیکھیں",
+    paywallTitleSkillGuru: "SkillGuru کے ساتھ جاری رکھیں؟", paywallBody: "آج کا مفت سوال استعمال ہو گیا۔ لامحدود گفتگو کے لیے پریمیئم اپگریڈ کریں!", upgradeToPremium: "پریمیئم پر اپگریڈ کریں",
     seekhoSignIn: "Seekho تک رسائی کے لیے لاگ ان کریں", curriculumAligned: "نصاب پر مبنی تعلیم", subjects: "مضامین", continueLearning: "سیکھنا جاری رکھیں", resumeLearning: "جہاں چھوڑا تھا وہاں سے شروع کریں",
     revisionDue: "مراجعت کریں!", revisionReady: "تصورات مراجعت کے لیے تیار", unlockCurriculum: "مکمل نصاب کھولیں",
     pendingReview: "جائزہ باقی", inReview: "جائزے میں", approved: "منظور", rejected: "مسترد", limitReached: "حد تک پہنچ گئے", limitReachedDesc: "آپ اس مقابلے کی اپلوڈ حد تک پہنچ گئے ہیں۔",
@@ -1831,6 +2031,16 @@ const translations: Translations = {
     modeExplain: "تصور سمجھائیں", modeNotes: "نوٹس بنائیں", modeExam: "امتحان کی تیاری",
     modeDoubt: "شک دور کریں", modeSummarize: "باب خلاصہ", modeTip: "روزانہ پڑھائی ٹپ",
     modeLanguage: "میری زبان میں سمجھائیں",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "اپنی پڑھائی، ہنر یا عام معلومات کے بارے میں کچھ بھی تلاش کریں",
+    modeDoubtHint: "کچھ بھی تلاش کریں…", modeExplainHint: "ایک تصور سمجھائیں…",
+    modeNotesHint: "نوٹس بنائیں…", modeExamHint: "تیاری میں مدد کریں…",
+    modeSummarizeHint: "باب کا خلاصہ دیں…", modeTipHint: "پڑھائی کے لیے ایک ٹپ دیں…",
+    trySearchingFor: "یہ تلاش کرنے کی کوشش کریں", searching: "تلاش کر رہا ہے…",
+    resultsFor: "اس کے نتائج", relatedSearches: "متعلقہ تلاشیں",
+    newSearch: "نئی تلاش",
+    writeInYourLanguage: "اپنی زبان میں لکھیں — AI اسی زبان میں جواب دے گا",
+    notebook: "نوٹ بک", practiceExam: "مشق امتحان",
     notebookTitle: "میری AI نوٹ بک", notebookEmpty: "نوٹ بک خالی ہے",
     savedToNotebook: "نوٹ بک میں محفوظ ہوگیا", saveToNotebook: "نوٹ بک میں محفوظ کریں",
     viewNotebook: "نوٹ بک دیکھیں", pinned: "پن کیا گیا",
@@ -1871,7 +2081,7 @@ const translations: Translations = {
     seeTop100: "ٹاپ 100 دیکھیں", showLess: "کم دکھائیں",
     yourRank: "آپ کی رینک", updatedDaily: "روزانہ اپڈیٹ",
     referralTitle: "ریفر کریں اور کمائیں", inviteFriendsEarn: "دوستوں کو مدعو کریں، VCoins کمائیں!",
-    totalReferred: "کل ریفر", completed: "مکمل",
+    totalReferred: "کل ریفر",
     yourReferralCode: "آپ کا ریفرل کوڈ", shareCode: "یہ کوڈ دوستوں کے ساتھ شیئر کریں۔",
     howItWorks: "یہ کیسے کام کرتا ہے", referralHistory: "ریفرل کی تاریخ",
     shareEarn: "شیئر کریں اور کمائیں", pendingLabel: "زیر التواء", joinedLabel: "شامل ہوئے",
@@ -1883,7 +2093,7 @@ const translations: Translations = {
   as: {
     home: "হোম", leaderboard: "লিডাৰবৰ্ড", wallet: "ৱালেট",
     settings: "ছেটিংছ", dashboard: "ডেচবৰ্ড", aiGuru: "AI গুৰু",
-    skillBoard: "দক্ষতা বৰ্ড", logout: "লগআউট",
+    skillBoard: "দক্ষতা বৰ্ড", myPrizes: "মোৰ পুৰস্কাৰ", skillBoost: "দক্ষতা বুষ্ট", logout: "লগআউট",
     profileSettings: "প্ৰ'ফাইল ছেটিংছ", language: "ভাষা",
     changeLanguage: "এপ আৰু সমলৰ ভাষা সলনি কৰক",
     darkTheme: "ডাৰ্ক থিম", notifications: "জাননী",
@@ -1923,11 +2133,17 @@ const translations: Translations = {
     joinNow: "এতিয়াই যোগ দিয়ক", participate: "অংশ লওক", reserveSpot: "ঠাই সংৰক্ষণ",
     startsSoon: "সোনকালে আৰম্ভ হ'ব", all: "সকলো", upcoming: "আহিবলগীয়া",
     aiGuruSubtitle: "আপোনাৰ ব্যক্তিগত শিক্ষণ সহায়ক", askAnything: "যিকোনো কথা সুধিব", instantAnswers: "তৎক্ষণাৎ উত্তৰ", studyHelp: "পঢ়াত সহায়", startChatting: "চেট আৰম্ভ কৰক →",
+    dailyChallenge: "দৈনিক প্ৰত্যাহ্বান", dayStreak: "দিনৰ ষ্ট্ৰীক", dailyStreakQuiz: "ডেইলী ষ্ট্ৰীক কুইজ", dailyStreakQuizSubtitle: "আজিৰ প্ৰশ্নৰ উত্তৰ দিয়ক — আপোনাৰ ষ্ট্ৰীক বজাই ৰাখক", playTodaysQuiz: "আজিৰ কুইজ খেলক →",
     premiumFeature: "প্ৰিমিয়াম ফিচাৰ", premiumUnlockMsg: "এই ফিচাৰটো আনলক কৰিবলৈ AI Guru Premium আপগ্ৰেড কৰক।", maybeLater: "পিছত", upgrade: "আপগ্ৰেড",
     aiClassroom: "আপোনাৰ ব্যক্তিগত AI ক্লাছৰুম\nGemini দ্বাৰা পৰিচালিত", freeLessonsLeft: "আজি বিনামূলীয়া পাঠ বাকী", unlimitedAccess: "অসীমিত প্ৰিমিয়াম এক্সেছ সক্ৰিয়",
     lessonSetup: "পাঠ ছেটআপ", continueBtn: "অব্যাহত ৰাখক →", fillRequiredFields: "প্ৰয়োজনীয় তথ্য পূৰণ কৰক", fillRequiredFieldsDesc: "অনুগ্ৰহ কৰি বিষয় বাছক আৰু অধ্যায়ৰ নাম দিয়ক।",
-    vidyaGuruAI: "বিদ্যাগুৰু AI", personalAiTeacher: "আপোনাৰ ব্যক্তিগত AI শিক্ষক", readyToHelp: "সহায় কৰিবলৈ সাজু!", thinking: "ভাবি আছো...", speaking: "কৈ আছো...", listening: "শুনি আছো...",
-    paywallTitle: "বিদ্যাগুৰুৰ সৈতে অব্যাহত ৰাখিবনে?", paywallBody: "আজিৰ বিনামূলীয়া প্ৰশ্ন শেষ। অসীমিত কথোপকথনৰ বাবে প্ৰিমিয়াম আপগ্ৰেড কৰক!", upgradeToPremium: "প্ৰিমিয়ামলৈ আপগ্ৰেড কৰক",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "আপোনাৰ ব্যক্তিগত AI স্কিল কোচ", readyToHelp: "সহায় কৰিবলৈ সাজু!", thinking: "ভাবি আছো...", speaking: "কৈ আছো...", listening: "শুনি আছো...",
+    // NEW KEY — needs native speaker review
+    respondingIn: "{{lang}}ত উত্তৰ দি আছো", voiceMessage: "🎤 ভইচ বাৰ্তা",
+    askSomethingPlaceholder: "যিকোনো প্রশ্ন কৰক...", helloGreet: "নমস্কাৰ",
+    skillGuruGreeting: "মই SkillGuru, আপোনাৰ ব্যক্তিগত AI স্কিল কোচ। মই আপোনাৰ ৰিজিউম, ইন্টাৰভিউৰ প্রস্তুতি, যোগাযোগ, কোডিঙৰ মৌলিক, আৰু টিমৱৰ্ক ও সময় ব্যবস্থাপনাৰ দৰে সফট স্কিলত সহায় কৰিব পাৰো। তলৰ পৰা এটা স্কিল ক্ষেত্ৰ বাছনি কৰক বা আপুনি কি কাম কৰি আছে কওক — মই {{language}}তো উত্তৰ দিব পাৰো!",
+    tryAskingSkillGuru: "বা এইটো সুধি চাওক",
+    paywallTitleSkillGuru: "SkillGuruৰ সৈতে অব্যাহত ৰাখিবনে?", paywallBody: "আজিৰ বিনামূলীয়া প্ৰশ্ন শেষ। অসীমিত কথোপকথনৰ বাবে প্ৰিমিয়াম আপগ্ৰেড কৰক!", upgradeToPremium: "প্ৰিমিয়ামলৈ আপগ্ৰেড কৰক",
     seekhoSignIn: "Seekho এক্সেছ কৰিবলৈ লগইন কৰক", curriculumAligned: "পাঠ্যক্ৰম-আধাৰিত শিক্ষণ", subjects: "বিষয়সমূহ", continueLearning: "শিকাটো অব্যাহত ৰাখক", resumeLearning: "য'ত এৰিছিল তাৰপৰা আৰম্ভ কৰক",
     revisionDue: "পুনৰালোচনা কৰক!", revisionReady: "ধাৰণাসমূহ পুনৰালোচনাৰ বাবে সাজু", unlockCurriculum: "সম্পূৰ্ণ পাঠ্যক্ৰম আনলক কৰক",
     pendingReview: "পৰ্যালোচনা বাকী", inReview: "পৰ্যালোচনাত", approved: "অনুমোদিত", rejected: "প্ৰত্যাখ্যাত", limitReached: "সীমা পাইছে", limitReachedDesc: "আপুনি এই বেটেলৰ আপলোড সীমাত পাইছে।",
@@ -1938,6 +2154,16 @@ const translations: Translations = {
     modeExplain: "ধাৰণা বুজাওক", modeNotes: "নোট তৈয়াৰ কৰক", modeExam: "পৰীক্ষাৰ প্ৰস্তুতি",
     modeDoubt: "সন্দেহ দূৰ কৰক", modeSummarize: "অধ্যায় সাৰাংশ", modeTip: "দৈনিক পঢ়া টিপ",
     modeLanguage: "মোৰ ভাষাত বুজাওক",
+    // NEW KEY — needs native speaker review
+    askAiGuruTagline: "তোমাৰ পঢ়া, দক্ষতা বা সাধাৰণ জ্ঞান সম্পর্কে যিকোনো বিচাৰক",
+    modeDoubtHint: "যিকোনো বিচাৰক…", modeExplainHint: "এটা ধাৰণা বুজাওক…",
+    modeNotesHint: "নোট তৈয়াৰ কৰক…", modeExamHint: "প্রস্তুতিত সহায় কৰক…",
+    modeSummarizeHint: "অধ্যায়ৰ সাৰাংশ দিয়ক…", modeTipHint: "এটা পঢ়াৰ টিপ দিয়ক…",
+    trySearchingFor: "ইয়াক বিচাৰি চাওক", searching: "বিচাৰি আছে…",
+    resultsFor: "ইয়াৰ বাবে ফলাফল", relatedSearches: "সম্পর্কিত অনুসন্ধান",
+    newSearch: "নতুন অনুসন্ধান",
+    writeInYourLanguage: "তোমাৰ ভাষাত লিখক — AI সেই ভাষাতেই উত্তর দিব",
+    notebook: "নোটবুক", practiceExam: "অনুশীলন পরীক্ষা",
     notebookTitle: "মোৰ AI নোটবুক", notebookEmpty: "নোটবুক খালী",
     savedToNotebook: "নোটবুকত সংৰক্ষণ হ'ল", saveToNotebook: "নোটবুকত সংৰক্ষণ কৰক",
     viewNotebook: "নোটবুক চাওক", pinned: "পিন কৰা হৈছে",
@@ -1978,7 +2204,7 @@ const translations: Translations = {
     seeTop100: "টপ 100 চাওক", showLess: "কম দেখুৱাওক",
     yourRank: "আপোনাৰ ৰেংক", updatedDaily: "দৈনিক আপডেট",
     referralTitle: "ৰেফাৰ কৰক আৰু উপাৰ্জন কৰক", inviteFriendsEarn: "বন্ধু আমন্ত্ৰণ, VCoins উপাৰ্জন!",
-    totalReferred: "মুঠ ৰেফাৰ", completed: "সম্পূৰ্ণ",
+    totalReferred: "মুঠ ৰেফাৰ",
     yourReferralCode: "আপোনাৰ ৰেফাৰেল ক'ড", shareCode: "এই ক'ড বন্ধুসকলৰ সৈতে শ্বেয়াৰ কৰক।",
     howItWorks: "এয়া কেনেকৈ কাম কৰে", referralHistory: "ৰেফাৰেল ইতিহাস",
     shareEarn: "শ্বেয়াৰ কৰক আৰু উপাৰ্জন কৰক", pendingLabel: "বিচাৰাধীন", joinedLabel: "যোগ দিলে",
@@ -1990,7 +2216,7 @@ const translations: Translations = {
   mni: {
     home: "হোম", leaderboard: "লিডারবোর্ড", wallet: "ওয়ালেট",
     settings: "সেটিং", dashboard: "ড্যাশবোর্ড", aiGuru: "AI গুরু",
-    skillBoard: "স্কিল বোর্ড", logout: "লগআউট",
+    skillBoard: "স্কিল বোর্ড", myPrizes: "আমার পুরস্কার", skillBoost: "স্কিল বুস্ট", logout: "লগআউট",
     profileSettings: "প্রোফাইল সেটিং", language: "মাতৃভাষা",
     changeLanguage: "অ্যাপ ও বিষয়বস্তুর ভাষা পরিবর্তন করুন",
     darkTheme: "ডার্ক থিম", notifications: "বিজ্ঞপ্তি",
@@ -2030,11 +2256,17 @@ const translations: Translations = {
     joinNow: "এখনই যোগ দিন", participate: "অংশগ্রহণ করুন", reserveSpot: "জায়গা বুক করুন",
     startsSoon: "শীঘ্রই শুরু", all: "সব", upcoming: "আসন্ন",
     aiGuruSubtitle: "তোমার ব্যক্তিগত শিক্ষণ সহায়ক", askAnything: "যা ইচ্ছা জিজ্ঞেস করো", instantAnswers: "তাৎক্ষণিক উত্তর", studyHelp: "পড়ায় সাহায্য", startChatting: "চ্যাট শুরু করো →",
+    dailyChallenge: "প্রতিদিনের চ্যালেঞ্জ", dayStreak: "দিনের স্ট্রিক", dailyStreakQuiz: "ডেইলি স্ট্রিক কুইজ", dailyStreakQuizSubtitle: "আজকের প্রশ্নের উত্তর দাও — তোমার স্ট্রিক বজায় রাখো", playTodaysQuiz: "আজকের কুইজ খেলো →",
     premiumFeature: "প্রিমিয়াম ফিচার", premiumUnlockMsg: "এই ফিচার আনলক করতে AI Guru Premium আপগ্রেড করো।", maybeLater: "পরে", upgrade: "আপগ্রেড",
     aiClassroom: "তোমার ব্যক্তিগত AI ক্লাসরুম\nGemini দ্বারা পরিচালিত", freeLessonsLeft: "আজকের বিনামূল্যে পাঠ বাকি", unlimitedAccess: "সীমাহীন প্রিমিয়াম অ্যাক্সেস সক্রিয়",
     lessonSetup: "পাঠ সেটআপ", continueBtn: "চালিয়ে যাও →", fillRequiredFields: "প্রয়োজনীয় তথ্য পূরণ করো", fillRequiredFieldsDesc: "অনুগ্রহ করে বিষয় বেছে নাও এবং অধ্যায়ের নাম লেখো।",
-    vidyaGuruAI: "বিদ্যাগুরু AI", personalAiTeacher: "তোমার ব্যক্তিগত AI শিক্ষক", readyToHelp: "সাহায্যের জন্য প্রস্তুত!", thinking: "ভাবছি...", speaking: "বলছি...", listening: "শুনছি...",
-    paywallTitle: "বিদ্যাগুরুর সাথে চালিয়ে যাবে?", paywallBody: "আজকের বিনামূল্যে প্রশ্ন শেষ। সীমাহীন কথোপকথনের জন্য প্রিমিয়াম আপগ্রেড করো!", upgradeToPremium: "প্রিমিয়ামে আপগ্রেড করো",
+    skillGuruAI: "SkillGuru AI", personalAiSkillsCoach: "তোমার ব্যক্তিগত AI স্কিল কোচ", readyToHelp: "সাহায্যের জন্য প্রস্তুত!", thinking: "ভাবছি...", speaking: "বলছি...", listening: "শুনছি...",
+    // NEW KEY — needs native speaker review (Manipuri/Meitei, Bengali script)
+    respondingIn: "{{lang}}-এ উত্তর দিচ্ছি", voiceMessage: "🎤 ভয়েস বার্তা",
+    askSomethingPlaceholder: "যা ইচ্ছা জিজ্ঞেস করো...", helloGreet: "নমস্কার",
+    skillGuruGreeting: "আমি SkillGuru, তোমার ব্যক্তিগত AI স্কিল কোচ। আমি তোমার রিজিউমে, ইন্টারভিউ প্রস্তুতি, কমিউনিকেশন, কোডিং-এর বুনিয়াদ এবং টিমওয়ার্ক ও সময় ব্যবস্থাপনার মতো সফট স্কিলে সাহায্য করতে পারি। নিচে থেকে একটি স্কিল এরিয়া বেছে নাও বা বলো তুমি কী নিয়ে কাজ করছো — আমি {{language}}তেও উত্তর দিতে পারি!",
+    tryAskingSkillGuru: "নাহলে এটা জিজ্ঞেস করে দেখো",
+    paywallTitleSkillGuru: "SkillGuru-র সাথে চালিয়ে যাবে?", paywallBody: "আজকের বিনামূল্যে প্রশ্ন শেষ। সীমাহীন কথোপকথনের জন্য প্রিমিয়াম আপগ্রেড করো!", upgradeToPremium: "প্রিমিয়ামে আপগ্রেড করো",
     seekhoSignIn: "Seekho অ্যাক্সেস করতে লগইন করো", curriculumAligned: "পাঠ্যক্রম-ভিত্তিক শিক্ষা", subjects: "বিষয়সমূহ", continueLearning: "শেখা চালিয়ে যাও", resumeLearning: "যেখানে ছেড়েছিলে সেখান থেকে শুরু করো",
     revisionDue: "রিভিশন করো!", revisionReady: "ধারণাগুলো পুনরালোচনার জন্য প্রস্তুত", unlockCurriculum: "সম্পূর্ণ পাঠ্যক্রম আনলক করো",
     pendingReview: "পর্যালোচনা বাকি", inReview: "পর্যালোচনায়", approved: "অনুমোদিত", rejected: "প্রত্যাখ্যাত", limitReached: "সীমা পৌঁছেছে", limitReachedDesc: "তুমি এই ব্যাটেলের আপলোড সীমায় পৌঁছে গেছ।",
@@ -2045,6 +2277,17 @@ const translations: Translations = {
     modeExplain: "ধারণা বোঝো", modeNotes: "নোট তৈরি করো", modeExam: "পরীক্ষার প্রস্তুতি",
     modeDoubt: "সন্দেহ দূর করো", modeSummarize: "অধ্যায় সারাংশ", modeTip: "দৈনিক পড়ার টিপস",
     modeLanguage: "আমার ভাষায় বুঝিয়ে দাও",
+    // NEW KEY — needs native speaker review (Manipuri/Meitei, Bengali script,
+    // matching this file's existing convention for this language block)
+    askAiGuruTagline: "তোমার পড়া, দক্ষতা বা সাধারণ জ্ঞান বিষয়ে যা ইচ্ছা খোঁজ",
+    modeDoubtHint: "যা ইচ্ছা খোঁজ…", modeExplainHint: "একটা ধারণা বুঝিয়ে দাও…",
+    modeNotesHint: "নোট তৈরি কর…", modeExamHint: "প্রস্তুতিতে সাহায্য কর…",
+    modeSummarizeHint: "অধ্যায়ের সারাংশ দাও…", modeTipHint: "একটা পড়ার টিপ দাও…",
+    trySearchingFor: "এটা খুঁজে দেখ", searching: "খুঁজছে…",
+    resultsFor: "এর জন্য ফলাফল", relatedSearches: "সম্পর্কিত অনুসন্ধান",
+    newSearch: "নতুন অনুসন্ধান",
+    writeInYourLanguage: "তোমার ভাষায় লেখ — AI সেই ভাষায় উত্তর দেবে",
+    notebook: "নোটবুক", practiceExam: "অনুশীলন পরীক্ষা",
     notebookTitle: "আমার AI নোটবুক", notebookEmpty: "নোটবুক খালি",
     savedToNotebook: "নোটবুকে সংরক্ষিত", saveToNotebook: "নোটবুকে সংরক্ষণ করো",
     viewNotebook: "নোটবুক দেখো", pinned: "পিন করা",

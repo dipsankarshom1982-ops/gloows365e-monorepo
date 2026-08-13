@@ -335,7 +335,7 @@ export default function DrawerLayout() {
                  onPress={() => router.push("/starboard")} colors={colors} />
               )}
               {drawerItem("myPrizes") && (
-                <DrawerItem icon="gift-outline" label="My Prizes"
+                <DrawerItem icon="gift-outline" label={t("myPrizes")}
                  onPress={() => router.push("/my-prizes" as any)} colors={colors} />
               )}
               {drawerItem("wallet") && (
@@ -346,6 +346,7 @@ export default function DrawerLayout() {
                 <DailyStreakQuizDrawerItem
                   onPress={() => router.push("/daily-streak-quiz" as any)}
                   colors={colors}
+                  t={t}
                 />
               )}
               {drawerItem("settings") && (
@@ -365,7 +366,7 @@ export default function DrawerLayout() {
                   onPress={() => router.push("/(drawer)/(tabs)/learnFun")} colors={colors} />
               )}
               {drawerItem("skillboost") && (
-                <DrawerItem icon="flash-outline" label="Skill Boost"
+                <DrawerItem icon="flash-outline" label={t("skillBoost")}
                   onPress={() => router.push("/(drawer)/(tabs)/skillboost")} colors={colors} />
               )}
 
@@ -394,7 +395,7 @@ export default function DrawerLayout() {
               )}
 
               {drawerItem("skillboard") && (
-                <SkillBoardItem onPress={() => router.push("/skillboard")} />
+                <SkillBoardItem onPress={() => router.push("/skillboard")} t={t} />
               )}
               {drawerItem("glostore") && (
                 <GloStoreItem onPress={() => router.push("/glostore" as any)} />
@@ -419,7 +420,7 @@ export default function DrawerLayout() {
   );
 }
 
-function SkillBoardItem({ onPress }: { onPress: () => void }) {
+function SkillBoardItem({ onPress, t }: { onPress: () => void; t: (key: string) => string }) {
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={styles.skillBoardWrapper}>
       <LinearGradient
@@ -430,7 +431,7 @@ function SkillBoardItem({ onPress }: { onPress: () => void }) {
       >
         <View style={styles.skillBoardLeft}>
           <Ionicons name="trophy" size={22} color="#fff" />
-          <Text style={styles.skillBoardLabel}>Skill Board</Text>
+          <Text style={styles.skillBoardLabel}>{t("skillBoard")}</Text>
         </View>
         <View style={styles.skillBoardBadge}>
           <Text style={styles.skillBoardBadgeText}>⭐ TOP</Text>
@@ -442,7 +443,7 @@ function SkillBoardItem({ onPress }: { onPress: () => void }) {
 
 // 🔥 Daily Streak Quiz — flame + quiz icon combo, sits just below Wallet
 // (the app's "Coins/Rewards" engagement section) per spec §1.
-function DailyStreakQuizDrawerItem({ onPress, colors }: { onPress: () => void; colors: any }) {
+function DailyStreakQuizDrawerItem({ onPress, colors, t }: { onPress: () => void; colors: any; t: (key: string) => string }) {
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -453,7 +454,7 @@ function DailyStreakQuizDrawerItem({ onPress, colors }: { onPress: () => void; c
         <Ionicons name="help-circle" size={20} color="#f97316" />
         <Text style={styles.streakQuizFlame}>🔥</Text>
       </View>
-      <Text style={[styles.label, { color: colors.text }]}>Daily Streak Quiz</Text>
+      <Text style={[styles.label, { color: colors.text }]}>{t("dailyStreakQuiz")}</Text>
       <View style={styles.streakQuizBadge}>
         <Text style={styles.streakQuizBadgeText}>NEW</Text>
       </View>
