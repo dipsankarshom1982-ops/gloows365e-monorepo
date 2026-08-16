@@ -92,6 +92,9 @@ export { getContestLesson } from "./contestLesson";
 // ── VidyaStar Board Aggregation ───────────────────────────────────────────────
 export { onContestParticipantWrite } from "./vidyastarBoard";
 
+// ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
+export { registerTutorAccount, submitTutorVerification, reviewTutorVerification } from "./tutorAccounts";
+
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 export { applyReferral, getReferralLeaderboard } from "./referral";
 

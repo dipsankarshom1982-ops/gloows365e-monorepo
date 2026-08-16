@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  padding: 0;
+  margin: 0;
+}
+
+/* Committing to a single dark theme for Phase 1a — matches
+   packages/tutor-ui/src/tokens.ts, which only defines a dark-shell
+   semantic palette (no light-mode tokens yet). A light theme is a later
+   addition to tokens.ts, not something to half-implement here. */

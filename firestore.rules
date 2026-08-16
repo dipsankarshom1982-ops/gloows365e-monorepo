@@ -416,6 +416,35 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 🎫 AI GURU CREDITS — pay-as-you-go, coexists with subscriptions above.
+    // Balance + ledger are Admin-SDK-only, same reasoning as vCoinTransactions:
+    // every mutation goes through aiGuruCreditDebit.ts / aiGuruCredits.ts
+    // Cloud Functions so a client can never grant or spend its own credits.
+    match /aiGuruCredits/{uid} {
+      allow read:  if request.auth.uid == uid || request.auth.token.admin == true;
+      allow write: if false;
+      match /transactions/{txId} {
+        allow read:                   if request.auth.uid == uid || request.auth.token.admin == true;
+        allow create, update, delete: if false;
+      }
+    }
+    match /aiGuruCreditPacks/{packId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+    match /aiGuruCreditConfig/{docId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+    // Server-only — the security boundary for credit purchases. Order amount
+    // and credit count are derived from aiGuruCreditPacks at order-create
+    // time and read back from this doc at verify time, never from client
+    // input, so nobody can tamper with what a payment is worth after the
+    // fact (see aiGuruCredits.ts).
+    match /aiGuruCreditOrders/{orderId} {
+      allow read, write: if false;
+    }
+
     // 📚 SEEKHO MODULE
     match /seekho_courses/{courseId} {
       allow read: if request.auth != null;
@@ -622,6 +651,77 @@ service cloud.firestore {
         )
       );
       allow delete: if false;
+    }
+
+    // 🎓 GLOOWS TUTOR — Phase 1a. Role granted via Firebase custom claim
+    // (request.auth.token.role, set by functions/src/tutorAccounts.ts'
+    // registerTutorAccount — never a Firestore field, same rule this repo
+    // already follows for admins/{uid}) — not enforced here since these
+    // are owner-scoped docs; the claim matters for future collections
+    // (students-under-tutor, batches, etc.) that need to distinguish
+    // TUTOR/TEACHER/COACHING_CENTER, not this one.
+    //
+    // Profile writes happen directly from the client (no callable) — see
+    // functions/src/tutorAccounts.ts's header comment for why.
+    match /tutors/{uid} {
+      allow read:  if request.auth != null && (request.auth.uid == uid || request.auth.token.admin == true);
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Verification workflow doc. The tutor never writes this directly —
+    // both the "Submitted" transition (submitTutorVerification) and the
+    // admin review outcome (reviewTutorVerification) go through the Admin
+    // SDK server-side, which bypasses these rules entirely, so this rule
+    // only needs to grant the owner read access for the status-timeline UI
+    // and otherwise stay closed to client writes.
+    match /tutorVerifications/{uid} {
+      allow read:  if request.auth != null && (request.auth.uid == uid || request.auth.token.admin == true);
+      allow write: if request.auth != null && request.auth.token.admin == true;
+    }
+
+    // 🧑‍🎓 GLOOWS TUTOR — Phase 1b. A tutor's own manually-added roster
+    // entries. Auto-ID docs (a tutor has many students, no natural 1:1
+    // key), so ownership is checked via the tutorId field rather than the
+    // doc ID — same reasoning as prizeClaims/{claimId} above. No
+    // admin-read carve-out: a tutor's roster is private, admin has no
+    // product reason to browse it in this phase.
+    match /tutorStudents/{studentId} {
+      allow read:   if request.auth != null && resource.data.tutorId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.tutorId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.tutorId == request.auth.uid
+        && request.resource.data.tutorId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.tutorId == request.auth.uid;
+    }
+
+    // 📚 GLOOWS TUTOR — Phase 1c. A tutor's own batches (named groupings
+    // of their tutorStudents). Same owner-scoped-via-field shape as
+    // tutorStudents above — this is the "batches" collection that
+    // Phase 1a's comment (above, on the custom-claim block) already
+    // anticipated. Membership lives on tutorStudents.batchIds, not here;
+    // this rule only governs the batch doc itself.
+    match /tutorBatches/{batchId} {
+      allow read:   if request.auth != null && resource.data.tutorId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.tutorId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.tutorId == request.auth.uid
+        && request.resource.data.tutorId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.tutorId == request.auth.uid;
+    }
+
+    // 🗓️ GLOOWS TUTOR — Phase 1d. A tutor's scheduled class sessions, each
+    // belonging to one tutorBatch (batchId field, not enforced here — the
+    // batch reference is just data, ownership is still checked the same
+    // tutorId-field way as tutorBatches/tutorStudents above). "Cancel" is
+    // a status update (allow update covers it), not a delete — no
+    // hard-delete path this phase.
+    match /tutorClasses/{classId} {
+      allow read:   if request.auth != null && resource.data.tutorId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.tutorId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.tutorId == request.auth.uid
+        && request.resource.data.tutorId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.tutorId == request.auth.uid;
     }
 
   }
