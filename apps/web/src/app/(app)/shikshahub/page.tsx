@@ -7,6 +7,13 @@
 // featured-curation source yet — just one subject-chip filter row over the
 // full verified-tutor list. See apps/web/src/lib/shikshahub/index.ts for
 // the data layer this reads from.
+//
+// UI-only redesign pass (data layer / fetchAllTutors untouched): responsive
+// card grid (1/2/3/4 cols by viewport, see _shared.tsx's .shikshahub-grid),
+// richer per-card info, and a slightly more polished hero. No rating field
+// is rendered anywhere — functions/src/tutorMarketplace.ts's SAFE_FIELDS
+// list (mirrored into MarketplaceTutor) has no such field, so there is
+// nothing real to show; not shown here rather than invented.
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -16,6 +23,7 @@ import {
   fetchAllTutors,
   type MarketplaceTutor,
 } from "@/lib/shikshahub";
+import { ShikshaHubStyles, SubjectChips, VerifiedBadge } from "./_shared";
 
 export default function ShikshaHubPage() {
   const router = useRouter();
@@ -36,14 +44,17 @@ export default function ShikshaHubPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+      <ShikshaHubStyles />
       <Hero />
 
       {!loading && subjectChips.length > 0 && (
-        <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "0 16px 16px" }}>
-          <Chip label={t("shikshaHubAllSubjects", "All")} active={subject === null} onClick={() => setSubject(null)} />
-          {subjectChips.map((s) => (
-            <Chip key={s} label={s} active={subject === s} onClick={() => setSubject(s)} />
-          ))}
+        <div className="shikshahub-container" style={{ padding: "0 16px 18px" }}>
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+            <Chip label={t("shikshaHubAllSubjects", "All")} active={subject === null} onClick={() => setSubject(null)} />
+            {subjectChips.map((s) => (
+              <Chip key={s} label={s} active={subject === s} onClick={() => setSubject(s)} />
+            ))}
+          </div>
         </div>
       )}
 
@@ -57,13 +68,12 @@ export default function ShikshaHubPage() {
           </div>
         </div>
       ) : (
-        <div style={{
-          display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-          gap: 14, padding: "0 16px 40px",
-        }}>
-          {filtered.map((tu) => (
-            <TutorCard key={tu.uid} tutor={tu} onClick={() => router.push(`/shikshahub/profile?id=${tu.uid}`)} />
-          ))}
+        <div className="shikshahub-container" style={{ padding: "0 16px 48px" }}>
+          <div className="shikshahub-grid">
+            {filtered.map((tu) => (
+              <TutorCard key={tu.uid} tutor={tu} onClick={() => router.push(`/shikshahub/profile?id=${tu.uid}`)} />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -75,14 +85,21 @@ function Hero() {
   return (
     <div style={{
       background: "linear-gradient(135deg, #0f766e, #0d9488, #14b8a6)",
-      padding: "16px 20px 26px", borderBottomLeftRadius: 24, borderBottomRightRadius: 24,
+      padding: "24px 20px 34px", borderBottomLeftRadius: 24, borderBottomRightRadius: 24,
     }}>
-      <div style={{ fontSize: 40, marginTop: 10 }}>🎓</div>
-      <div style={{ color: "#fff", fontSize: 26, fontWeight: 900, marginTop: 2 }}>
-        {t("shikshaHubTitle", "ShikshaHub")}
-      </div>
-      <div style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: 600, marginTop: 4, maxWidth: 420 }}>
-        {t("shikshaHubSubtitle", "Verified tutors, ready to teach — browse and find the right fit")}
+      <div className="shikshahub-container" style={{ padding: 0 }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: 18, background: "rgba(255,255,255,0.16)",
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28,
+        }}>
+          🎓
+        </div>
+        <div style={{ color: "#fff", fontSize: 28, fontWeight: 900, marginTop: 12, letterSpacing: -0.3 }}>
+          {t("shikshaHubTitle", "ShikshaHub")}
+        </div>
+        <div style={{ color: "rgba(255,255,255,0.88)", fontSize: 13, fontWeight: 600, marginTop: 5, maxWidth: 460, lineHeight: "19px" }}>
+          {t("shikshaHubSubtitle", "Find verified tutors who match your learning needs.")}
+        </div>
       </div>
     </div>
   );
@@ -108,30 +125,58 @@ function TutorCard({ tutor, onClick }: { tutor: MarketplaceTutor; onClick: () =>
   return (
     <button
       onClick={onClick}
+      className="shikshahub-card"
       style={{
         textAlign: "left", cursor: "pointer", border: "1px solid var(--border)",
-        borderRadius: 16, overflow: "hidden", background: "var(--bg-card)", padding: 0,
+        borderRadius: 18, overflow: "hidden", background: "var(--bg-card)", padding: 0,
+        display: "flex", flexDirection: "column", height: "100%", width: "100%",
       }}
     >
       <div style={{
-        height: 120, background: tutor.profilePic ? `url(${tutor.profilePic}) center/cover` : "rgba(20,184,166,0.12)",
+        position: "relative", aspectRatio: "4 / 3",
+        background: tutor.profilePic ? `url(${tutor.profilePic}) center/cover` : "rgba(20,184,166,0.12)",
         display: "flex", alignItems: "center", justifyContent: "center",
       }}>
-        {!tutor.profilePic && <span style={{ fontSize: 34 }}>🧑‍🏫</span>}
+        {!tutor.profilePic && <span style={{ fontSize: 38 }}>🧑‍🏫</span>}
+        <div style={{ position: "absolute", top: 10, left: 10 }}>
+          <VerifiedBadge compact />
+        </div>
       </div>
-      <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 4 }}>
-        <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>{tutor.name || "Tutor"}</span>
-        {!!tutor.qualification && (
-          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>{tutor.qualification}</span>
+
+      <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+        <span style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", lineHeight: "19px" }}>
+          {tutor.name || "Tutor"}
+        </span>
+
+        {(!!tutor.qualification || tutor.teachingExperienceYears != null) && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>
+            {!!tutor.qualification && <span>🎓 {tutor.qualification}</span>}
+            {!!tutor.qualification && tutor.teachingExperienceYears != null && <span>·</span>}
+            {tutor.teachingExperienceYears != null && <span>{tutor.teachingExperienceYears} yrs exp</span>}
+          </div>
         )}
-        {tutor.subjects.length > 0 && (
-          <span style={{ fontSize: 11, fontWeight: 700, color: "#14b8a6" }}>{tutor.subjects.slice(0, 3).join(", ")}</span>
-        )}
-        {tutor.teachingExperienceYears != null && (
-          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)" }}>
-            {tutor.teachingExperienceYears} yrs experience
+
+        {!!tutor.preferredLanguage && (
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>
+            🗣️ {tutor.preferredLanguage}
           </span>
         )}
+
+        {tutor.subjects.length > 0 && <SubjectChips subjects={tutor.subjects} limit={3} />}
+
+        {!!tutor.bio && (
+          <p className="shikshahub-clamp2" style={{ fontSize: 12, lineHeight: "17px", fontWeight: 500, color: "var(--text-muted)", margin: 0 }}>
+            {tutor.bio}
+          </p>
+        )}
+
+        <div style={{
+          marginTop: "auto", paddingTop: 8, display: "flex", alignItems: "center",
+          justifyContent: "space-between", fontSize: 12.5, fontWeight: 800, color: "#0d9488",
+        }}>
+          View Profile
+          <span aria-hidden>→</span>
+        </div>
       </div>
     </button>
   );

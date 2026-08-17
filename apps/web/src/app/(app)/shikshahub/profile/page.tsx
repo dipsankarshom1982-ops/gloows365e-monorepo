@@ -9,11 +9,23 @@
 // apps/mobile/app/shikshahub/[uid].tsx (mobile has a real native router).
 // No contact/enquiry action here — explicitly deferred, see the approved
 // plan's Context section.
+//
+// UI-only redesign pass (data layer / fetchTutorById untouched): the old
+// version used a 220px full-bleed "background image behind everything"
+// hero with the back button absolutely-positioned on top of it, which read
+// as the tutor photo running into AppHeader above it. Replaced with a
+// bounded profile-card avatar (TutorAvatar) that sits in normal document
+// flow below the header — it structurally cannot overlap it. Also switches
+// to a 2-column layout on desktop (profile+about left, action card right,
+// sticky) and stacks on mobile, per the approved redesign brief. Booking/
+// contact actions are UI-only placeholders (disabled, "coming soon") since
+// there is no backend support for them yet — not wired to fake behaviour.
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { fetchTutorById, type MarketplaceTutor } from "@/lib/shikshahub";
+import { ShikshaHubStyles, SubjectChips, TutorAvatar, VerifiedBadge } from "../_shared";
 
 function ShikshaHubProfileContent() {
   const searchParams = useSearchParams();
@@ -53,63 +65,123 @@ function ShikshaHubProfileContent() {
     );
   }
 
+  const hasMeta = !!tutor.qualification || tutor.teachingExperienceYears != null || !!tutor.preferredLanguage;
+
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", paddingBottom: 60 }}>
-      <div style={{
-        position: "relative", height: 220,
-        background: tutor.profilePic ? `url(${tutor.profilePic}) center/cover` : "linear-gradient(135deg, #0f766e, #14b8a6)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
+      <ShikshaHubStyles />
+
+      <div className="shikshahub-container" style={{ padding: "16px 16px 40px" }}>
         <button
           onClick={() => router.back()}
-          style={{ position: "absolute", top: 14, left: 16, width: 38, height: 38, borderRadius: 19, background: "rgba(0,0,0,0.45)", border: "none", color: "#fff", fontSize: 18, cursor: "pointer" }}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 16,
+            background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12,
+            padding: "8px 14px", color: "var(--text)", fontSize: 13, fontWeight: 700, cursor: "pointer",
+          }}
         >
-          ‹
+          <span aria-hidden>‹</span> {t("back", "Back")}
         </button>
-        {!tutor.profilePic && <span style={{ fontSize: 56 }}>🧑‍🏫</span>}
-      </div>
 
-      <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12, maxWidth: 640, margin: "0 auto" }}>
-        <div style={{ fontSize: 22, fontWeight: 900, color: "var(--text)" }}>{tutor.name || "Tutor"}</div>
+        <div className="shikshahub-detail-grid">
+          {/* ── LEFT: profile + about ───────────────────────────── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{
+              border: "1px solid var(--border)", borderRadius: 20, background: "var(--bg-card)",
+              padding: 20, display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start",
+            }}>
+              <TutorAvatar tutor={tutor} size={92} ring />
 
-        {tutor.subjects.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {tutor.subjects.map((s) => (
-              <span key={s} style={{ fontSize: 11, fontWeight: 700, border: "1px solid #14b8a6", borderRadius: 20, padding: "5px 10px", color: "#14b8a6" }}>
-                {s}
-              </span>
-            ))}
-          </div>
-        )}
+              <div style={{ flex: 1, minWidth: 200, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 21, fontWeight: 900, color: "var(--text)" }}>
+                    {tutor.name || "Tutor"}
+                  </span>
+                  <VerifiedBadge />
+                </div>
 
-        {!!tutor.qualification && (
-          <Field label={t("shikshaHubQualificationLabel", "Qualification")} value={tutor.qualification} />
-        )}
-        {tutor.teachingExperienceYears != null && (
-          <Field label={t("shikshaHubExperienceLabel", "Experience")} value={`${tutor.teachingExperienceYears} years`} />
-        )}
-        {!!tutor.preferredLanguage && (
-          <Field label={t("shikshaHubLanguageLabel", "Preferred Language")} value={tutor.preferredLanguage} />
-        )}
-        {!!tutor.bio && (
-          <div style={{ marginTop: 4 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>
-              {t("shikshaHubBioLabel", "About")}
+                {hasMeta && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {!!tutor.qualification && (
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>
+                        🎓 {tutor.qualification}
+                      </span>
+                    )}
+                    {tutor.teachingExperienceYears != null && (
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>
+                        ⏳ {tutor.teachingExperienceYears} years experience
+                      </span>
+                    )}
+                    {!!tutor.preferredLanguage && (
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>
+                        🗣️ {tutor.preferredLanguage}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {tutor.subjects.length > 0 && <SubjectChips subjects={tutor.subjects} />}
+              </div>
             </div>
-            <div style={{ fontSize: 13, lineHeight: "20px", fontWeight: 500, color: "var(--text)" }}>{tutor.bio}</div>
+
+            {!!tutor.bio && (
+              <div style={{
+                border: "1px solid var(--border)", borderRadius: 20, background: "var(--bg-card)", padding: 20,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 8 }}>
+                  {t("shikshaHubAboutTitle", "About the Tutor")}
+                </div>
+                <div style={{ fontSize: 13.5, lineHeight: "21px", fontWeight: 500, color: "var(--text-muted)" }}>
+                  {tutor.bio}
+                </div>
+              </div>
+            )}
           </div>
-        )}
+
+          {/* ── RIGHT: action card ──────────────────────────────── */}
+          <div className="shikshahub-action-card">
+            <div style={{
+              border: "1px solid rgba(20,184,166,0.35)", borderRadius: 20,
+              background: "linear-gradient(180deg, rgba(20,184,166,0.09), var(--bg-card) 55%)",
+              padding: 20, display: "flex", flexDirection: "column", gap: 12,
+            }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>
+                {t("shikshaHubInterested", "Interested in learning with")} {tutor.name || "this tutor"}?
+              </div>
+
+              <ActionButton label={t("shikshaHubBookTrial", "Book a Trial")} primary />
+              <ActionButton label={t("shikshaHubBookTutor", "Book Tutor")} primary />
+              <ActionButton label={t("shikshaHubContactTutor", "Contact Tutor")} />
+
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textAlign: "center", marginTop: 2 }}>
+                {t("shikshaHubActionsComingSoon", "Booking & messaging are coming soon")}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+/** UI-only placeholder — no booking/contact backend exists yet
+ *  (see this file's header comment), so these stay disabled rather than
+ *  wired to fake behaviour. */
+function ActionButton({ label, primary }: { label: string; primary?: boolean }) {
   return (
-    <div>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{value}</div>
-    </div>
+    <button
+      disabled
+      title="Coming soon"
+      style={{
+        width: "100%", border: primary ? "none" : "1px solid var(--border)",
+        borderRadius: 14, padding: "13px 0", fontSize: 14, fontWeight: 800,
+        cursor: "not-allowed", opacity: 0.55,
+        background: primary ? "linear-gradient(90deg, #0f766e, #14b8a6)" : "var(--bg-card)",
+        color: primary ? "#fff" : "var(--text)",
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
