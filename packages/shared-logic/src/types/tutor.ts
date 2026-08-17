@@ -9,6 +9,24 @@
 
 export type TutorRole = "TUTOR" | "TEACHER" | "COACHING_CENTER";
 
+// ShikshaHub Phase 1 (minimum viable booking) — a tutor's own declared
+// weekly availability. Deliberately simple: one enabled/start/end window
+// per weekday, no timezone, no recurrence exceptions, no per-slot student
+// caps. Full calendar/timezone handling is explicitly later-phase scope
+// per the Phase 1 architecture audit — this shape is meant to be replaced
+// wholesale then, not incrementally extended in place.
+export type TutorWeekday =
+  | "monday" | "tuesday" | "wednesday" | "thursday"
+  | "friday" | "saturday" | "sunday";
+
+export type TutorDayAvailability = {
+  enabled: boolean;
+  start?: string; // "HH:mm", 24h
+  end?: string;   // "HH:mm", 24h
+};
+
+export type TutorWeeklyAvailability = Partial<Record<TutorWeekday, TutorDayAvailability>>;
+
 export type TutorVerificationStatus =
   | "Draft"
   | "Submitted"
@@ -42,6 +60,12 @@ export type TutorProfile = {
   // TutorVerification.status (which tracks the review workflow itself).
   verified?: boolean;
   role?: "tutor" | "admin" | "tester";
+  // ShikshaHub Phase 1 — flat per-session rate in whole INR (no paise,
+  // no per-subject/package pricing yet). Validated server-side (positive
+  // integer) by firestore.rules' tutors/{uid} write rule and again by
+  // requestBooking before it's snapshotted onto a booking.
+  sessionFee?: number;
+  availability?: TutorWeeklyAvailability;
   [key: string]: any;
 };
 
@@ -62,6 +86,11 @@ export type TutorMarketplaceProfile = {
   preferredLanguage?: string;
   profilePic?: string;
   tutorRole?: TutorRole;
+  // Both public-safe (a price and a weekly hour range, no personal data) —
+  // mirrored so ShikshaHub's booking panel can show a fee and compute slot
+  // options without ever widening tutors/{uid}'s own owner+admin-only read.
+  sessionFee?: number;
+  availability?: TutorWeeklyAvailability;
   updatedAt?: unknown;
 };
 

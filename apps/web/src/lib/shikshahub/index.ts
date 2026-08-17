@@ -12,9 +12,14 @@ import {
   getDoc,
   getDocs,
   getFirestore,
+  onSnapshot,
   orderBy,
   query,
+  type Unsubscribe,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "@/lib/firebase";
+import type { Booking, BookingSessionType, TutorWeeklyAvailability } from "@gloows/shared-logic";
 
 export interface MarketplaceTutor {
   uid: string;
@@ -26,6 +31,12 @@ export interface MarketplaceTutor {
   preferredLanguage: string;
   profilePic: string;
   tutorRole: string;
+  // ShikshaHub Phase 1 — both optional/nullable: older mirror docs synced
+  // before this phase landed won't have them, and the UI must not invent
+  // a fee/schedule that isn't really there (see the Phase 1 audit's "hide
+  // fields that aren't available" rule, same as every other field here).
+  sessionFee: number | null;
+  availability: TutorWeeklyAvailability | null;
 }
 
 const COLLECTION = "tutorMarketplaceProfiles";
@@ -42,6 +53,8 @@ function fromDoc(d: any): MarketplaceTutor {
     preferredLanguage: data.preferredLanguage ?? "",
     profilePic: data.profilePic ?? "",
     tutorRole: data.tutorRole ?? "TUTOR",
+    sessionFee: Number.isInteger(data.sessionFee) && data.sessionFee > 0 ? data.sessionFee : null,
+    availability: data.availability ?? null,
   };
 }
 
@@ -69,4 +82,83 @@ export function deriveSubjectChips(tutors: MarketplaceTutor[]): string[] {
   const set = new Set<string>();
   for (const t of tutors) for (const s of t.subjects) if (s.trim()) set.add(s.trim());
   return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+// ─── ShikshaHub Phase 1 — minimum viable tutor booking ─────────────────────
+// No payment here (see requestBooking's own header comment in
+// functions/src/tutorBooking.ts) — this just calls the two callables and
+// listens to the resulting bookings/{id} doc for a live status update.
+
+const WEEKDAY_KEYS = [
+  "sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+] as const;
+
+/** "YYYY-MM-DD" → the matching TutorWeekday key, parsed as a local date
+ *  (not UTC) so "picking today" always maps to today's own weekday
+ *  regardless of timezone offset — deliberately simple, no timezone
+ *  conversion beyond that (see the Phase 1 audit: full timezone handling
+ *  is Phase 3 scope). */
+export function weekdayKeyForDate(dateStr: string): (typeof WEEKDAY_KEYS)[number] | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(d.getTime())) return null;
+  return WEEKDAY_KEYS[d.getDay()];
+}
+
+/** Turns a tutor's declared "enabled 17:00–20:00" window for one weekday
+ *  into a flat list of hour-long "17:00–18:00" style slot option strings.
+ *  Deliberately no conflict detection / already-booked exclusion yet —
+ *  that needs real availability-vs-existing-bookings cross-checking,
+ *  explicitly Phase 3 scope per the audit. */
+export function slotOptionsForDate(
+  availability: TutorWeeklyAvailability | null,
+  dateStr: string
+): { label: string; start: string; end: string }[] {
+  const key = weekdayKeyForDate(dateStr);
+  const day = key ? availability?.[key] : undefined;
+  if (!day?.enabled || !day.start || !day.end) return [];
+
+  const [startH] = day.start.split(":").map(Number);
+  const [endH]   = day.end.split(":").map(Number);
+  if (!Number.isFinite(startH) || !Number.isFinite(endH) || endH <= startH) return [];
+
+  const slots: { label: string; start: string; end: string }[] = [];
+  for (let h = startH; h < endH; h++) {
+    const start = `${String(h).padStart(2, "0")}:00`;
+    const end   = `${String(h + 1).padStart(2, "0")}:00`;
+    slots.push({ label: `${start} – ${end}`, start, end });
+  }
+  return slots;
+}
+
+export interface RequestBookingInput {
+  tutorUid: string;
+  subject: string;
+  sessionType: BookingSessionType;
+  requestedDate: string;
+  requestedStartTime: string;
+  requestedEndTime: string;
+}
+
+export async function requestBookingCall(
+  input: RequestBookingInput
+): Promise<{ bookingId: string; status: Booking["status"] }> {
+  const fn = httpsCallable<RequestBookingInput, { bookingId: string; status: Booking["status"] }>(
+    functions, "requestBooking"
+  );
+  const res = await fn(input);
+  return res.data;
+}
+
+/** Live status for one booking the current student owns — relies on
+ *  firestore.rules' bookings/{id} read rule (studentUid/tutorUid ==
+ *  caller), not on trusting anything client-side. */
+export function listenToBooking(bookingId: string, onChange: (booking: Booking | null) => void): Unsubscribe {
+  const db = getFirestore();
+  return onSnapshot(
+    doc(db, "bookings", bookingId),
+    (snap) => onChange(snap.exists() ? ({ id: snap.id, ...snap.data() } as Booking) : null),
+    () => onChange(null)
+  );
 }

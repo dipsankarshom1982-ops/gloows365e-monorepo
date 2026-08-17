@@ -98,6 +98,9 @@ export { registerTutorAccount, submitTutorVerification, reviewTutorVerification 
 // ── ShikshaHub — public tutor marketplace mirror ────────────────────────────────
 export { syncTutorMarketplaceProfile } from "./tutorMarketplace";
 
+// ── ShikshaHub — Phase 1 minimum viable tutor booking ───────────────────────────
+export { requestBooking, respondToBooking } from "./tutorBooking";
+
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 export { applyReferral, getReferralLeaderboard } from "./referral";
 

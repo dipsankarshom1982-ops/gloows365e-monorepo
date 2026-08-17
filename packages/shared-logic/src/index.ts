@@ -27,6 +27,7 @@ export * from "./hooks/useReferralConfig";
 export * from "./hooks/useStories";
 export * from "./hooks/useBatchStudents";
 export * from "./hooks/useTutorBatches";
+export * from "./hooks/useTutorBookings";
 export * from "./hooks/useTutorClasses";
 export * from "./hooks/useTutorStudents";
 
@@ -35,6 +36,7 @@ export * from "./services/aiGuruApi";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 export * from "./types/aiGuru";
+export * from "./types/booking";
 export * from "./types/referral";
 export * from "./types/skillBattle";
 export * from "./types/student";

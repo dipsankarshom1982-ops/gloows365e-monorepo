@@ -140,5 +140,16 @@
   "noBatchesForClassSubtitle": "पहले एक बैच बनाएं, फिर उसके लिए कक्षा शेड्यूल करें।",
   "todaysClassesLabel": "आज की कक्षाएं",
   "moreTitle": "और",
-  "moreNavLabel": "और"
+  "moreNavLabel": "और",
+
+  "shikshaHubSessionFeeLabel": "सेशन शुल्क (₹, प्रति सेशन)",
+  "shikshaHubFeeInvalid": "सेशन शुल्क 0 से अधिक एक पूर्ण संख्या होनी चाहिए",
+  "shikshaHubAvailabilityLabel": "साप्ताहिक उपलब्धता",
+  "shikshaHubBookingRequestsTitle": "बुकिंग अनुरोध",
+  "shikshaHubNoBookingsTitle": "अभी तक कोई बुकिंग अनुरोध नहीं",
+  "shikshaHubNoBookingsSubtitle": "जो छात्र शिक्षाहब पर सेशन का अनुरोध करेंगे, वे यहाँ दिखाई देंगे।",
+  "shikshaHubTrial": "ट्रायल",
+  "shikshaHubRegular": "नियमित",
+  "shikshaHubAccept": "स्वीकार करें",
+  "shikshaHubDecline": "अस्वीकार करें"
 }

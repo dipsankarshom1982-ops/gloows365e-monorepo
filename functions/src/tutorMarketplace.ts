@@ -21,6 +21,12 @@ import {
 const SAFE_FIELDS = [
   "name", "bio", "subjects", "qualification",
   "teachingExperienceYears", "preferredLanguage", "profilePic", "tutorRole",
+  // ShikshaHub Phase 1 — sessionFee (a price) and availability (a weekly
+  // hour range) are both public-safe the same way the fields above are:
+  // no phone/email, nothing PII. Mirrored so the booking panel can show a
+  // fee and compute slot options without widening tutors/{uid}'s own
+  // owner+admin-only read (see that collection's firestore.rules match).
+  "sessionFee", "availability",
 ] as const;
 
 export const syncTutorMarketplaceProfile = onDocumentWritten(

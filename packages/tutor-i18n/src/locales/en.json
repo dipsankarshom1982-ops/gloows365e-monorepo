@@ -140,5 +140,16 @@
   "noBatchesForClassSubtitle": "Create a batch first, then schedule a class for it.",
   "todaysClassesLabel": "Today's Classes",
   "moreTitle": "More",
-  "moreNavLabel": "More"
+  "moreNavLabel": "More",
+
+  "shikshaHubSessionFeeLabel": "Session fee (₹, per session)",
+  "shikshaHubFeeInvalid": "Session fee must be a whole number greater than 0",
+  "shikshaHubAvailabilityLabel": "Weekly availability",
+  "shikshaHubBookingRequestsTitle": "Booking Requests",
+  "shikshaHubNoBookingsTitle": "No booking requests yet",
+  "shikshaHubNoBookingsSubtitle": "Students who request a session on ShikshaHub will show up here.",
+  "shikshaHubTrial": "Trial",
+  "shikshaHubRegular": "Regular",
+  "shikshaHubAccept": "Accept",
+  "shikshaHubDecline": "Decline"
 }

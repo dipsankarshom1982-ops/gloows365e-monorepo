@@ -664,8 +664,24 @@ service cloud.firestore {
     // Profile writes happen directly from the client (no callable) — see
     // functions/src/tutorAccounts.ts's header comment for why.
     match /tutors/{uid} {
-      allow read:  if request.auth != null && (request.auth.uid == uid || request.auth.token.admin == true);
-      allow write: if request.auth != null && request.auth.uid == uid;
+      allow read:   if request.auth != null && (request.auth.uid == uid || request.auth.token.admin == true);
+      // ShikshaHub Phase 1 — sessionFee is the one profile field that
+      // actually needs a server-side check (it drives what a student
+      // gets charged in a later phase), so it's validated right here
+      // rather than needing a callable for what's otherwise a plain
+      // direct-Firestore-write field (see this match block's original
+      // comment above). Split from a single `allow write` into
+      // create/update/delete specifically so this check never runs
+      // against request.resource.data on a delete, where it doesn't
+      // exist. availability isn't validated beyond "the owner wrote
+      // it" — same trust level qualification/subjects/bio already have.
+      allow create: if request.auth != null && request.auth.uid == uid
+        && (!("sessionFee" in request.resource.data)
+          || (request.resource.data.sessionFee is int && request.resource.data.sessionFee > 0));
+      allow update: if request.auth != null && request.auth.uid == uid
+        && (!("sessionFee" in request.resource.data)
+          || (request.resource.data.sessionFee is int && request.resource.data.sessionFee > 0));
+      allow delete: if request.auth != null && request.auth.uid == uid;
     }
 
     // Verification workflow doc. The tutor never writes this directly —
@@ -731,6 +747,30 @@ service cloud.firestore {
         && resource.data.tutorId == request.auth.uid
         && request.resource.data.tutorId == request.auth.uid;
       allow delete: if request.auth != null && resource.data.tutorId == request.auth.uid;
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 1 minimum viable tutor booking. A booking
+    // request between one student and one verified tutor — deliberately
+    // NOT connected to tutorStudents/tutorBatches/tutorClasses above
+    // (those are the tutor's own private CRM for students they already
+    // teach; this is the public-marketplace booking relationship — see
+    // the Phase 1 architecture audit for why keeping them separate
+    // matters). Auto-ID docs, ownership checked via the studentUid/
+    // tutorUid fields, same shape as tutorStudents/tutorBatches above.
+    //
+    // `allow write: if false` is deliberate, not a placeholder — every
+    // write (create via requestBooking, the requested->accepted/declined
+    // transition via respondToBooking) goes through
+    // functions/src/tutorBooking.ts's two callables over the Admin SDK,
+    // which bypasses these rules entirely. This is what stops a client
+    // from ever posting an arbitrary "accepted" status directly, editing
+    // someone else's booking, or reassigning studentUid/tutorUid after
+    // the fact — none of that is expressible as a rule a client write
+    // could satisfy, so the client path is closed altogether instead.
+    match /bookings/{bookingId} {
+      allow read: if request.auth != null
+        && (resource.data.studentUid == request.auth.uid || resource.data.tutorUid == request.auth.uid);
+      allow write: if false;
     }
 
   }
