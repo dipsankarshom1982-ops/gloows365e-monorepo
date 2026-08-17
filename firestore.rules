@@ -679,6 +679,15 @@ service cloud.firestore {
       allow write: if request.auth != null && request.auth.token.admin == true;
     }
 
+    // 🎓 SHIKSHAHUB — public-safe mirror of verified tutor profiles, written
+    // only by syncTutorMarketplaceProfile (functions/src/tutorMarketplace.ts),
+    // which runs via the Admin SDK and bypasses these rules entirely. Never
+    // phone/email — see tutors/{uid} above for why that stays owner+admin-only.
+    match /tutorMarketplaceProfiles/{uid} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
     // 🧑‍🎓 GLOOWS TUTOR — Phase 1b. A tutor's own manually-added roster
     // entries. Auto-ID docs (a tutor has many students, no natural 1:1
     // key), so ownership is checked via the tutorId field rather than the

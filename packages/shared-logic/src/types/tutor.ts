@@ -32,12 +32,37 @@ export type TutorProfile = {
   teachingExperienceYears?: number;
   preferredLanguage?: string;
   profilePic?: string;
+  // Free-text public bio shown on the tutor's ShikshaHub marketplace
+  // listing (see TutorMarketplaceProfile below) — added onto this same
+  // doc without a schema migration, same as this file's other Phase 1a
+  // comment already anticipated.
+  bio?: string;
   // Set true only by reviewTutorVerification's approve path — this is the
   // marketplace-visibility eligibility flag, distinct from
   // TutorVerification.status (which tracks the review workflow itself).
   verified?: boolean;
   role?: "tutor" | "admin" | "tester";
   [key: string]: any;
+};
+
+// tutorMarketplaceProfiles/{uid} — public-safe mirror of a verified tutor's
+// tutors/{uid} doc, written only by functions/src/tutorMarketplace.ts's
+// syncTutorMarketplaceProfile trigger (Admin SDK, bypasses firestore.rules
+// entirely — the collection's own rules block all client writes). Never
+// phone/email, unlike TutorProfile above. Doc exists iff
+// tutors/{uid}.verified === true; deleted by the trigger the moment that
+// flips false. Read by apps/web's and apps/mobile's ShikshaHub screens.
+export type TutorMarketplaceProfile = {
+  uid: string;
+  name?: string;
+  bio?: string;
+  subjects?: string[];
+  qualification?: string;
+  teachingExperienceYears?: number;
+  preferredLanguage?: string;
+  profilePic?: string;
+  tutorRole?: TutorRole;
+  updatedAt?: unknown;
 };
 
 // tutorVerifications/{uid} — one doc per tutor, tracks the review workflow

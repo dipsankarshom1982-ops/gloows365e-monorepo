@@ -1,0 +1,168 @@
+// PATH: apps/mobile/app/(drawer)/(tabs)/shikshahub.tsx
+// ShikshaHub — browsable marketplace of verified Gloows Tutor profiles.
+// Mirrors apps/web/src/app/(app)/shikshahub/page.tsx. Registered as a tab
+// via ALL_SCREENS + DEFAULT_MODULES in ../_layout.tsx and the Firestore
+// appModules/shikshahub doc (see apps/admin/src/pages/AppModules.tsx).
+
+import { useEffect, useMemo, useState } from "react";
+import { useTheme } from "@/context/ThemeContext";
+import { useStudentProfile } from "@gloows/shared-logic";
+import { useAppTranslation } from "@/context/LanguageContext";
+import {
+  deriveSubjectChips,
+  fetchAllTutors,
+  type MarketplaceTutor,
+} from "@/lib/shikshahub";
+import { router } from "expo-router";
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import Header from "@/components/header";
+
+export default function ShikshaHubHomeScreen() {
+  const { colors } = useTheme();
+  const { t } = useAppTranslation();
+  const { user, authLoading } = useStudentProfile();
+  const [tutors, setTutors]   = useState<MarketplaceTutor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [subject, setSubject] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchAllTutors().then(setTutors).finally(() => setLoading(false));
+  }, []);
+
+  const subjectChips = useMemo(() => deriveSubjectChips(tutors), [tutors]);
+  const filtered = useMemo(
+    () => (subject ? tutors.filter((tu) => tu.subjects.includes(subject)) : tutors),
+    [tutors, subject]
+  );
+
+  if (!authLoading && !user) {
+    return (
+      <SafeAreaView style={[S.container, { backgroundColor: colors.background }]}>
+        <Header />
+        <View style={S.center}>
+          <Text style={[S.emptyTitle, { color: colors.text }]}>{t("shikshaHubSignIn") ?? "Sign in to browse ShikshaHub"}</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={[S.container, { backgroundColor: colors.background }]}>
+      <Header />
+
+      <View style={S.titleWrap}>
+        <Text style={[S.title, { color: colors.text }]}>🎓 {t("shikshaHubTitle") ?? "ShikshaHub"}</Text>
+        <Text style={[S.subtitle, { color: colors.textSecondary }]}>
+          {t("shikshaHubSubtitle") ?? "Verified tutors, ready to teach — browse and find the right fit"}
+        </Text>
+      </View>
+
+      {!loading && subjectChips.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.chipRow}>
+          <Chip label={t("shikshaHubAllSubjects") ?? "All"} active={subject === null} onPress={() => setSubject(null)} />
+          {subjectChips.map((s) => (
+            <Chip key={s} label={s} active={subject === s} onPress={() => setSubject(s)} />
+          ))}
+        </ScrollView>
+      )}
+
+      {loading ? (
+        <View style={S.center}>
+          <ActivityIndicator color="#14b8a6" />
+        </View>
+      ) : filtered.length === 0 ? (
+        <View style={S.center}>
+          <Text style={{ fontSize: 40 }}>🎓</Text>
+          <Text style={[S.emptyText, { color: colors.textSecondary }]}>
+            {t("shikshaHubEmpty") ?? "No verified tutors yet — check back soon!"}
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => item.uid}
+          numColumns={2}
+          columnWrapperStyle={{ gap: 12 }}
+          contentContainerStyle={S.grid}
+          renderItem={({ item }) => (
+            <TutorCard
+              tutor={item}
+              colors={colors}
+              onPress={() => router.push({ pathname: "/shikshahub/[uid]", params: { uid: item.uid } })}
+            />
+          )}
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[S.chip, active ? S.chipActive : null]}
+    >
+      <Text style={[S.chipText, active ? S.chipTextActive : null]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function TutorCard({ tutor, colors, onPress }: { tutor: MarketplaceTutor; colors: any; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={[S.card, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={onPress} activeOpacity={0.85}>
+      <View style={S.cardImageWrap}>
+        {tutor.profilePic ? (
+          <Image source={{ uri: tutor.profilePic }} style={S.cardImage} resizeMode="cover" />
+        ) : (
+          <Text style={{ fontSize: 34 }}>🧑‍🏫</Text>
+        )}
+      </View>
+      <View style={S.cardBody}>
+        <Text style={[S.cardName, { color: colors.text }]} numberOfLines={1}>{tutor.name || "Tutor"}</Text>
+        {!!tutor.qualification && (
+          <Text style={[S.cardMeta, { color: colors.textSecondary }]} numberOfLines={1}>{tutor.qualification}</Text>
+        )}
+        {tutor.subjects.length > 0 && (
+          <Text style={S.cardSubjects} numberOfLines={1}>{tutor.subjects.slice(0, 3).join(", ")}</Text>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const S = StyleSheet.create({
+  container: { flex: 1 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 60 },
+  emptyTitle: { fontSize: 15, fontWeight: "700" },
+  emptyText: { fontSize: 13, fontWeight: "600", textAlign: "center" },
+
+  titleWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
+  title: { fontSize: 22, fontWeight: "900" },
+  subtitle: { fontSize: 12, fontWeight: "600", marginTop: 4 },
+
+  chipRow: { paddingHorizontal: 16, gap: 8, paddingBottom: 12 },
+  chip: { borderWidth: 1, borderColor: "#334155", borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
+  chipActive: { backgroundColor: "rgba(20,184,166,0.15)", borderColor: "#14b8a6" },
+  chipText: { fontSize: 12, fontWeight: "700", color: "#94a3b8" },
+  chipTextActive: { color: "#14b8a6" },
+
+  grid: { paddingHorizontal: 16, paddingBottom: 40, gap: 12 },
+  card: { flex: 1, borderRadius: 16, borderWidth: 1, overflow: "hidden" },
+  cardImageWrap: { height: 110, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(20,184,166,0.12)" },
+  cardImage: { width: "100%", height: "100%" },
+  cardBody: { padding: 10, gap: 3 },
+  cardName: { fontSize: 14, fontWeight: "800" },
+  cardMeta: { fontSize: 11, fontWeight: "600" },
+  cardSubjects: { fontSize: 11, fontWeight: "700", color: "#14b8a6" },
+});

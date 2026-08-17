@@ -95,6 +95,9 @@ export { onContestParticipantWrite } from "./vidyastarBoard";
 // ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
 export { registerTutorAccount, submitTutorVerification, reviewTutorVerification } from "./tutorAccounts";
 
+// ── ShikshaHub — public tutor marketplace mirror ────────────────────────────────
+export { syncTutorMarketplaceProfile } from "./tutorMarketplace";
+
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 export { applyReferral, getReferralLeaderboard } from "./referral";
 

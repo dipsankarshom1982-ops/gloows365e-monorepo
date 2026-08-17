@@ -6,7 +6,7 @@
 // system — grows as later phases need more, per the approved plan's
 // "shared tokens, platform-specific components" decision.
 
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
 
 export function Button({
   variant = "primary",
@@ -26,6 +26,19 @@ export function Input({ label, className = "", ...props }: InputHTMLAttributes<H
       {label && <span className="block text-xs font-semibold text-slate-400 mb-1.5">{label}</span>}
       <input
         className={`w-full rounded-lg bg-surface border border-slate-700 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-500 ${className}`}
+        {...props}
+      />
+    </label>
+  );
+}
+
+export function Textarea({ label, className = "", ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string }) {
+  return (
+    <label className="block mb-4">
+      {label && <span className="block text-xs font-semibold text-slate-400 mb-1.5">{label}</span>}
+      <textarea
+        rows={4}
+        className={`w-full rounded-lg bg-surface border border-slate-700 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-500 resize-none ${className}`}
         {...props}
       />
     </label>

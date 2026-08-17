@@ -17,6 +17,7 @@ export default function ProfileScreen() {
   const [subjects, setSubjects]           = useState("");
   const [experience, setExperience]       = useState("");
   const [language, setLanguage]           = useState("");
+  const [bio, setBio]                     = useState("");
   const [saved, setSaved]                 = useState(false);
   const [saving, setSaving]               = useState(false);
 
@@ -26,6 +27,7 @@ export default function ProfileScreen() {
     setSubjects((tutorProfile.subjects ?? []).join(", "));
     setExperience(tutorProfile.teachingExperienceYears?.toString() ?? "");
     setLanguage(tutorProfile.preferredLanguage ?? "");
+    setBio(tutorProfile.bio ?? "");
   }, [tutorProfile]);
 
   async function handleSave() {
@@ -38,6 +40,7 @@ export default function ProfileScreen() {
         subjects: subjects.split(",").map((s) => s.trim()).filter(Boolean),
         teachingExperienceYears: experience ? Number(experience) : null,
         preferredLanguage: language.trim(),
+        bio: bio.trim(),
         updatedAt: new Date(),
       }, { merge: true });
       setSaved(true);
@@ -58,6 +61,15 @@ export default function ProfileScreen() {
         <Input label={t("subjectsLabel")} placeholder="Mathematics, Physics" value={subjects} onChangeText={setSubjects} />
         <Input label={t("experienceLabel")} value={experience} onChangeText={setExperience} keyboardType="numeric" />
         <Input label={t("languageLabel")} value={language} onChangeText={setLanguage} />
+        <Input
+          label={t("bioLabel")}
+          placeholder="Tell students a bit about how you teach"
+          value={bio}
+          onChangeText={setBio}
+          multiline
+          numberOfLines={4}
+          style={{ minHeight: 96, textAlignVertical: "top" }}
+        />
         {saved && <Text style={{ color: semantic.success, fontSize: 12, fontWeight: "700", marginBottom: spacing.md }}>{t("profileSaved")}</Text>}
         <Button title={saving ? t("loading") : t("saveProfile")} onPress={handleSave} loading={saving} />
       </ScrollView>

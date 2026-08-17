@@ -145,6 +145,19 @@ export type TranslationSet = {
   revisionDue: string;
   revisionReady: string;
   unlockCurriculum: string;
+  // ── ShikshaHub (tutor marketplace) — new, English only so far, falls
+  // back to English on other locales via i18next fallbackLng ───────────
+  shikshaHubSignIn?: string;
+  shikshaHubTitle?: string;
+  shikshaHubSubtitle?: string;
+  shikshaHubEmpty?: string;
+  shikshaHubAllSubjects?: string;
+  shikshaHubQualificationLabel?: string;
+  shikshaHubExperienceLabel?: string;
+  shikshaHubLanguageLabel?: string;
+  shikshaHubBioLabel?: string;
+  shikshaHubNotFound?: string;
+  browseShikshaHub?: string;
   // ── Create Reels ───────────────────────────────────────────
   pendingReview: string;
   inReview: string;
@@ -470,6 +483,10 @@ const translations: Translations = {
     paywallTitleSkillGuru: "Continue with SkillGuru?", paywallBody: "You've used your free question for today. Upgrade to Premium for unlimited conversations!", upgradeToPremium: "Upgrade to Premium",
     seekhoSignIn: "Sign in to access Seekho", curriculumAligned: "Curriculum-aligned learning", subjects: "Subjects", continueLearning: "Continue Learning", resumeLearning: "Resume where you left off",
     revisionDue: "Revision Due!", revisionReady: "concepts ready for review", unlockCurriculum: "Unlock Full Curriculum",
+    shikshaHubSignIn: "Sign in to browse ShikshaHub", shikshaHubTitle: "ShikshaHub", shikshaHubSubtitle: "Verified tutors, ready to teach — browse and find the right fit",
+    shikshaHubEmpty: "No verified tutors yet — check back soon!", shikshaHubAllSubjects: "All", shikshaHubQualificationLabel: "Qualification",
+    shikshaHubExperienceLabel: "Experience", shikshaHubLanguageLabel: "Preferred Language", shikshaHubBioLabel: "About",
+    shikshaHubNotFound: "This tutor profile isn't available anymore.", browseShikshaHub: "Browse ShikshaHub",
     pendingReview: "Pending Review", inReview: "In Review", approved: "Approved", rejected: "Rejected", limitReached: "Limit Reached", limitReachedDesc: "You've reached the upload limit for this battle.",
     seekhoPreviewTitle: "📖 Seekho", seekhoPreviewSub: "Learn subjects, skills and creative activities", explore: "Explore →",
     vidyaStarPreviewTitle: "🌟 VidyaStar Contest", vidyaStarPreviewSub: "Showcase your talent and win prizes",

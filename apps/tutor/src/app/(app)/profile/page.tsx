@@ -11,7 +11,7 @@ import { doc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useTutorProfile } from "@gloows/shared-logic";
 import { useTutorT } from "@gloows/tutor-i18n";
-import { Button, Input, LoadingState } from "@/components/ui";
+import { Button, Input, LoadingState, Textarea } from "@/components/ui";
 import BottomNav from "@/components/BottomNav";
 
 export default function ProfilePage() {
@@ -22,6 +22,7 @@ export default function ProfilePage() {
   const [subjects, setSubjects]           = useState("");
   const [experience, setExperience]       = useState("");
   const [language, setLanguage]           = useState("");
+  const [bio, setBio]                     = useState("");
   const [saved, setSaved]                 = useState(false);
   const [saving, setSaving]               = useState(false);
 
@@ -31,6 +32,7 @@ export default function ProfilePage() {
     setSubjects((tutorProfile.subjects ?? []).join(", "));
     setExperience(tutorProfile.teachingExperienceYears?.toString() ?? "");
     setLanguage(tutorProfile.preferredLanguage ?? "");
+    setBio(tutorProfile.bio ?? "");
   }, [tutorProfile]);
 
   async function handleSave(e: React.FormEvent) {
@@ -44,6 +46,7 @@ export default function ProfilePage() {
         subjects: subjects.split(",").map((s) => s.trim()).filter(Boolean),
         teachingExperienceYears: experience ? Number(experience) : null,
         preferredLanguage: language.trim(),
+        bio: bio.trim(),
         updatedAt: new Date(),
       }, { merge: true });
       setSaved(true);
@@ -63,6 +66,7 @@ export default function ProfilePage() {
           <Input label={t("subjectsLabel")} placeholder="Mathematics, Physics" value={subjects} onChange={(e) => setSubjects(e.target.value)} />
           <Input label={t("experienceLabel")} type="number" min={0} value={experience} onChange={(e) => setExperience(e.target.value)} />
           <Input label={t("languageLabel")} value={language} onChange={(e) => setLanguage(e.target.value)} />
+          <Textarea label={t("bioLabel")} placeholder="Tell students a bit about how you teach" value={bio} onChange={(e) => setBio(e.target.value)} />
           {saved && <p className="text-success text-xs font-semibold mb-4">{t("profileSaved")}</p>}
           <Button type="submit" disabled={saving}>{saving ? t("loading") : t("saveProfile")}</Button>
         </form>
