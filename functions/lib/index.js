@@ -10,14 +10,16 @@
  * Also added vite.config optimization (see vite.config.ts output).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onPostCreated = exports.updateSkillboard = exports.ensureStudentId = exports.adminEraseStudent = exports.eraseMyAccount = exports.exportMyData = exports.getReferralLeaderboard = exports.applyReferral = exports.onContestParticipantWrite = exports.getContestLesson = exports.removeAdmin = exports.getUserSubscriptionHistory = exports.createCoupon = exports.createComboPlan = exports.createAdmin = exports.approveContent = exports.recordAdEvent = exports.getAds = exports.claimAdReward = exports.aggregateAdAnalytics = exports.aiGuruPaymentSuccess = exports.aiGuruCreateSubscription = exports.aiGuruCheckoutPage = exports.voiceTutorAnswer = exports.generateExam = exports.evaluateExam = exports.photoSolve = exports.restartEducationAdvisor = exports.askAiGuruQuestion = exports.getPersonalizedDashboard = exports.dailyStreakQuizReminder = exports.applyForAmbassadorProgram = exports.submitDailyStreakQuizAnswer = exports.getTodaysStreakQuizQuestion = exports.submitVidyastarContestQuiz = exports.deleteContest = exports.joinVidyastarContest = exports.getVCoinBalance = exports.claimVCoinReward = exports.getReelsFeed = exports.getHomeFeed = exports.getLeaderboard = exports.seekhoUpdateRevisionQueue = exports.seekhoOnChapterComplete = exports.seekhoGetDailyStudyPlan = exports.seekhoDailyRevisionReminder = exports.seekhoCreateSubscription = exports.vidyaguruChat = exports.discoverTrending = exports.discoverSearch = void 0;
-exports.followUp = exports.generateLesson = void 0;
+exports.syncTutorMarketplaceProfile = exports.reviewTutorVerification = exports.submitTutorVerification = exports.registerTutorAccount = exports.resetStarboardPeriods = exports.onContestParticipantWrite = exports.getContestLesson = exports.removeAdmin = exports.getUserSubscriptionHistory = exports.createCoupon = exports.createComboPlan = exports.createAdmin = exports.approveContent = exports.recordAdEvent = exports.getAds = exports.claimAdReward = exports.aggregateAdAnalytics = exports.reconcileAiGuruCreditOrders = exports.aiGuruCreditPaymentSuccess = exports.aiGuruCreateCreditOrder = exports.aiGuruPaymentSuccess = exports.aiGuruCreateSubscription = exports.aiGuruCheckoutPage = exports.voiceTutorAnswer = exports.generateExam = exports.evaluateExam = exports.photoSolve = exports.restartEducationAdvisor = exports.askAiGuruQuestion = exports.getPersonalizedDashboard = exports.dailyStreakQuizReminder = exports.applyForAmbassadorProgram = exports.submitDailyStreakQuizAnswer = exports.getTodaysStreakQuizQuestion = exports.submitVidyastarContestQuiz = exports.deleteContest = exports.joinVidyastarContest = exports.getVCoinBalance = exports.claimVCoinReward = exports.getReelsFeed = exports.getHomeFeed = exports.getLeaderboard = exports.seekhoUpdateRevisionQueue = exports.seekhoOnChapterComplete = exports.seekhoGetDailyStudyPlan = exports.seekhoDailyRevisionReminder = exports.seekhoCreateSubscription = exports.vidyaguruChat = exports.discoverTrending = exports.discoverSearch = void 0;
+exports.followUp = exports.generateLesson = exports.onPostCreated = exports.updateSkillboard = exports.ensureStudentId = exports.adminEraseStudent = exports.eraseMyAccount = exports.exportMyData = exports.getReferralLeaderboard = exports.applyReferral = exports.syncTutorServiceMarketplace = exports.deleteService = exports.updateService = exports.createService = exports.cancelBooking = exports.respondToBooking = exports.requestBooking = void 0;
 const admin = require("firebase-admin");
+const crypto = require("crypto");
 const functionsV1 = require("firebase-functions/v1");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const gemini_1 = require("./gemini");
 const redish_1 = require("./redish");
 const usageCheck_1 = require("./usageCheck");
+const aiGuruCreditDebit_1 = require("./aiGuruCreditDebit");
 const validateLesson_1 = require("./validateLesson");
 admin.initializeApp();
 const db = admin.firestore();
@@ -80,6 +82,12 @@ var aiGuruSubscription_1 = require("./aiGuruSubscription");
 Object.defineProperty(exports, "aiGuruCheckoutPage", { enumerable: true, get: function () { return aiGuruSubscription_1.aiGuruCheckoutPage; } });
 Object.defineProperty(exports, "aiGuruCreateSubscription", { enumerable: true, get: function () { return aiGuruSubscription_1.aiGuruCreateSubscription; } });
 Object.defineProperty(exports, "aiGuruPaymentSuccess", { enumerable: true, get: function () { return aiGuruSubscription_1.aiGuruPaymentSuccess; } });
+// ── AI Guru Credits — pay-as-you-go (Razorpay), coexists with the
+// subscription above (see aiGuruCredits.ts) ────────────────────────────────────
+var aiGuruCredits_1 = require("./aiGuruCredits");
+Object.defineProperty(exports, "aiGuruCreateCreditOrder", { enumerable: true, get: function () { return aiGuruCredits_1.aiGuruCreateCreditOrder; } });
+Object.defineProperty(exports, "aiGuruCreditPaymentSuccess", { enumerable: true, get: function () { return aiGuruCredits_1.aiGuruCreditPaymentSuccess; } });
+Object.defineProperty(exports, "reconcileAiGuruCreditOrders", { enumerable: true, get: function () { return aiGuruCredits_1.reconcileAiGuruCreditOrders; } });
 // ── Unified Ads System ─────────────────────────────────────────────────────────
 var ads_1 = require("./ads");
 Object.defineProperty(exports, "aggregateAdAnalytics", { enumerable: true, get: function () { return ads_1.aggregateAdAnalytics; } });
@@ -100,6 +108,29 @@ Object.defineProperty(exports, "getContestLesson", { enumerable: true, get: func
 // ── VidyaStar Board Aggregation ───────────────────────────────────────────────
 var vidyastarBoard_1 = require("./vidyastarBoard");
 Object.defineProperty(exports, "onContestParticipantWrite", { enumerable: true, get: function () { return vidyastarBoard_1.onContestParticipantWrite; } });
+// ── Starboard period reset (daily/weekly/monthly/yearly rollover) ─────────────
+var starboardReset_1 = require("./starboardReset");
+Object.defineProperty(exports, "resetStarboardPeriods", { enumerable: true, get: function () { return starboardReset_1.resetStarboardPeriods; } });
+// ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
+var tutorAccounts_1 = require("./tutorAccounts");
+Object.defineProperty(exports, "registerTutorAccount", { enumerable: true, get: function () { return tutorAccounts_1.registerTutorAccount; } });
+Object.defineProperty(exports, "submitTutorVerification", { enumerable: true, get: function () { return tutorAccounts_1.submitTutorVerification; } });
+Object.defineProperty(exports, "reviewTutorVerification", { enumerable: true, get: function () { return tutorAccounts_1.reviewTutorVerification; } });
+// ── ShikshaHub — public tutor marketplace mirror ────────────────────────────────
+var tutorMarketplace_1 = require("./tutorMarketplace");
+Object.defineProperty(exports, "syncTutorMarketplaceProfile", { enumerable: true, get: function () { return tutorMarketplace_1.syncTutorMarketplaceProfile; } });
+// ── ShikshaHub — Phase 1 minimum viable tutor booking ───────────────────────────
+var tutorBooking_1 = require("./tutorBooking");
+Object.defineProperty(exports, "requestBooking", { enumerable: true, get: function () { return tutorBooking_1.requestBooking; } });
+Object.defineProperty(exports, "respondToBooking", { enumerable: true, get: function () { return tutorBooking_1.respondToBooking; } });
+Object.defineProperty(exports, "cancelBooking", { enumerable: true, get: function () { return tutorBooking_1.cancelBooking; } });
+// ── ShikshaHub — Phase 3 tutor services (multi-service, online/offline,
+// one-time/short-term/long-term, instant-help config-only) ─────────────────────
+var tutorServices_1 = require("./tutorServices");
+Object.defineProperty(exports, "createService", { enumerable: true, get: function () { return tutorServices_1.createService; } });
+Object.defineProperty(exports, "updateService", { enumerable: true, get: function () { return tutorServices_1.updateService; } });
+Object.defineProperty(exports, "deleteService", { enumerable: true, get: function () { return tutorServices_1.deleteService; } });
+Object.defineProperty(exports, "syncTutorServiceMarketplace", { enumerable: true, get: function () { return tutorServices_1.syncTutorServiceMarketplace; } });
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 var referral_1 = require("./referral");
 Object.defineProperty(exports, "applyReferral", { enumerable: true, get: function () { return referral_1.applyReferral; } });
@@ -272,6 +303,21 @@ function setCorsHeaders(res) {
     res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
     res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
+// Shared cache key for generateLesson, mirroring contestLesson.ts's per-
+// (contest, language) cache: two requests for the identical board+class+
+// subject+chapter+topic+language+difficulty+style(+pasted text) are the
+// same lesson, so the second one should reuse the first's Gemini output
+// instead of paying for it again. Values are trimmed/lowercased before
+// hashing so incidental whitespace/casing differences still hit the cache.
+function buildLessonCacheKey(params) {
+    const norm = (s) => (s ?? "").trim().toLowerCase();
+    const canonical = [
+        norm(params.board), norm(params.classLevel), norm(params.subject),
+        norm(params.chapter), norm(params.topic), norm(params.language),
+        norm(params.difficulty), norm(params.lessonStyle), norm(params.inputText),
+    ].join("|");
+    return crypto.createHash("sha256").update(canonical).digest("hex");
+}
 function buildLessonPromptInline(body) {
     const { board, classLevel, subject, chapter, topic, language, difficulty, lessonStyle, inputText } = body;
     return `You are AI Guru, a friendly Indian AI teacher for school students.\nConvert the content into an interactive self-learning lesson.\nRules: Teach at Class ${classLevel} level, ${board} board. Use ${language}. Style: ${lessonStyle}. Difficulty: ${difficulty}.\nKeep each narration under 120 words. Use Indian examples. Return ONLY valid JSON, no markdown.\n\nBoard: ${board}, Class: ${classLevel}, Subject: ${subject}, Chapter: ${chapter}, Topic: ${topic ?? "Full Chapter"}\n\nStudent Content:\n${inputText || `Create a comprehensive lesson on "${chapter}" for Class ${classLevel} ${subject} (${board}).`}\n\nReturn exactly this JSON (populate ALL fields, minimum 5 scenes, 8 quiz, 8 flashcards, 5 keyConcepts):\n{"lessonTitle":"","shortIntro":"","estimatedDurationMinutes":0,"learningObjectives":[""],"prerequisites":[""],"storyHook":{"title":"","narration":"","studentMission":""},"scenes":[{"sceneNumber":1,"sceneTitle":"","visualType":"animation","visualDescription":"","narration":"","keyConcept":"","example":"","studentAction":"","checkQuestion":{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":""}}],"keyConcepts":[{"term":"","simpleMeaning":"","realLifeExample":""}],"practicalActivity":{"title":"","instructions":[""],"expectedOutput":"","aiEvaluationCriteria":[""]},"flashcards":[{"front":"","back":""}],"quickRevisionNotes":[""],"quiz":[{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":"","difficulty":"easy","concept":""}],"finalMission":{"title":"","task":"","successCriteria":[""],"rewardText":""},"commonMistakes":[{"mistake":"","correction":""}],"examTips":[""],"followUpPrompts":["Explain this chapter again in simpler way","Give me real-life examples","Take my test","Create revision notes"]}`;
@@ -290,6 +336,7 @@ exports.generateLesson = functionsV1
     }
     let uid;
     let lessonId;
+    let creditTxId = null;
     try {
         uid = await verifyAuthToken(req);
     }
@@ -298,30 +345,64 @@ exports.generateLesson = functionsV1
         return;
     }
     try {
-        await (0, usageCheck_1.checkGenerationLimit)(uid, db);
+        const quota = await (0, usageCheck_1.checkGenerationLimit)(uid, db);
+        creditTxId = quota.creditTxId;
         const { board, classLevel, subject, chapter, topic = "", language, difficulty, lessonStyle, inputText = "", imageBase64, imageMimeType } = req.body;
         const inputType = imageBase64 ? "image" : inputText.trim() ? "text" : "topic";
+        // An image upload is unique content every time, so only topic/text
+        // requests are cacheable.
+        const cacheKey = inputType === "image" ? null : buildLessonCacheKey({
+            board, classLevel, subject, chapter, topic, language,
+            difficulty, lessonStyle, inputText: inputType === "text" ? inputText : "",
+        });
+        const cacheRef = cacheKey ? db.doc(`aiGuruLessonCache/${cacheKey}`) : null;
+        const cacheSnap = cacheRef ? await cacheRef.get() : null;
+        const cachedData = cacheSnap?.exists && cacheSnap.data()?.status === "completed"
+            ? cacheSnap.data()
+            : null;
         const lessonRef = await db.collection("aiGuruLessons").add({
             uid, board, classLevel, subject, chapter, topic, language,
             difficulty, lessonStyle, inputType,
             inputText: inputType === "text" ? inputText : "",
             status: "generating", aiModel: "gemini-2.5-flash", progress: 0,
+            cacheKey: cacheKey ?? null, cached: !!cachedData,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         lessonId = lessonRef.id;
-        const prompt = buildLessonPromptInline(req.body);
-        const rawResponse = imageBase64 && imageMimeType
-            ? await (0, gemini_1.callGeminiWithImage)(prompt, imageBase64, imageMimeType)
-            : await (0, gemini_1.callGeminiText)(prompt);
-        const lessonJson = (0, gemini_1.parseJsonFromResponse)(rawResponse);
-        (0, validateLesson_1.validateLessonJson)(lessonJson);
+        let lessonJson;
+        if (cachedData) {
+            lessonJson = cachedData.lessonJson;
+        }
+        else {
+            const prompt = buildLessonPromptInline(req.body);
+            const rawResponse = imageBase64 && imageMimeType
+                ? await (0, gemini_1.callGeminiWithImage)(prompt, imageBase64, imageMimeType)
+                : await (0, gemini_1.callGeminiText)(prompt);
+            lessonJson = (0, gemini_1.parseJsonFromResponse)(rawResponse);
+            (0, validateLesson_1.validateLessonJson)(lessonJson);
+            if (cacheRef) {
+                await cacheRef.set({
+                    lessonJson, status: "completed",
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                }, { merge: true });
+            }
+        }
         await lessonRef.update({
             status: "completed", lessonJson, progress: 0,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        await (0, usageCheck_1.incrementGenerationUsage)(uid, db);
-        res.status(200).json({ lessonId, lessonJson });
+        if (cachedData) {
+            // Reused an already-generated lesson — no Gemini call happened, so
+            // don't burn the student's daily free slot and hand back any
+            // credit that was already spent by checkGenerationLimit above.
+            if (creditTxId)
+                await (0, aiGuruCreditDebit_1.refundAiGuruCredit)(uid, creditTxId, "LESSON_GENERATION", db);
+        }
+        else {
+            await (0, usageCheck_1.incrementGenerationUsage)(uid, db);
+        }
+        res.status(200).json({ lessonId, lessonJson, cached: !!cachedData });
     }
     catch (err) {
         const msg = err?.message ?? "Unknown error";
@@ -331,8 +412,21 @@ exports.generateLesson = functionsV1
                 status: "failed", errorMessage: msg,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             }).catch(() => { });
+            // Only refund on a failure AFTER the credit was already spent —
+            // lessonId only gets set once checkGenerationLimit (and therefore
+            // any debit) already succeeded, so this is exactly that window.
+            if (creditTxId)
+                await (0, aiGuruCreditDebit_1.refundAiGuruCredit)(uid, creditTxId, "LESSON_GENERATION", db);
         }
-        if (msg.startsWith("FREE_LIMIT_REACHED:")) {
+        if (msg.startsWith("CREDITS_EXHAUSTED:")) {
+            res.status(429).json({
+                error: msg.replace("CREDITS_EXHAUSTED:", ""),
+                code: "CREDITS_EXHAUSTED",
+                creditBalance: err?.creditBalance ?? 0,
+                creditsRequired: err?.creditsRequired ?? 1,
+            });
+        }
+        else if (msg.startsWith("FREE_LIMIT_REACHED:")) {
             res.status(429).json({ error: msg.replace("FREE_LIMIT_REACHED:", ""), code: "FREE_LIMIT_REACHED" });
         }
         else if (msg.includes("GEMINI_API_KEY")) {
@@ -362,6 +456,7 @@ exports.followUp = functionsV1
         return;
     }
     let uid;
+    let creditTxId = null;
     try {
         uid = await verifyAuthToken(req);
     }
@@ -370,14 +465,21 @@ exports.followUp = functionsV1
         return;
     }
     try {
-        await (0, usageCheck_1.checkFollowUpLimit)(uid, db);
+        const quota = await (0, usageCheck_1.checkFollowUpLimit)(uid, db);
+        creditTxId = quota.creditTxId;
         const { lessonId, question, language = "English", mode = "ask_doubt" } = req.body;
         if (!lessonId || !question) {
+            // Validation failure, not an AI/system failure — refund rather
+            // than charge a credit for a request that never actually ran.
+            if (creditTxId)
+                await (0, aiGuruCreditDebit_1.refundAiGuruCredit)(uid, creditTxId, "LESSON_FOLLOWUP", db);
             res.status(400).json({ error: "lessonId and question required" });
             return;
         }
         const lessonSnap = await db.doc(`aiGuruLessons/${lessonId}`).get();
         if (!lessonSnap.exists || lessonSnap.data()?.uid !== uid) {
+            if (creditTxId)
+                await (0, aiGuruCreditDebit_1.refundAiGuruCredit)(uid, creditTxId, "LESSON_FOLLOWUP", db);
             res.status(403).json({ error: "Lesson not found or access denied" });
             return;
         }
@@ -399,10 +501,24 @@ exports.followUp = functionsV1
     }
     catch (err) {
         console.error("followUp error:", err.message);
-        if (err.message?.startsWith("FREE_LIMIT_REACHED:")) {
+        if (err.message?.startsWith("CREDITS_EXHAUSTED:")) {
+            res.status(429).json({
+                error: err.message.replace("CREDITS_EXHAUSTED:", ""),
+                code: "CREDITS_EXHAUSTED",
+                creditBalance: err?.creditBalance ?? 0,
+                creditsRequired: err?.creditsRequired ?? 1,
+            });
+        }
+        else if (err.message?.startsWith("FREE_LIMIT_REACHED:")) {
             res.status(429).json({ error: err.message.replace("FREE_LIMIT_REACHED:", ""), code: "FREE_LIMIT_REACHED" });
         }
         else {
+            // Reached only after checkFollowUpLimit already succeeded (a
+            // CREDITS_EXHAUSTED/FREE_LIMIT_REACHED throw from that check is
+            // handled above and never reaches here), so any credit spent for
+            // this request was for a call that then failed — refund it.
+            if (creditTxId)
+                await (0, aiGuruCreditDebit_1.refundAiGuruCredit)(uid, creditTxId, "LESSON_FOLLOWUP", db);
             res.status(500).json({ error: "Failed to process your question." });
         }
     }

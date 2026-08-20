@@ -10,6 +10,7 @@
  */
 
 import * as admin from "firebase-admin";
+import * as crypto from "crypto";
 import * as functionsV1 from "firebase-functions/v1";
 import {
   Change,
@@ -25,6 +26,7 @@ import {
   incrementFollowUpUsage,
   incrementGenerationUsage,
 } from "./usageCheck";
+import { refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { validateLessonJson } from "./validateLesson";
 
 admin.initializeApp();
@@ -80,6 +82,14 @@ export { voiceTutorAnswer } from "./voiceTutor";
 // ── AI Guru Subscription (Razorpay) ────────────────────────────────────────────
 export { aiGuruCheckoutPage, aiGuruCreateSubscription, aiGuruPaymentSuccess } from "./aiGuruSubscription";
 
+// ── AI Guru Credits — pay-as-you-go (Razorpay), coexists with the
+// subscription above (see aiGuruCredits.ts) ────────────────────────────────────
+export {
+  aiGuruCreateCreditOrder,
+  aiGuruCreditPaymentSuccess,
+  reconcileAiGuruCreditOrders,
+} from "./aiGuruCredits";
+
 // ── Unified Ads System ─────────────────────────────────────────────────────────
 export { aggregateAdAnalytics, claimAdReward, getAds, recordAdEvent } from "./ads";
 
@@ -92,6 +102,9 @@ export { getContestLesson } from "./contestLesson";
 // ── VidyaStar Board Aggregation ───────────────────────────────────────────────
 export { onContestParticipantWrite } from "./vidyastarBoard";
 
+// ── Starboard period reset (daily/weekly/monthly/yearly rollover) ─────────────
+export { resetStarboardPeriods } from "./starboardReset";
+
 // ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
 export { registerTutorAccount, submitTutorVerification, reviewTutorVerification } from "./tutorAccounts";
 
@@ -99,7 +112,11 @@ export { registerTutorAccount, submitTutorVerification, reviewTutorVerification 
 export { syncTutorMarketplaceProfile } from "./tutorMarketplace";
 
 // ── ShikshaHub — Phase 1 minimum viable tutor booking ───────────────────────────
-export { requestBooking, respondToBooking } from "./tutorBooking";
+export { requestBooking, respondToBooking, cancelBooking } from "./tutorBooking";
+
+// ── ShikshaHub — Phase 3 tutor services (multi-service, online/offline,
+// one-time/short-term/long-term, instant-help config-only) ─────────────────────
+export { createService, updateService, deleteService, syncTutorServiceMarketplace } from "./tutorServices";
 
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 export { applyReferral, getReferralLeaderboard } from "./referral";
@@ -381,6 +398,26 @@ function setCorsHeaders(res: functionsV1.Response): void {
   res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
+// Shared cache key for generateLesson, mirroring contestLesson.ts's per-
+// (contest, language) cache: two requests for the identical board+class+
+// subject+chapter+topic+language+difficulty+style(+pasted text) are the
+// same lesson, so the second one should reuse the first's Gemini output
+// instead of paying for it again. Values are trimmed/lowercased before
+// hashing so incidental whitespace/casing differences still hit the cache.
+function buildLessonCacheKey(params: {
+  board: string; classLevel: string; subject: string; chapter: string;
+  topic: string; language: string; difficulty: string; lessonStyle: string;
+  inputText: string;
+}): string {
+  const norm = (s: string) => (s ?? "").trim().toLowerCase();
+  const canonical = [
+    norm(params.board), norm(params.classLevel), norm(params.subject),
+    norm(params.chapter), norm(params.topic), norm(params.language),
+    norm(params.difficulty), norm(params.lessonStyle), norm(params.inputText),
+  ].join("|");
+  return crypto.createHash("sha256").update(canonical).digest("hex");
+}
+
 function buildLessonPromptInline(body: Record<string, string>): string {
   const { board, classLevel, subject, chapter, topic, language, difficulty, lessonStyle, inputText } = body;
   return `You are AI Guru, a friendly Indian AI teacher for school students.\nConvert the content into an interactive self-learning lesson.\nRules: Teach at Class ${classLevel} level, ${board} board. Use ${language}. Style: ${lessonStyle}. Difficulty: ${difficulty}.\nKeep each narration under 120 words. Use Indian examples. Return ONLY valid JSON, no markdown.\n\nBoard: ${board}, Class: ${classLevel}, Subject: ${subject}, Chapter: ${chapter}, Topic: ${topic ?? "Full Chapter"}\n\nStudent Content:\n${inputText || `Create a comprehensive lesson on "${chapter}" for Class ${classLevel} ${subject} (${board}).`}\n\nReturn exactly this JSON (populate ALL fields, minimum 5 scenes, 8 quiz, 8 flashcards, 5 keyConcepts):\n{"lessonTitle":"","shortIntro":"","estimatedDurationMinutes":0,"learningObjectives":[""],"prerequisites":[""],"storyHook":{"title":"","narration":"","studentMission":""},"scenes":[{"sceneNumber":1,"sceneTitle":"","visualType":"animation","visualDescription":"","narration":"","keyConcept":"","example":"","studentAction":"","checkQuestion":{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":""}}],"keyConcepts":[{"term":"","simpleMeaning":"","realLifeExample":""}],"practicalActivity":{"title":"","instructions":[""],"expectedOutput":"","aiEvaluationCriteria":[""]},"flashcards":[{"front":"","back":""}],"quickRevisionNotes":[""],"quiz":[{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":"","difficulty":"easy","concept":""}],"finalMission":{"title":"","task":"","successCriteria":[""],"rewardText":""},"commonMistakes":[{"mistake":"","correction":""}],"examTips":[""],"followUpPrompts":["Explain this chapter again in simpler way","Give me real-life examples","Take my test","Create revision notes"]}`;
@@ -395,42 +432,76 @@ export const generateLesson = functionsV1
 
     let uid: string;
     let lessonId: string | undefined;
+    let creditTxId: string | null = null;
 
     try { uid = await verifyAuthToken(req); }
     catch { res.status(401).json({ error: "Unauthorized" }); return; }
 
     try {
-      await checkGenerationLimit(uid, db);
+      const quota = await checkGenerationLimit(uid, db);
+      creditTxId = quota.creditTxId;
 
       const { board, classLevel, subject, chapter, topic = "", language,
               difficulty, lessonStyle, inputText = "", imageBase64, imageMimeType } = req.body;
       const inputType = imageBase64 ? "image" : inputText.trim() ? "text" : "topic";
+
+      // An image upload is unique content every time, so only topic/text
+      // requests are cacheable.
+      const cacheKey = inputType === "image" ? null : buildLessonCacheKey({
+        board, classLevel, subject, chapter, topic, language,
+        difficulty, lessonStyle, inputText: inputType === "text" ? inputText : "",
+      });
+      const cacheRef = cacheKey ? db.doc(`aiGuruLessonCache/${cacheKey}`) : null;
+      const cacheSnap = cacheRef ? await cacheRef.get() : null;
+      const cachedData = cacheSnap?.exists && cacheSnap.data()?.status === "completed"
+        ? cacheSnap.data()!
+        : null;
 
       const lessonRef = await db.collection("aiGuruLessons").add({
         uid, board, classLevel, subject, chapter, topic, language,
         difficulty, lessonStyle, inputType,
         inputText: inputType === "text" ? inputText : "",
         status: "generating", aiModel: "gemini-2.5-flash", progress: 0,
+        cacheKey: cacheKey ?? null, cached: !!cachedData,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       lessonId = lessonRef.id;
 
-      const prompt = buildLessonPromptInline(req.body);
-      const rawResponse = imageBase64 && imageMimeType
-        ? await callGeminiWithImage(prompt, imageBase64, imageMimeType)
-        : await callGeminiText(prompt);
+      let lessonJson: unknown;
+      if (cachedData) {
+        lessonJson = cachedData.lessonJson;
+      } else {
+        const prompt = buildLessonPromptInline(req.body);
+        const rawResponse = imageBase64 && imageMimeType
+          ? await callGeminiWithImage(prompt, imageBase64, imageMimeType)
+          : await callGeminiText(prompt);
 
-      const lessonJson = parseJsonFromResponse(rawResponse);
-      validateLessonJson(lessonJson);
+        lessonJson = parseJsonFromResponse(rawResponse);
+        validateLessonJson(lessonJson);
+
+        if (cacheRef) {
+          await cacheRef.set({
+            lessonJson, status: "completed",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      }
 
       await lessonRef.update({
         status: "completed", lessonJson, progress: 0,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      await incrementGenerationUsage(uid, db);
-      res.status(200).json({ lessonId, lessonJson });
+      if (cachedData) {
+        // Reused an already-generated lesson — no Gemini call happened, so
+        // don't burn the student's daily free slot and hand back any
+        // credit that was already spent by checkGenerationLimit above.
+        if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "LESSON_GENERATION", db);
+      } else {
+        await incrementGenerationUsage(uid, db);
+      }
+      res.status(200).json({ lessonId, lessonJson, cached: !!cachedData });
     } catch (err: any) {
       const msg: string = err?.message ?? "Unknown error";
       console.error("generateLesson error:", msg);
@@ -439,8 +510,19 @@ export const generateLesson = functionsV1
           status: "failed", errorMessage: msg,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         }).catch(() => {});
+        // Only refund on a failure AFTER the credit was already spent —
+        // lessonId only gets set once checkGenerationLimit (and therefore
+        // any debit) already succeeded, so this is exactly that window.
+        if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "LESSON_GENERATION", db);
       }
-      if (msg.startsWith("FREE_LIMIT_REACHED:")) {
+      if (msg.startsWith("CREDITS_EXHAUSTED:")) {
+        res.status(429).json({
+          error: msg.replace("CREDITS_EXHAUSTED:", ""),
+          code: "CREDITS_EXHAUSTED",
+          creditBalance:   err?.creditBalance   ?? 0,
+          creditsRequired: err?.creditsRequired ?? 1,
+        });
+      } else if (msg.startsWith("FREE_LIMIT_REACHED:")) {
         res.status(429).json({ error: msg.replace("FREE_LIMIT_REACHED:", ""), code: "FREE_LIMIT_REACHED" });
       } else if (msg.includes("GEMINI_API_KEY")) {
         res.status(500).json({ error: "AI service not configured. Contact support.", code: "CONFIG_ERROR" });
@@ -462,16 +544,24 @@ export const followUp = functionsV1
     if (req.method !== "POST")    { res.status(405).json({ error: "Method not allowed" }); return; }
 
     let uid: string;
+    let creditTxId: string | null = null;
     try { uid = await verifyAuthToken(req); }
     catch { res.status(401).json({ error: "Unauthorized" }); return; }
 
     try {
-      await checkFollowUpLimit(uid, db);
+      const quota = await checkFollowUpLimit(uid, db);
+      creditTxId = quota.creditTxId;
       const { lessonId, question, language = "English", mode = "ask_doubt" } = req.body;
-      if (!lessonId || !question) { res.status(400).json({ error: "lessonId and question required" }); return; }
+      if (!lessonId || !question) {
+        // Validation failure, not an AI/system failure — refund rather
+        // than charge a credit for a request that never actually ran.
+        if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "LESSON_FOLLOWUP", db);
+        res.status(400).json({ error: "lessonId and question required" }); return;
+      }
 
       const lessonSnap = await db.doc(`aiGuruLessons/${lessonId}`).get();
       if (!lessonSnap.exists || lessonSnap.data()?.uid !== uid) {
+        if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "LESSON_FOLLOWUP", db);
         res.status(403).json({ error: "Lesson not found or access denied" }); return;
       }
       const lesson = lessonSnap.data()!;
@@ -494,9 +584,21 @@ export const followUp = functionsV1
       res.status(200).json(parsed);
     } catch (err: any) {
       console.error("followUp error:", err.message);
-      if (err.message?.startsWith("FREE_LIMIT_REACHED:")) {
+      if (err.message?.startsWith("CREDITS_EXHAUSTED:")) {
+        res.status(429).json({
+          error: err.message.replace("CREDITS_EXHAUSTED:", ""),
+          code: "CREDITS_EXHAUSTED",
+          creditBalance:   err?.creditBalance   ?? 0,
+          creditsRequired: err?.creditsRequired ?? 1,
+        });
+      } else if (err.message?.startsWith("FREE_LIMIT_REACHED:")) {
         res.status(429).json({ error: err.message.replace("FREE_LIMIT_REACHED:", ""), code: "FREE_LIMIT_REACHED" });
       } else {
+        // Reached only after checkFollowUpLimit already succeeded (a
+        // CREDITS_EXHAUSTED/FREE_LIMIT_REACHED throw from that check is
+        // handled above and never reaches here), so any credit spent for
+        // this request was for a call that then failed — refund it.
+        if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "LESSON_FOLLOWUP", db);
         res.status(500).json({ error: "Failed to process your question." });
       }
     }

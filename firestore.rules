@@ -773,5 +773,30 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 🎓 SHIKSHAHUB — Phase 3 tutor services. Owner-only read (the "My
+    // Services" management screen) — students never read this collection
+    // directly, they read tutorServicesMarketplace below instead, same
+    // owner-doc/public-mirror split as tutors/{uid} vs
+    // tutorMarketplaceProfiles/{uid}. `allow write: if false` for the same
+    // reason bookings/{id} is closed: every field here needs real
+    // validation (positive fee, valid enum, valid date range) that
+    // functions/src/tutorServices.ts's createService/updateService/
+    // deleteService callables enforce — see that file's header comment.
+    match /tutorServices/{serviceId} {
+      allow read:  if request.auth != null
+        && (resource.data.tutorUid == request.auth.uid || request.auth.token.admin == true);
+      allow write: if false;
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 3 public-safe mirror of published services
+    // belonging to verified tutors, written only by
+    // syncTutorServiceMarketplace (functions/src/tutorServices.ts), which
+    // runs via the Admin SDK and bypasses these rules entirely. Same
+    // read-open/write-closed shape as tutorMarketplaceProfiles/{uid}.
+    match /tutorServicesMarketplace/{serviceId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
   }
 }

@@ -19,7 +19,8 @@ import {
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "@/lib/firebase";
-import type { Booking, BookingSessionType, TutorWeeklyAvailability } from "@gloows/shared-logic";
+import { where } from "firebase/firestore";
+import type { Booking, BookingSessionType, TutorService, TutorWeeklyAvailability } from "@gloows/shared-logic";
 
 export interface MarketplaceTutor {
   uid: string;
@@ -132,8 +133,29 @@ export function slotOptionsForDate(
   return slots;
 }
 
+// ─── ShikshaHub Phase 3 — tutor services ────────────────────────────────────
+// Reads from tutorServicesMarketplace, the public-safe mirror written by
+// functions/src/tutorServices.ts's syncTutorServiceMarketplace trigger —
+// same owner-doc/public-mirror split as tutorMarketplaceProfiles above.
+// Only ever contains published services of verified tutors, by
+// construction — no client-side published/verified filtering needed.
+
+const SERVICES_COLLECTION = "tutorServicesMarketplace";
+
+/** A tutor's published, bookable services (empty array if they have none —
+ *  the caller falls back to the legacy flat sessionFee/availability path
+ *  in that case, matching requestBooking's own migration rule). */
+export async function fetchTutorServices(tutorUid: string): Promise<TutorService[]> {
+  const db = getFirestore();
+  const snap = await getDocs(
+    query(collection(db, SERVICES_COLLECTION), where("tutorUid", "==", tutorUid), orderBy("createdAt", "desc"))
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as TutorService));
+}
+
 export interface RequestBookingInput {
   tutorUid: string;
+  serviceId?: string;
   subject: string;
   sessionType: BookingSessionType;
   requestedDate: string;
@@ -148,6 +170,19 @@ export async function requestBookingCall(
     functions, "requestBooking"
   );
   const res = await fn(input);
+  return res.data;
+}
+
+/** ShikshaHub Phase 2 — either party (student or tutor) can cancel a
+ *  "requested"/"accepted" booking. Same Admin-SDK-only write path as
+ *  requestBooking/respondToBooking. */
+export async function cancelBookingCall(
+  bookingId: string
+): Promise<{ status: Booking["status"] }> {
+  const fn = httpsCallable<{ bookingId: string }, { status: Booking["status"] }>(
+    functions, "cancelBooking"
+  );
+  const res = await fn({ bookingId });
   return res.data;
 }
 

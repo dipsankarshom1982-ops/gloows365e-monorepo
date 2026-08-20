@@ -27,8 +27,10 @@ export * from "./hooks/useReferralConfig";
 export * from "./hooks/useStories";
 export * from "./hooks/useBatchStudents";
 export * from "./hooks/useTutorBatches";
+export * from "./hooks/useStudentBookings";
 export * from "./hooks/useTutorBookings";
 export * from "./hooks/useTutorClasses";
+export * from "./hooks/useTutorServices";
 export * from "./hooks/useTutorStudents";
 
 // ─── Services ────────────────────────────────────────────────────────────
@@ -43,5 +45,6 @@ export * from "./types/student";
 export * from "./types/tutor";
 export * from "./types/tutorBatch";
 export * from "./types/tutorClass";
+export * from "./types/tutorService";
 export * from "./types/tutorStudent";
 export * from "./types/vcoins";

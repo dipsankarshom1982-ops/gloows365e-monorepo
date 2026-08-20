@@ -38,6 +38,19 @@ export type Booking = {
   studentName?: string;
   tutorName?: string;
 
+  // ShikshaHub Phase 3 — present only for bookings made through a
+  // tutorServices/{serviceId} (the "service path" in requestBooking).
+  // Absent entirely on legacy Phase 1/2 bookings and on any booking made
+  // against a tutor who still has zero services — never backfilled, so a
+  // booking's presence/absence of these fields is itself a reliable signal
+  // of which path created it. All server-resolved at request time, same
+  // snapshot-not-live-reference rule sessionFee already followed.
+  serviceId?: string;
+  serviceName?: string;
+  serviceType?: "one_time" | "short_term" | "long_term" | "instant_help";
+  deliveryMode?: "online" | "offline" | "online_offline";
+  duration?: number; // minutes
+
   createdAt?: unknown; // Firestore Timestamp
   updatedAt?: unknown; // Firestore Timestamp
 };

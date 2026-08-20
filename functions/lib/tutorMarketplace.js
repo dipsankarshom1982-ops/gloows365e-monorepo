@@ -18,6 +18,12 @@ const firestore_1 = require("firebase-functions/v2/firestore");
 const SAFE_FIELDS = [
     "name", "bio", "subjects", "qualification",
     "teachingExperienceYears", "preferredLanguage", "profilePic", "tutorRole",
+    // ShikshaHub Phase 1 — sessionFee (a price) and availability (a weekly
+    // hour range) are both public-safe the same way the fields above are:
+    // no phone/email, nothing PII. Mirrored so the booking panel can show a
+    // fee and compute slot options without widening tutors/{uid}'s own
+    // owner+admin-only read (see that collection's firestore.rules match).
+    "sessionFee", "availability",
 ];
 exports.syncTutorMarketplaceProfile = (0, firestore_1.onDocumentWritten)({ document: "tutors/{uid}" }, async (event) => {
     const change = event.data;
@@ -32,6 +38,23 @@ exports.syncTutorMarketplaceProfile = (0, firestore_1.onDocumentWritten)({ docum
             // .delete() on a non-existent doc is a no-op — no existence check
             // needed (covers both "never verified" and "verified -> false").
             await mirrorRef.delete();
+            // ShikshaHub Phase 3 — cascade the same "unverified -> invisible"
+            // rule onto this tutor's own service listings. requestBooking
+            // already re-checks tutor.verified server-side before letting a
+            // service-based booking through, so this isn't the only guard —
+            // but a since-unverified tutor's services staying visible/
+            // browsable in tutorServicesMarketplace would be stale and
+            // misleading, so clean them up here too, in the one trigger that
+            // already watches exactly this transition.
+            const staleMirrors = await db
+                .collection("tutorServicesMarketplace")
+                .where("tutorUid", "==", uid)
+                .get();
+            if (!staleMirrors.empty) {
+                const batch = db.batch();
+                staleMirrors.docs.forEach((d) => batch.delete(d.ref));
+                await batch.commit();
+            }
             return null;
         }
         const mirror = {

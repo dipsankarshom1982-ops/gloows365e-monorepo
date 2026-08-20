@@ -20,7 +20,7 @@ const LINKS = [
   { href: "/classes",   label: "Classes",   icon: "🗓️" },
 ];
 
-const MORE_PREFIXES = ["/batches", "/bookings", "/profile", "/verification", "/more"];
+const MORE_PREFIXES = ["/batches", "/bookings", "/services", "/profile", "/verification", "/more"];
 
 export default function BottomNav() {
   const pathname = usePathname();

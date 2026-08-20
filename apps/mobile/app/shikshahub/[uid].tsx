@@ -6,17 +6,33 @@
 
 import { useTheme } from "@/context/ThemeContext";
 import { useAppTranslation } from "@/context/LanguageContext";
-import { fetchTutorById, type MarketplaceTutor } from "@/lib/shikshahub";
+import {
+  fetchTutorById,
+  fetchTutorServices,
+  requestBookingCall,
+  listenToBooking,
+  slotOptionsForDate,
+  type MarketplaceTutor,
+} from "@/lib/shikshahub";
+import type { Booking, BookingSessionType, TutorService } from "@gloows/shared-logic";
+
+const SERVICE_TYPE_LABEL: Record<TutorService["serviceType"], string> = {
+  one_time: "One-time",
+  short_term: "Short-term",
+  long_term: "Long-term",
+  instant_help: "Instant Help",
+};
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -102,9 +118,377 @@ export default function ShikshaHubProfileScreen() {
               <Text style={[S.bio, { color: colors.text }]}>{tutor.bio}</Text>
             </View>
           )}
+
+          <View style={[S.bookingCard, { borderColor: colors.border }]}>
+            <Text style={[S.bookingTitle, { color: colors.text }]}>
+              {(t("shikshaHubInterested") ?? "Interested in learning with") + " " + (tutor.name || "this tutor") + "?"}
+            </Text>
+            <BookingPanel tutor={tutor} colors={colors} t={t} />
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function todayDateStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const STATUS_META: Record<Booking["status"], { label: string; color: string }> = {
+  requested: { label: "Requested — waiting for tutor confirmation", color: "#f59e0b" },
+  accepted:  { label: "Accepted",  color: "#22c55e" },
+  declined:  { label: "Declined",  color: "#ef4444" },
+  cancelled: { label: "Cancelled", color: "#94a3b8" },
+};
+
+/** ShikshaHub Phase 3 — fetches this tutor's published services first; if
+ *  they have any, renders the service picker (ServiceBookingPanel) and
+ *  never falls back to the legacy flat fields — matches requestBooking's
+ *  own migration rule (see functions/src/tutorBooking.ts's header
+ *  comment). Zero services → byte-for-byte the same legacy form Phase 1/2
+ *  always had (LegacyBookingPanel). */
+function BookingPanel({ tutor, colors, t }: { tutor: MarketplaceTutor; colors: any; t: (k: string) => string | undefined }) {
+  const [services, setServices]               = useState<TutorService[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(true);
+
+  useEffect(() => {
+    fetchTutorServices(tutor.uid).then(setServices).finally(() => setServicesLoading(false));
+  }, [tutor.uid]);
+
+  if (servicesLoading) return null;
+
+  return services.length > 0
+    ? <ServiceBookingPanel tutor={tutor} services={services} colors={colors} t={t} />
+    : <LegacyBookingPanel tutor={tutor} colors={colors} t={t} />;
+}
+
+function BookingStatusView({ bookingId, booking, colors, t }: {
+  bookingId: string; booking: Booking | null; colors: any; t: (k: string) => string | undefined;
+}) {
+  const meta = booking ? STATUS_META[booking.status] : null;
+  return (
+    <View style={{ alignItems: "center", gap: 6, paddingVertical: 4 }}>
+      <Text style={{ fontSize: 13, fontWeight: "800", color: colors.text }}>
+        {t("shikshaHubBookingSent") ?? "Booking request sent"}
+      </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: meta?.color ?? colors.textSecondary }} />
+        <Text style={{ fontSize: 12, fontWeight: "700", color: meta?.color ?? colors.textSecondary }}>
+          {meta ? meta.label : (t("shikshaHubBookingWaiting") ?? "Waiting for tutor confirmation")}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/** ShikshaHub Phase 3 — service-based booking. Mirrors apps/web's
+ *  ServiceBookingPanel: subject/fee/mode/duration all come off the
+ *  selected service doc, never re-derived here. instant_help services are
+ *  shown (browse/rate-visibility) but not selectable for booking. */
+function ServiceBookingPanel({ tutor, services, colors, t }: {
+  tutor: MarketplaceTutor; services: TutorService[]; colors: any; t: (k: string) => string | undefined;
+}) {
+  const [serviceId, setServiceId]     = useState(services[0]?.id ?? "");
+  const [sessionType, setSessionType] = useState<BookingSessionType>("trial");
+  const [date, setDate]               = useState(todayDateStr());
+  const [slotStart, setSlotStart]     = useState("");
+  const [phase, setPhase]             = useState<"idle" | "submitting" | "error">("idle");
+  const [errorMsg, setErrorMsg]       = useState("");
+  const [bookingId, setBookingId]     = useState<string | null>(null);
+  const [booking, setBooking]         = useState<Booking | null>(null);
+
+  const service = services.find((s) => s.id === serviceId) ?? null;
+  const isInstantHelp = service?.serviceType === "instant_help";
+
+  const slots = useMemo(
+    () => (service && !isInstantHelp ? slotOptionsForDate(service.availability ?? null, date) : []),
+    [service, isInstantHelp, date]
+  );
+
+  useEffect(() => { setSlotStart(""); }, [date, serviceId]);
+  useEffect(() => {
+    if (service && !isInstantHelp && sessionType === "trial" && !service.trialAvailable) setSessionType("regular");
+  }, [service, isInstantHelp, sessionType]);
+
+  useEffect(() => {
+    if (!bookingId) return;
+    return listenToBooking(bookingId, setBooking);
+  }, [bookingId]);
+
+  if (bookingId) return <BookingStatusView bookingId={bookingId} booking={booking} colors={colors} t={t} />;
+
+  async function handleSubmit() {
+    const selectedSlot = slots.find((s) => s.start === slotStart);
+    if (!service || isInstantHelp || !selectedSlot) return;
+    setPhase("submitting");
+    setErrorMsg("");
+    try {
+      const res = await requestBookingCall({
+        tutorUid: tutor.uid,
+        serviceId: service.id!,
+        subject: service.subject,
+        sessionType,
+        requestedDate: date,
+        requestedStartTime: selectedSlot.start,
+        requestedEndTime: selectedSlot.end,
+      });
+      setBookingId(res.bookingId);
+      setPhase("idle");
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? "Could not send the booking request. Please try again.");
+      setPhase("error");
+    }
+  }
+
+  return (
+    <View style={{ gap: 10 }}>
+      <View>
+        <Text style={[S.bookingLabel, { color: colors.textSecondary }]}>{t("serviceLabel") ?? "Service"}</Text>
+        <View style={S.chipRow}>
+          {services.map((s) => (
+            <TouchableOpacity key={s.id} onPress={() => setServiceId(s.id!)} style={[S.pickChip, serviceId === s.id && S.pickChipActive]}>
+              <Text style={[S.pickChipText, serviceId === s.id && S.pickChipTextActive]}>
+                {s.serviceName} · {SERVICE_TYPE_LABEL[s.serviceType]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {isInstantHelp ? (
+        <View style={{ paddingVertical: 8 }}>
+          <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textSecondary }}>
+            {t("serviceInstantHelpComingSoon") ?? "Instant Help isn't bookable yet."}
+          </Text>
+          {service?.creditsPerMinute != null && (
+            <Text style={{ marginTop: 4, fontWeight: "800", color: colors.text }}>
+              {service.creditsPerMinute} {t("creditsPerMinuteSuffix") ?? "credits/min"}
+            </Text>
+          )}
+        </View>
+      ) : (
+        <>
+          <View>
+            <Text style={[S.bookingLabel, { color: colors.textSecondary }]}>{t("shikshaHubSessionTypeLabel") ?? "Session"}</Text>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {(["trial", "regular"] as const).map((opt) => {
+                const disabled = opt === "trial" && !service?.trialAvailable;
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    disabled={disabled}
+                    onPress={() => setSessionType(opt)}
+                    style={[S.pickChip, { flex: 1, alignItems: "center" }, sessionType === opt && S.pickChipActive, disabled && { opacity: 0.4 }]}
+                  >
+                    <Text style={[S.pickChipText, sessionType === opt && S.pickChipTextActive]}>
+                      {opt === "trial" ? (t("shikshaHubTrial") ?? "Trial") : (t("shikshaHubRegular") ?? "Regular")}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          <View>
+            <Text style={[S.bookingLabel, { color: colors.textSecondary }]}>{t("shikshaHubDateLabel") ?? "Date"}</Text>
+            <TextInput
+              value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary}
+              style={[S.bookingInput, { color: colors.text, borderColor: colors.border }]}
+            />
+          </View>
+
+          <View>
+            <Text style={[S.bookingLabel, { color: colors.textSecondary }]}>{t("shikshaHubTimeLabel") ?? "Time"}</Text>
+            {slots.length === 0 ? (
+              <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.textSecondary }}>
+                {t("shikshaHubNoSlots") ?? "No slots available on this date — try another day."}
+              </Text>
+            ) : (
+              <View style={S.chipRow}>
+                {slots.map((s) => (
+                  <TouchableOpacity key={s.start} onPress={() => setSlotStart(s.start)} style={[S.pickChip, slotStart === s.start && S.pickChipActive]}>
+                    <Text style={[S.pickChipText, slotStart === s.start && S.pickChipTextActive]}>{s.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10 }}>
+            <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary }}>{t("shikshaHubFeeLabel") ?? "Fee"}</Text>
+            <Text style={{ fontSize: 16, fontWeight: "900", color: colors.text }}>₹{service?.sessionFee}</Text>
+          </View>
+
+          {phase === "error" && (
+            <Text style={{ fontSize: 11.5, fontWeight: "600", color: "#ef4444" }}>{errorMsg}</Text>
+          )}
+
+          <TouchableOpacity
+            onPress={handleSubmit}
+            disabled={!slotStart || phase === "submitting"}
+            style={[S.submitBtn, (!slotStart || phase === "submitting") && { opacity: 0.55 }]}
+          >
+            <Text style={S.submitBtnText}>
+              {phase === "submitting" ? (t("shikshaHubRequesting") ?? "Sending request…") : (t("shikshaHubRequestBooking") ?? "Request Booking")}
+            </Text>
+          </TouchableOpacity>
+        </>
+      )}
+    </View>
+  );
+}
+
+/** ShikshaHub Phase 1/2 legacy booking form — unchanged from before Phase
+ *  3, rendered only for a tutor with zero services. */
+function LegacyBookingPanel({ tutor, colors, t }: { tutor: MarketplaceTutor; colors: any; t: (k: string) => string | undefined }) {
+  const [subject, setSubject]         = useState(tutor.subjects[0] ?? "");
+  const [sessionType, setSessionType] = useState<BookingSessionType>("trial");
+  const [date, setDate]               = useState(todayDateStr());
+  const [slotStart, setSlotStart]     = useState("");
+  const [phase, setPhase]             = useState<"idle" | "submitting" | "error">("idle");
+  const [errorMsg, setErrorMsg]       = useState("");
+  const [bookingId, setBookingId]     = useState<string | null>(null);
+  const [booking, setBooking]         = useState<Booking | null>(null);
+
+  const slots = useMemo(() => slotOptionsForDate(tutor.availability, date), [tutor.availability, date]);
+
+  useEffect(() => { setSlotStart(""); }, [date]);
+
+  useEffect(() => {
+    if (!bookingId) return;
+    return listenToBooking(bookingId, setBooking);
+  }, [bookingId]);
+
+  if (tutor.subjects.length === 0 || tutor.sessionFee == null) {
+    return (
+      <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textSecondary, textAlign: "center", paddingVertical: 8 }}>
+        {t("shikshaHubBookingNotReady") ?? "This tutor hasn't set up bookable subjects/pricing yet."}
+      </Text>
+    );
+  }
+
+  if (bookingId) {
+    const meta = booking ? STATUS_META[booking.status] : null;
+    return (
+      <View style={{ alignItems: "center", gap: 6, paddingVertical: 4 }}>
+        <Text style={{ fontSize: 13, fontWeight: "800", color: colors.text }}>
+          {t("shikshaHubBookingSent") ?? "Booking request sent"}
+        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: meta?.color ?? colors.textSecondary }} />
+          <Text style={{ fontSize: 12, fontWeight: "700", color: meta?.color ?? colors.textSecondary }}>
+            {meta ? meta.label : (t("shikshaHubBookingWaiting") ?? "Waiting for tutor confirmation")}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  async function handleSubmit() {
+    const selectedSlot = slots.find((s) => s.start === slotStart);
+    if (!selectedSlot) return;
+    setPhase("submitting");
+    setErrorMsg("");
+    try {
+      const res = await requestBookingCall({
+        tutorUid: tutor.uid,
+        subject,
+        sessionType,
+        requestedDate: date,
+        requestedStartTime: selectedSlot.start,
+        requestedEndTime: selectedSlot.end,
+      });
+      setBookingId(res.bookingId);
+      setPhase("idle");
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? "Could not send the booking request. Please try again.");
+      setPhase("error");
+    }
+  }
+
+  return (
+    <View style={{ gap: 10 }}>
+      <View>
+        <Text style={[S.bookingLabel, { color: colors.textSecondary }]}>{t("shikshaHubSubjectLabel") ?? "Subject"}</Text>
+        <View style={S.chipRow}>
+          {tutor.subjects.map((s) => (
+            <TouchableOpacity key={s} onPress={() => setSubject(s)} style={[S.pickChip, subject === s && S.pickChipActive]}>
+              <Text style={[S.pickChipText, subject === s && S.pickChipTextActive]}>{s}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      <View>
+        <Text style={[S.bookingLabel, { color: colors.textSecondary }]}>{t("shikshaHubSessionTypeLabel") ?? "Session"}</Text>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {(["trial", "regular"] as const).map((opt) => (
+            <TouchableOpacity
+              key={opt}
+              onPress={() => setSessionType(opt)}
+              style={[S.pickChip, { flex: 1, alignItems: "center" }, sessionType === opt && S.pickChipActive]}
+            >
+              <Text style={[S.pickChipText, sessionType === opt && S.pickChipTextActive]}>
+                {opt === "trial" ? (t("shikshaHubTrial") ?? "Trial") : (t("shikshaHubRegular") ?? "Regular")}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      <View>
+        <Text style={[S.bookingLabel, { color: colors.textSecondary }]}>{t("shikshaHubDateLabel") ?? "Date"}</Text>
+        <TextInput
+          value={date}
+          onChangeText={setDate}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor={colors.textSecondary}
+          style={[S.bookingInput, { color: colors.text, borderColor: colors.border }]}
+        />
+      </View>
+
+      <View>
+        <Text style={[S.bookingLabel, { color: colors.textSecondary }]}>{t("shikshaHubTimeLabel") ?? "Time"}</Text>
+        {slots.length === 0 ? (
+          <Text style={{ fontSize: 11.5, fontWeight: "600", color: colors.textSecondary }}>
+            {t("shikshaHubNoSlots") ?? "No slots available on this date — try another day."}
+          </Text>
+        ) : (
+          <View style={S.chipRow}>
+            {slots.map((s) => (
+              <TouchableOpacity
+                key={s.start}
+                onPress={() => setSlotStart(s.start)}
+                style={[S.pickChip, slotStart === s.start && S.pickChipActive]}
+              >
+                <Text style={[S.pickChipText, slotStart === s.start && S.pickChipTextActive]}>{s.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </View>
+
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10 }}>
+        <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary }}>{t("shikshaHubFeeLabel") ?? "Fee"}</Text>
+        <Text style={{ fontSize: 16, fontWeight: "900", color: colors.text }}>₹{tutor.sessionFee}</Text>
+      </View>
+
+      {phase === "error" && (
+        <Text style={{ fontSize: 11.5, fontWeight: "600", color: "#ef4444" }}>{errorMsg}</Text>
+      )}
+
+      <TouchableOpacity
+        onPress={handleSubmit}
+        disabled={!slotStart || phase === "submitting"}
+        style={[S.submitBtn, (!slotStart || phase === "submitting") && { opacity: 0.55 }]}
+      >
+        <Text style={S.submitBtnText}>
+          {phase === "submitting" ? (t("shikshaHubRequesting") ?? "Sending request…") : (t("shikshaHubRequestBooking") ?? "Request Booking")}
+        </Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -135,4 +519,19 @@ const S = StyleSheet.create({
   fieldLabel: { fontSize: 11, fontWeight: "700", marginBottom: 2 },
   fieldValue: { fontSize: 14, fontWeight: "600" },
   bio: { fontSize: 13, lineHeight: 20, fontWeight: "500" },
+
+  bookingCard: { marginTop: 6, borderWidth: 1, borderRadius: 18, padding: 16, gap: 12, backgroundColor: "rgba(20,184,166,0.06)" },
+  bookingTitle: { fontSize: 13.5, fontWeight: "800" },
+  bookingLabel: { fontSize: 10.5, fontWeight: "800", marginBottom: 5 },
+  bookingInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13, fontWeight: "600" },
+
+  // Reuses the chipRow key already defined above (subject-chip row) — same
+  // flex-wrap layout works for the booking panel's subject/time chips too.
+  pickChip: { borderWidth: 1, borderColor: "#334155", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  pickChipActive: { backgroundColor: "rgba(20,184,166,0.15)", borderColor: "#14b8a6" },
+  pickChipText: { fontSize: 11.5, fontWeight: "700", color: "#94a3b8" },
+  pickChipTextActive: { color: "#0d9488" },
+
+  submitBtn: { borderRadius: 14, paddingVertical: 13, alignItems: "center", backgroundColor: "#0f766e" },
+  submitBtnText: { color: "#fff", fontSize: 14, fontWeight: "800" },
 });

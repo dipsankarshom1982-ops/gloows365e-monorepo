@@ -31,13 +31,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAppTranslation } from "@/context/LanguageContext";
 import {
   fetchTutorById,
+  fetchTutorServices,
   requestBookingCall,
+  cancelBookingCall,
   listenToBooking,
   slotOptionsForDate,
   type MarketplaceTutor,
 } from "@/lib/shikshahub";
-import type { Booking, BookingSessionType } from "@gloows/shared-logic";
+import type { Booking, BookingSessionType, TutorService } from "@gloows/shared-logic";
 import { ShikshaHubStyles, SubjectChips, TutorAvatar, VerifiedBadge } from "../_shared";
+
+const SERVICE_TYPE_LABEL: Record<TutorService["serviceType"], string> = {
+  one_time: "One-time",
+  short_term: "Short-term",
+  long_term: "Long-term",
+  instant_help: "Instant Help",
+};
 
 function todayDateStr(): string {
   const d = new Date();
@@ -215,12 +224,224 @@ const STATUS_META: Record<Booking["status"], { label: string; color: string }> =
   cancelled: { label: "Cancelled", color: "var(--text-muted)" },
 };
 
-/** ShikshaHub Phase 1 booking form. No payment anywhere in here — submit
+/** ShikshaHub Phase 1/3 booking form. No payment anywhere in here — submit
  *  only calls requestBooking() (Firestore write, no Razorpay) and then
  *  listens to the resulting bookings/{id} doc for a live status update,
  *  so an "Accepted"/"Declined" from respondToBooking shows up here
- *  without a page reload. */
+ *  without a page reload.
+ *
+ *  Phase 3: fetches this tutor's published services first. If they have
+ *  any, the panel switches to the service picker below and the legacy
+ *  flat subject/fee/availability fields are never used for booking —
+ *  matches requestBooking's own migration rule (a tutor with ANY service
+ *  stops accepting the legacy path). If they have zero services, this
+ *  renders byte-for-byte the same legacy form Phase 1/2 always has. */
 function BookingPanel({ tutor }: { tutor: MarketplaceTutor }) {
+  const [services, setServices]             = useState<TutorService[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(true);
+
+  useEffect(() => {
+    fetchTutorServices(tutor.uid).then(setServices).finally(() => setServicesLoading(false));
+  }, [tutor.uid]);
+
+  if (servicesLoading) return null;
+
+  return services.length > 0
+    ? <ServiceBookingPanel tutor={tutor} services={services} />
+    : <LegacyBookingPanel tutor={tutor} />;
+}
+
+/** Shared "already requested — show live status" view, used by both the
+ *  service and legacy booking panels below. */
+function BookingStatusView({ bookingId, booking }: { bookingId: string; booking: Booking | null }) {
+  const { t } = useAppTranslation();
+  const meta = booking ? STATUS_META[booking.status] : null;
+  const cancellable = booking?.status === "requested" || booking?.status === "accepted";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, textAlign: "center", padding: "6px 0" }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>
+        {t("shikshaHubBookingSent", "Booking request sent")}
+      </div>
+      <div style={{
+        display: "inline-flex", alignSelf: "center", alignItems: "center", gap: 6,
+        fontSize: 12, fontWeight: 700, color: meta?.color ?? "var(--text-muted)",
+      }}>
+        <span style={{ width: 7, height: 7, borderRadius: "50%", background: meta?.color ?? "var(--text-muted)" }} />
+        {meta ? meta.label : t("shikshaHubBookingWaiting", "Waiting for tutor confirmation")}
+      </div>
+      {cancellable && <CancelBookingButton bookingId={bookingId} />}
+    </div>
+  );
+}
+
+/** ShikshaHub Phase 3 — service-based booking. Every authoritative value
+ *  (subject/fee/mode/duration) comes straight off the selected service
+ *  doc, never re-derived or editable here — the server re-resolves all of
+ *  it from tutorServices/{serviceId} again anyway (see requestBooking's
+ *  header comment), this is purely display. instant_help services are
+ *  shown (so students can browse/see the rate — approved Phase 3 scope)
+ *  but are not selectable for booking — see the disabled state below. */
+function ServiceBookingPanel({ tutor, services }: { tutor: MarketplaceTutor; services: TutorService[] }) {
+  const { t } = useAppTranslation();
+  const [serviceId, setServiceId]     = useState(services[0]?.id ?? "");
+  const [sessionType, setSessionType] = useState<BookingSessionType>("trial");
+  const [date, setDate]               = useState(todayDateStr());
+  const [slotStart, setSlotStart]     = useState("");
+  const [phase, setPhase]             = useState<"idle" | "submitting" | "error">("idle");
+  const [errorMsg, setErrorMsg]       = useState("");
+  const [bookingId, setBookingId]     = useState<string | null>(null);
+  const [booking, setBooking]         = useState<Booking | null>(null);
+
+  const service = services.find((s) => s.id === serviceId) ?? null;
+  const isInstantHelp = service?.serviceType === "instant_help";
+
+  const slots = useMemo(
+    () => (service && !isInstantHelp ? slotOptionsForDate(service.availability ?? null, date) : []),
+    [service, isInstantHelp, date]
+  );
+  const selectedSlot = slots.find((s) => s.start === slotStart) ?? null;
+
+  useEffect(() => { setSlotStart(""); }, [date, serviceId]);
+  useEffect(() => {
+    if (service && !isInstantHelp && sessionType === "trial" && !service.trialAvailable) setSessionType("regular");
+  }, [service, isInstantHelp, sessionType]);
+
+  useEffect(() => {
+    if (!bookingId) return;
+    return listenToBooking(bookingId, setBooking);
+  }, [bookingId]);
+
+  if (bookingId) return <BookingStatusView bookingId={bookingId} booking={booking} />;
+
+  async function handleSubmit() {
+    if (!service || isInstantHelp || !selectedSlot) return;
+    setPhase("submitting");
+    setErrorMsg("");
+    try {
+      const res = await requestBookingCall({
+        tutorUid: tutor.uid,
+        serviceId: service.id!,
+        subject: service.subject,
+        sessionType,
+        requestedDate: date,
+        requestedStartTime: selectedSlot.start,
+        requestedEndTime: selectedSlot.end,
+      });
+      setBookingId(res.bookingId);
+      setPhase("idle");
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? "Could not send the booking request. Please try again.");
+      setPhase("error");
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div>
+        <span style={labelStyle}>{t("serviceLabel", "Service")}</span>
+        <select style={inputStyle} value={serviceId} onChange={(e) => setServiceId(e.target.value)}>
+          {services.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.serviceName} · {SERVICE_TYPE_LABEL[s.serviceType]}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {service && (
+        <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>
+          {service.subject} · {service.deliveryMode === "online_offline" ? "Online + Offline" : service.deliveryMode === "online" ? "Online" : "Offline"}
+        </div>
+      )}
+
+      {isInstantHelp ? (
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", padding: "8px 0" }}>
+          {t("serviceInstantHelpComingSoon", "Instant Help isn't bookable yet.")}
+          {service?.creditsPerMinute != null && (
+            <div style={{ marginTop: 4, fontWeight: 800, color: "var(--text)" }}>
+              {service.creditsPerMinute} {t("creditsPerMinuteSuffix", "credits/min")}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <div>
+            <span style={labelStyle}>{t("shikshaHubSessionTypeLabel", "Session")}</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              {(["trial", "regular"] as const).map((opt) => {
+                const disabled = opt === "trial" && !service?.trialAvailable;
+                return (
+                  <button
+                    key={opt} type="button" disabled={disabled}
+                    onClick={() => setSessionType(opt)}
+                    style={{
+                      flex: 1, borderRadius: 10, padding: "8px 0", fontSize: 12, fontWeight: 800,
+                      cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.4 : 1,
+                      border: sessionType === opt ? "1px solid #14b8a6" : "1px solid var(--border)",
+                      background: sessionType === opt ? "rgba(20,184,166,0.15)" : "var(--bg)",
+                      color: sessionType === opt ? "#0d9488" : "var(--text)",
+                    }}
+                  >
+                    {opt === "trial" ? t("shikshaHubTrial", "Trial") : t("shikshaHubRegular", "Regular")}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <span style={labelStyle}>{t("shikshaHubDateLabel", "Date")}</span>
+            <input type="date" min={todayDateStr()} value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+          </div>
+
+          <div>
+            <span style={labelStyle}>{t("shikshaHubTimeLabel", "Time")}</span>
+            {slots.length === 0 ? (
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>
+                {t("shikshaHubNoSlots", "No slots available on this date — try another day.")}
+              </div>
+            ) : (
+              <select style={inputStyle} value={slotStart} onChange={(e) => setSlotStart(e.target.value)}>
+                <option value="">{t("shikshaHubSelectTime", "Select a time")}</option>
+                {slots.map((s) => <option key={s.start} value={s.start}>{s.label}</option>)}
+              </select>
+            )}
+          </div>
+
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 2,
+          }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)" }}>{t("shikshaHubFeeLabel", "Fee")}</span>
+            <span style={{ fontSize: 16, fontWeight: 900, color: "var(--text)" }}>₹{service?.sessionFee}</span>
+          </div>
+
+          {phase === "error" && (
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: "#ef4444" }}>{errorMsg}</div>
+          )}
+
+          <button
+            onClick={handleSubmit}
+            disabled={!selectedSlot || phase === "submitting"}
+            style={{
+              width: "100%", border: "none", borderRadius: 14, padding: "13px 0", fontSize: 14, fontWeight: 800,
+              cursor: !selectedSlot || phase === "submitting" ? "not-allowed" : "pointer",
+              opacity: !selectedSlot || phase === "submitting" ? 0.55 : 1,
+              background: "linear-gradient(90deg, #0f766e, #14b8a6)", color: "#fff",
+            }}
+          >
+            {phase === "submitting" ? t("shikshaHubRequesting", "Sending request…") : t("shikshaHubRequestBooking", "Request Booking")}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** ShikshaHub Phase 1/2 legacy booking form — unchanged from before Phase
+ *  3, rendered only for a tutor with zero services (see requestBooking's
+ *  migration rule in functions/src/tutorBooking.ts). */
+function LegacyBookingPanel({ tutor }: { tutor: MarketplaceTutor }) {
   const { t } = useAppTranslation();
   const [subject, setSubject]         = useState(tutor.subjects[0] ?? "");
   const [sessionType, setSessionType] = useState<BookingSessionType>("trial");
@@ -251,24 +472,7 @@ function BookingPanel({ tutor }: { tutor: MarketplaceTutor }) {
     );
   }
 
-  // Already requested this visit — show live status instead of the form.
-  if (bookingId) {
-    const meta = booking ? STATUS_META[booking.status] : null;
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, textAlign: "center", padding: "6px 0" }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>
-          {t("shikshaHubBookingSent", "Booking request sent")}
-        </div>
-        <div style={{
-          display: "inline-flex", alignSelf: "center", alignItems: "center", gap: 6,
-          fontSize: 12, fontWeight: 700, color: meta?.color ?? "var(--text-muted)",
-        }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: meta?.color ?? "var(--text-muted)" }} />
-          {meta ? meta.label : t("shikshaHubBookingWaiting", "Waiting for tutor confirmation")}
-        </div>
-      </div>
-    );
-  }
+  if (bookingId) return <BookingStatusView bookingId={bookingId} booking={booking} />;
 
   async function handleSubmit() {
     if (!selectedSlot) return;
@@ -364,6 +568,49 @@ function BookingPanel({ tutor }: { tutor: MarketplaceTutor }) {
       >
         {phase === "submitting" ? t("shikshaHubRequesting", "Sending request…") : t("shikshaHubRequestBooking", "Request Booking")}
       </button>
+    </div>
+  );
+}
+
+/** ShikshaHub Phase 2 — cancel a "requested"/"accepted" booking from the
+ *  student side. No local status mutation on success: the parent's
+ *  listenToBooking onSnapshot listener picks up the callable's Admin-SDK
+ *  write and re-renders with status "cancelled" (which flips
+ *  `cancellable` false above), same pattern apps/tutor's bookings page
+ *  uses for accept/decline. */
+function CancelBookingButton({ bookingId }: { bookingId: string }) {
+  const { t } = useAppTranslation();
+  const [phase, setPhase] = useState<"idle" | "cancelling" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  async function handleCancel() {
+    setPhase("cancelling");
+    setErrorMsg("");
+    try {
+      await cancelBookingCall(bookingId);
+      setPhase("idle");
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? "Could not cancel this booking. Please try again.");
+      setPhase("error");
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
+      <button
+        onClick={handleCancel}
+        disabled={phase === "cancelling"}
+        style={{
+          border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)",
+          borderRadius: 10, padding: "8px 14px", fontSize: 12, fontWeight: 700,
+          cursor: phase === "cancelling" ? "not-allowed" : "pointer", opacity: phase === "cancelling" ? 0.6 : 1,
+        }}
+      >
+        {phase === "cancelling" ? t("shikshaHubCancelling", "Cancelling…") : t("shikshaHubCancelBooking", "Cancel booking")}
+      </button>
+      {phase === "error" && (
+        <div style={{ fontSize: 11.5, fontWeight: 600, color: "#ef4444" }}>{errorMsg}</div>
+      )}
     </div>
   );
 }

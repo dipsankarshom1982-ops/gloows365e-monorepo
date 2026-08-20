@@ -33,6 +33,14 @@ const respondToBookingCall = httpsCallable<
   { status: Booking["status"] }
 >(functions, "respondToBooking");
 
+// ShikshaHub Phase 2 — either party can cancel a "requested"/"accepted"
+// booking; this is the tutor-side cancel action, same Admin-SDK-only
+// write path as respondToBooking above.
+const cancelBookingCall = httpsCallable<
+  { bookingId: string },
+  { status: Booking["status"] }
+>(functions, "cancelBooking");
+
 export default function BookingsPage() {
   const { t } = useTutorT();
   const { user } = useTutorProfile();
@@ -49,6 +57,18 @@ export default function BookingsPage() {
       // listener picks up the callable's Admin-SDK write automatically.
     } catch (e: any) {
       setRowError((prev) => ({ ...prev, [bookingId]: e?.message ?? "Could not update this booking." }));
+    } finally {
+      setActingOn(null);
+    }
+  }
+
+  async function cancel(bookingId: string) {
+    setActingOn(bookingId);
+    setRowError((prev) => ({ ...prev, [bookingId]: "" }));
+    try {
+      await cancelBookingCall({ bookingId });
+    } catch (e: any) {
+      setRowError((prev) => ({ ...prev, [bookingId]: e?.message ?? "Could not cancel this booking." }));
     } finally {
       setActingOn(null);
     }
@@ -103,6 +123,18 @@ export default function BookingsPage() {
                       className="flex-1 rounded-lg bg-surface2 hover:bg-slate-600 border border-slate-600 text-slate-100 text-xs font-bold py-2 disabled:opacity-50"
                     >
                       {t("shikshaHubDecline", "Decline")}
+                    </button>
+                  </div>
+                )}
+
+                {(b.status === "requested" || b.status === "accepted") && (
+                  <div className="mt-2">
+                    <button
+                      onClick={() => cancel(b.id!)}
+                      disabled={actingOn === b.id}
+                      className="w-full rounded-lg bg-surface2 hover:bg-slate-600 border border-slate-600 text-slate-100 text-xs font-bold py-2 disabled:opacity-50"
+                    >
+                      {t("shikshaHubCancelBooking", "Cancel booking")}
                     </button>
                   </div>
                 )}

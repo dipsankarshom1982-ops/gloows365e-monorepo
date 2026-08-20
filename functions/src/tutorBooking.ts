@@ -17,6 +17,31 @@
 // Admin-SDK callables (which bypass rules entirely) can create or mutate a
 // booking. This is deliberate, not an oversight: it's what stops a client
 // from ever posting an arbitrary "accepted" status directly.
+//
+// ShikshaHub Phase 3 — requestBooking now has TWO booking paths, chosen by
+// whether the client sends a serviceId (functions/src/tutorServices.ts's
+// tutorServices/{id}):
+//   • service path  — serviceId given. subject/sessionFee/serviceType/
+//     deliveryMode/duration are all resolved from the service doc, never
+//     client-sent (same "never trust a client-sent amount" rule this file
+//     already followed for the legacy sessionFee). instant_help services
+//     are rejected outright — see the approved Phase 3 scope: config-only
+//     this phase, no real-time request/match/session/billing engine yet.
+//   • legacy path   — no serviceId. Exactly today's Phase 1/2 behavior,
+//     byte-for-byte: resolves subject/sessionFee off tutors/{tutorUid}
+//     directly. Stays available ONLY for a tutor with zero tutorServices
+//     docs — the moment a tutor publishes (or even just creates, published
+//     or not) their first service, this path starts rejecting new bookings
+//     against them with a clear "use a service" error, forcing all NEW
+//     bookings onto the service path. This is the approved migration rule:
+//     never break an existing tutor's bookability, but don't let a
+//     tutor's legacy flat fields and their new services silently drift out
+//     of sync as two live, simultaneously-bookable pricing sources.
+// Either path converges on the same bookings/{id} write — the doc just
+// carries a few extra service-snapshot fields when it came from the
+// service path. Existing Phase 1/2 booking fields are never removed or
+// renamed, so every already-tested cancel/accept/decline flow (and every
+// booking already sitting in Firestore) keeps working unchanged.
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
@@ -25,6 +50,8 @@ const db = admin.firestore();
 
 type SessionType = "trial" | "regular";
 type BookingStatus = "requested" | "accepted" | "declined" | "cancelled";
+type ServiceType = "one_time" | "short_term" | "long_term" | "instant_help";
+type DeliveryMode = "online" | "offline" | "online_offline";
 
 const SESSION_TYPES: SessionType[] = ["trial", "regular"];
 const TUTOR_ROLE_CLAIMS = ["TUTOR", "TEACHER", "COACHING_CENTER"];
@@ -58,6 +85,7 @@ export const requestBooking = functionsV1
   .https.onCall(async (
     data: {
       tutorUid?: string;
+      serviceId?: string;
       subject?: string;
       sessionType?: SessionType;
       requestedDate?: string;
@@ -80,15 +108,12 @@ export const requestBooking = functionsV1
     }
 
     const {
-      tutorUid, subject, sessionType,
+      tutorUid, serviceId, subject, sessionType,
       requestedDate, requestedStartTime, requestedEndTime,
     } = data ?? {};
 
     if (!tutorUid || typeof tutorUid !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "tutorUid is required");
-    }
-    if (!subject || typeof subject !== "string") {
-      throw new functionsV1.https.HttpsError("invalid-argument", "subject is required");
     }
     if (!sessionType || !SESSION_TYPES.includes(sessionType)) {
       throw new functionsV1.https.HttpsError("invalid-argument", 'sessionType must be "trial" or "regular"');
@@ -120,18 +145,88 @@ export const requestBooking = functionsV1
       throw new functionsV1.https.HttpsError("failed-precondition", "This tutor isn't verified yet");
     }
 
-    const tutorSubjects: string[] = Array.isArray(tutor.subjects) ? tutor.subjects : [];
-    if (!tutorSubjects.includes(subject)) {
-      throw new functionsV1.https.HttpsError("invalid-argument", "subject must be one this tutor teaches");
-    }
+    // Resolved by whichever path below actually runs — never client-sent
+    // for the fields that matter (subject/sessionFee/service metadata),
+    // exactly the "never trust a client-sent amount" rule aiGuruCredits.ts
+    // follows for its own payment flow.
+    let resolvedSubject: string;
+    let sessionFee: number;
+    let serviceSnapshot: Record<string, unknown> = {};
 
-    // Server-resolved, never client-sent — there is no payment in Phase 1,
-    // but the fee is still snapshotted from the tutor's own doc, exactly
-    // the "never trust a client-sent amount" rule aiGuruCredits.ts follows
-    // for its (real, Phase-2-relevant) payment flow.
-    const sessionFee = Number(tutor.sessionFee);
-    if (!Number.isInteger(sessionFee) || sessionFee <= 0) {
-      throw new functionsV1.https.HttpsError("failed-precondition", "This tutor hasn't set a session fee yet");
+    if (serviceId) {
+      // ── Phase 3 service path ──────────────────────────────────────────
+      if (typeof serviceId !== "string") {
+        throw new functionsV1.https.HttpsError("invalid-argument", "serviceId must be a string");
+      }
+      const serviceSnap = await db.doc(`tutorServices/${serviceId}`).get();
+      if (!serviceSnap.exists) {
+        throw new functionsV1.https.HttpsError("not-found", "Service not found");
+      }
+      const service = serviceSnap.data()!;
+      if (service.tutorUid !== tutorUid) {
+        throw new functionsV1.https.HttpsError("invalid-argument", "serviceId does not belong to the given tutor");
+      }
+      if (service.published !== true) {
+        throw new functionsV1.https.HttpsError("failed-precondition", "This service is not currently available for booking");
+      }
+      const serviceType = service.serviceType as ServiceType;
+      if (serviceType === "instant_help") {
+        // Approved Phase 3 scope: instant_help services are configuration-
+        // only — no real-time request/match/session/billing engine exists
+        // yet, so this path is deliberately a dead end until that phase.
+        throw new functionsV1.https.HttpsError(
+          "failed-precondition",
+          "This service isn't bookable yet — Instant Help launches in a later phase"
+        );
+      }
+      if (sessionType === "trial" && service.trialAvailable !== true) {
+        throw new functionsV1.https.HttpsError("invalid-argument", "This service doesn't offer a trial session");
+      }
+      const fee = Number(service.sessionFee);
+      if (!Number.isInteger(fee) || fee <= 0) {
+        throw new functionsV1.https.HttpsError("failed-precondition", "This service hasn't set a session fee yet");
+      }
+
+      resolvedSubject = (service.subject as string) ?? "";
+      sessionFee = fee;
+      serviceSnapshot = {
+        serviceId,
+        serviceName: (service.serviceName as string | undefined) ?? "",
+        serviceType,
+        deliveryMode: (service.deliveryMode as DeliveryMode | undefined) ?? null,
+        duration: (service.durationMinutes as number | undefined) ?? null,
+      };
+    } else {
+      // ── Legacy Phase 1/2 path ─────────────────────────────────────────
+      if (!subject || typeof subject !== "string") {
+        throw new functionsV1.https.HttpsError("invalid-argument", "subject is required");
+      }
+
+      // Migration rule: the moment a tutor has created ANY tutorServices
+      // doc (published or not), new bookings against them must go through
+      // the service path — this is what stops their flat fields and their
+      // services from silently drifting into two live, conflicting prices.
+      const anyService = await db.collection("tutorServices")
+        .where("tutorUid", "==", tutorUid).limit(1).get();
+      if (!anyService.empty) {
+        throw new functionsV1.https.HttpsError(
+          "failed-precondition",
+          "This tutor now offers services — please select a service to book"
+        );
+      }
+
+      const tutorSubjects: string[] = Array.isArray(tutor.subjects) ? tutor.subjects : [];
+      if (!tutorSubjects.includes(subject)) {
+        throw new functionsV1.https.HttpsError("invalid-argument", "subject must be one this tutor teaches");
+      }
+
+      const fee = Number(tutor.sessionFee);
+      if (!Number.isInteger(fee) || fee <= 0) {
+        throw new functionsV1.https.HttpsError("failed-precondition", "This tutor hasn't set a session fee yet");
+      }
+
+      resolvedSubject = subject;
+      sessionFee = fee;
     }
 
     const now = admin.firestore.FieldValue.serverTimestamp();
@@ -139,7 +234,7 @@ export const requestBooking = functionsV1
     await bookingRef.set({
       studentUid,
       tutorUid,
-      subject,
+      subject: resolvedSubject,
       sessionType,
       requestedDate,
       requestedStartTime,
@@ -150,11 +245,12 @@ export const requestBooking = functionsV1
       // which stays studentUid/tutorUid above.
       studentName: (studentSnap.data()?.name as string | undefined) ?? "",
       tutorName: (tutor.name as string | undefined) ?? "",
+      ...serviceSnapshot,
       createdAt: now,
       updatedAt: now,
     });
 
-    console.log(`✅ Booking requested: ${bookingRef.id} student=${studentUid} tutor=${tutorUid}`);
+    console.log(`✅ Booking requested: ${bookingRef.id} student=${studentUid} tutor=${tutorUid}${serviceId ? ` service=${serviceId}` : " (legacy)"}`);
     return { bookingId: bookingRef.id, status: "requested" as BookingStatus };
   });
 
@@ -204,5 +300,53 @@ export const respondToBooking = functionsV1
     });
 
     console.log(`✅ Booking ${bookingId} ${result.status} by tutor ${tutorUid}`);
+    return result;
+  });
+
+// ─── cancelBooking ──────────────────────────────────────────────────────────
+// Phase 2 — either party on the booking (student or tutor) can cancel a
+// "requested" or "accepted" booking. "declined" and already-"cancelled"
+// bookings can't be cancelled again — declining is the tutor's own terminal
+// action, and there's nothing left to cancel once a booking is already
+// cancelled. Same transaction-guarded pattern as respondToBooking, for the
+// same double-tap race reason.
+export const cancelBooking = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (
+    data: { bookingId?: string },
+    context
+  ) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const callerUid = context.auth.uid;
+    const { bookingId } = data ?? {};
+
+    if (!bookingId || typeof bookingId !== "string") {
+      throw new functionsV1.https.HttpsError("invalid-argument", "bookingId is required");
+    }
+
+    const bookingRef = db.doc(`bookings/${bookingId}`);
+
+    const result = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(bookingRef);
+      if (!snap.exists) {
+        throw new functionsV1.https.HttpsError("not-found", "Booking not found");
+      }
+      const booking = snap.data()!;
+      if (booking.studentUid !== callerUid && booking.tutorUid !== callerUid) {
+        throw new functionsV1.https.HttpsError("permission-denied", "This booking doesn't belong to you");
+      }
+      if (booking.status !== "requested" && booking.status !== "accepted") {
+        throw new functionsV1.https.HttpsError("failed-precondition", `Booking is already "${booking.status}"`);
+      }
+      tx.update(bookingRef, {
+        status: "cancelled" as BookingStatus,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { status: "cancelled" as BookingStatus };
+    });
+
+    console.log(`✅ Booking ${bookingId} cancelled by ${callerUid}`);
     return result;
   });

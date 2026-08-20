@@ -16,6 +16,7 @@
 // nothing real to show; not shown here rather than invented.
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAppTranslation } from "@/context/LanguageContext";
 import {
@@ -87,19 +88,31 @@ function Hero() {
       background: "linear-gradient(135deg, #0f766e, #0d9488, #14b8a6)",
       padding: "24px 20px 34px", borderBottomLeftRadius: 24, borderBottomRightRadius: 24,
     }}>
-      <div className="shikshahub-container" style={{ padding: 0 }}>
-        <div style={{
-          width: 56, height: 56, borderRadius: 18, background: "rgba(255,255,255,0.16)",
-          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28,
-        }}>
-          🎓
+      <div className="shikshahub-container" style={{ padding: 0, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{
+            width: 56, height: 56, borderRadius: 18, background: "rgba(255,255,255,0.16)",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28,
+          }}>
+            🎓
+          </div>
+          <div style={{ color: "#fff", fontSize: 28, fontWeight: 900, marginTop: 12, letterSpacing: -0.3 }}>
+            {t("shikshaHubTitle", "ShikshaHub")}
+          </div>
+          <div style={{ color: "rgba(255,255,255,0.88)", fontSize: 13, fontWeight: 600, marginTop: 5, maxWidth: 460, lineHeight: "19px" }}>
+            {t("shikshaHubSubtitle", "Find verified tutors who match your learning needs.")}
+          </div>
         </div>
-        <div style={{ color: "#fff", fontSize: 28, fontWeight: 900, marginTop: 12, letterSpacing: -0.3 }}>
-          {t("shikshaHubTitle", "ShikshaHub")}
-        </div>
-        <div style={{ color: "rgba(255,255,255,0.88)", fontSize: 13, fontWeight: 600, marginTop: 5, maxWidth: 460, lineHeight: "19px" }}>
-          {t("shikshaHubSubtitle", "Find verified tutors who match your learning needs.")}
-        </div>
+        <Link
+          href="/shikshahub/bookings"
+          style={{
+            flexShrink: 0, marginTop: 4, background: "rgba(255,255,255,0.16)", color: "#fff",
+            border: "1px solid rgba(255,255,255,0.3)", borderRadius: 12, padding: "8px 14px",
+            fontSize: 12, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap",
+          }}
+        >
+          {t("shikshaHubMyBookingsTitle", "My Bookings")}
+        </Link>
       </div>
     </div>
   );

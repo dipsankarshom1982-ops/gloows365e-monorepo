@@ -4,16 +4,27 @@
 // collection, a public-safe (no phone/email) mirror of tutors/{uid} written
 // server-side by functions/src/tutorMarketplace.ts's syncTutorMarketplaceProfile
 // trigger whenever a tutor is Verified.
+//
+// ShikshaHub Phase 2 — brought to parity with the web version's booking
+// helpers (sessionFee/availability fields, weekday slot derivation,
+// requestBookingCall/cancelBookingCall/listenToBooking) which mobile
+// previously lacked entirely. See requestBooking's own header comment in
+// functions/src/tutorBooking.ts for why there's no payment anywhere here.
 
-import { db } from "@/lib/firebase";
+import { db, functions } from "@/lib/firebase";
 import {
   collection,
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
+  where,
+  type Unsubscribe,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import type { Booking, BookingSessionType, TutorService, TutorWeeklyAvailability } from "@gloows/shared-logic";
 
 export interface MarketplaceTutor {
   uid: string;
@@ -25,6 +36,11 @@ export interface MarketplaceTutor {
   preferredLanguage: string;
   profilePic: string;
   tutorRole: string;
+  // ShikshaHub Phase 1/2 — both optional/nullable: older mirror docs synced
+  // before booking landed won't have them, and the UI must not invent a
+  // fee/schedule that isn't really there.
+  sessionFee: number | null;
+  availability: TutorWeeklyAvailability | null;
 }
 
 const COLLECTION = "tutorMarketplaceProfiles";
@@ -41,6 +57,8 @@ function fromDoc(d: any): MarketplaceTutor {
     preferredLanguage: data.preferredLanguage ?? "",
     profilePic: data.profilePic ?? "",
     tutorRole: data.tutorRole ?? "TUTOR",
+    sessionFee: Number.isInteger(data.sessionFee) && data.sessionFee > 0 ? data.sessionFee : null,
+    availability: data.availability ?? null,
   };
 }
 
@@ -65,4 +83,109 @@ export function deriveSubjectChips(tutors: MarketplaceTutor[]): string[] {
   const set = new Set<string>();
   for (const t of tutors) for (const s of t.subjects) if (s.trim()) set.add(s.trim());
   return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+// ─── ShikshaHub Phase 1/2 — tutor booking ──────────────────────────────────
+
+const WEEKDAY_KEYS = [
+  "sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+] as const;
+
+/** "YYYY-MM-DD" → the matching TutorWeekday key, parsed as a local date
+ *  (not UTC) so "picking today" always maps to today's own weekday
+ *  regardless of timezone offset. */
+export function weekdayKeyForDate(dateStr: string): (typeof WEEKDAY_KEYS)[number] | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(d.getTime())) return null;
+  return WEEKDAY_KEYS[d.getDay()];
+}
+
+/** Turns a tutor's declared "enabled 17:00–20:00" window for one weekday
+ *  into a flat list of hour-long "17:00–18:00" style slot option strings.
+ *  Deliberately no conflict detection / already-booked exclusion yet —
+ *  that's Phase 3 scope. */
+export function slotOptionsForDate(
+  availability: TutorWeeklyAvailability | null,
+  dateStr: string
+): { label: string; start: string; end: string }[] {
+  const key = weekdayKeyForDate(dateStr);
+  const day = key ? availability?.[key] : undefined;
+  if (!day?.enabled || !day.start || !day.end) return [];
+
+  const [startH] = day.start.split(":").map(Number);
+  const [endH]   = day.end.split(":").map(Number);
+  if (!Number.isFinite(startH) || !Number.isFinite(endH) || endH <= startH) return [];
+
+  const slots: { label: string; start: string; end: string }[] = [];
+  for (let h = startH; h < endH; h++) {
+    const start = `${String(h).padStart(2, "0")}:00`;
+    const end   = `${String(h + 1).padStart(2, "0")}:00`;
+    slots.push({ label: `${start} – ${end}`, start, end });
+  }
+  return slots;
+}
+
+// ─── ShikshaHub Phase 3 — tutor services ────────────────────────────────────
+// Reads from tutorServicesMarketplace, the public-safe mirror written by
+// functions/src/tutorServices.ts's syncTutorServiceMarketplace trigger.
+// Only ever contains published services of verified tutors, by
+// construction — see apps/web/src/lib/shikshahub/index.ts's mirrored
+// header comment for why no published/verified filtering is needed here.
+
+const SERVICES_COLLECTION = "tutorServicesMarketplace";
+
+/** A tutor's published, bookable services (empty array if they have none —
+ *  the caller falls back to the legacy flat sessionFee/availability path
+ *  in that case, matching requestBooking's own migration rule). */
+export async function fetchTutorServices(tutorUid: string): Promise<TutorService[]> {
+  const snap = await getDocs(
+    query(collection(db, SERVICES_COLLECTION), where("tutorUid", "==", tutorUid), orderBy("createdAt", "desc"))
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as TutorService));
+}
+
+export interface RequestBookingInput {
+  tutorUid: string;
+  serviceId?: string;
+  subject: string;
+  sessionType: BookingSessionType;
+  requestedDate: string;
+  requestedStartTime: string;
+  requestedEndTime: string;
+}
+
+export async function requestBookingCall(
+  input: RequestBookingInput
+): Promise<{ bookingId: string; status: Booking["status"] }> {
+  const fn = httpsCallable<RequestBookingInput, { bookingId: string; status: Booking["status"] }>(
+    functions, "requestBooking"
+  );
+  const res = await fn(input);
+  return res.data;
+}
+
+/** ShikshaHub Phase 2 — either party (student or tutor) can cancel a
+ *  "requested"/"accepted" booking. Same Admin-SDK-only write path as
+ *  requestBooking/respondToBooking. */
+export async function cancelBookingCall(
+  bookingId: string
+): Promise<{ status: Booking["status"] }> {
+  const fn = httpsCallable<{ bookingId: string }, { status: Booking["status"] }>(
+    functions, "cancelBooking"
+  );
+  const res = await fn({ bookingId });
+  return res.data;
+}
+
+/** Live status for one booking the current student owns — relies on
+ *  firestore.rules' bookings/{id} read rule (studentUid/tutorUid ==
+ *  caller), not on trusting anything client-side. */
+export function listenToBooking(bookingId: string, onChange: (booking: Booking | null) => void): Unsubscribe {
+  return onSnapshot(
+    doc(db, "bookings", bookingId),
+    (snap) => onChange(snap.exists() ? ({ id: snap.id, ...snap.data() } as Booking) : null),
+    () => onChange(null)
+  );
 }

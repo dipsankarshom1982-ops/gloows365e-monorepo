@@ -11,6 +11,8 @@ import BottomNav from "@/components/BottomNav";
 
 const ITEMS = [
   { href: "/batches",      titleKey: "batchesTitle",      icon: "📚" },
+  { href: "/services",     titleKey: "servicesTitle",     icon: "🧩" },
+  { href: "/bookings",     titleKey: "shikshaHubBookingRequestsTitle", icon: "🎓" },
   { href: "/profile",      titleKey: "profileTitle",      icon: "👤" },
   { href: "/verification", titleKey: "verificationTitle", icon: "📄" },
 ] as const;
