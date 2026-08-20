@@ -25,7 +25,13 @@ const db = admin.firestore();
 exports.createTutorCreditOrder = functionsV1
     .runWith({
     timeoutSeconds: 60,
-    memory: "128MB",
+    // 256MB — bumped from 128MB after tutorCreditPaymentSuccess (the same
+    // memory allocation, mirrored from aiGuruCreditPaymentSuccess) was
+    // observed OOM-crashing on a real cold start in staging E2E ("Memory
+    // limit of 128 MiB exceeded with 128 MiB used"). Applied to all three
+    // Razorpay functions here as a precaution since they share the same
+    // Admin SDK + axios + crypto footprint.
+    memory: "256MB",
     secrets: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"],
 })
     .https.onCall(async (data, context) => {
@@ -86,7 +92,12 @@ exports.createTutorCreditOrder = functionsV1
 // ── HTTP endpoint called from the checkout page after payment success ─────
 exports.tutorCreditPaymentSuccess = (0, https_1.onRequest)({
     timeoutSeconds: 30,
-    memory: "128MiB",
+    // 256MiB — see createTutorCreditOrder's comment above. This is the
+    // specific function confirmed OOM-crashing at 128MiB on a real staging
+    // cold start during E2E verification, payment_id pay_TS5WDRHX0EPPrf
+    // (real TEST-mode Razorpay payment captured but never recorded here as
+    // a result — no partial write, the transaction never ran).
+    memory: "256MiB",
     secrets: ["RAZORPAY_KEY_SECRET"],
 }, async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*");
@@ -176,7 +187,8 @@ exports.tutorCreditPaymentSuccess = (0, https_1.onRequest)({
 exports.reconcileTutorCreditOrders = functionsV1
     .runWith({
     timeoutSeconds: 300,
-    memory: "128MB",
+    // 256MB — see createTutorCreditOrder's comment above.
+    memory: "256MB",
     secrets: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"],
 })
     .pubsub.schedule("every 10 minutes")
