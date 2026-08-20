@@ -11,7 +11,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncTutorMarketplaceProfile = exports.reviewTutorVerification = exports.submitTutorVerification = exports.registerTutorAccount = exports.resetStarboardPeriods = exports.onContestParticipantWrite = exports.getContestLesson = exports.removeAdmin = exports.getUserSubscriptionHistory = exports.createCoupon = exports.createComboPlan = exports.createAdmin = exports.approveContent = exports.recordAdEvent = exports.getAds = exports.claimAdReward = exports.aggregateAdAnalytics = exports.reconcileAiGuruCreditOrders = exports.aiGuruCreditPaymentSuccess = exports.aiGuruCreateCreditOrder = exports.aiGuruPaymentSuccess = exports.aiGuruCreateSubscription = exports.aiGuruCheckoutPage = exports.voiceTutorAnswer = exports.generateExam = exports.evaluateExam = exports.photoSolve = exports.restartEducationAdvisor = exports.askAiGuruQuestion = exports.getPersonalizedDashboard = exports.dailyStreakQuizReminder = exports.applyForAmbassadorProgram = exports.submitDailyStreakQuizAnswer = exports.getTodaysStreakQuizQuestion = exports.submitVidyastarContestQuiz = exports.deleteContest = exports.joinVidyastarContest = exports.getVCoinBalance = exports.claimVCoinReward = exports.getReelsFeed = exports.getHomeFeed = exports.getLeaderboard = exports.seekhoUpdateRevisionQueue = exports.seekhoOnChapterComplete = exports.seekhoGetDailyStudyPlan = exports.seekhoDailyRevisionReminder = exports.seekhoCreateSubscription = exports.vidyaguruChat = exports.discoverTrending = exports.discoverSearch = void 0;
-exports.followUp = exports.generateLesson = exports.onPostCreated = exports.updateSkillboard = exports.ensureStudentId = exports.adminEraseStudent = exports.eraseMyAccount = exports.exportMyData = exports.getReferralLeaderboard = exports.applyReferral = exports.syncTutorServiceMarketplace = exports.deleteService = exports.updateService = exports.createService = exports.cancelBooking = exports.respondToBooking = exports.requestBooking = void 0;
+exports.followUp = exports.generateLesson = exports.onPostCreated = exports.updateSkillboard = exports.ensureStudentId = exports.adminEraseStudent = exports.eraseMyAccount = exports.exportMyData = exports.getReferralLeaderboard = exports.applyReferral = exports.tickInstantHelp = exports.endInstantHelpSession = exports.cancelInstantHelpRequest = exports.respondToInstantHelpRequest = exports.requestInstantHelp = exports.setInstantHelpOnlineStatus = exports.reconcileTutorCreditOrders = exports.tutorCreditPaymentSuccess = exports.createTutorCreditOrder = exports.syncTutorServiceMarketplace = exports.deleteService = exports.updateService = exports.createService = exports.cancelBooking = exports.respondToBooking = exports.requestBooking = void 0;
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const functionsV1 = require("firebase-functions/v1");
@@ -131,6 +131,20 @@ Object.defineProperty(exports, "createService", { enumerable: true, get: functio
 Object.defineProperty(exports, "updateService", { enumerable: true, get: function () { return tutorServices_1.updateService; } });
 Object.defineProperty(exports, "deleteService", { enumerable: true, get: function () { return tutorServices_1.deleteService; } });
 Object.defineProperty(exports, "syncTutorServiceMarketplace", { enumerable: true, get: function () { return tutorServices_1.syncTutorServiceMarketplace; } });
+// ── ShikshaHub — Phase 4 Instant Help credits (pay-as-you-go, funds
+// per-minute billing — see tutorCredits.ts) ─────────────────────────────────────
+var tutorCredits_1 = require("./tutorCredits");
+Object.defineProperty(exports, "createTutorCreditOrder", { enumerable: true, get: function () { return tutorCredits_1.createTutorCreditOrder; } });
+Object.defineProperty(exports, "tutorCreditPaymentSuccess", { enumerable: true, get: function () { return tutorCredits_1.tutorCreditPaymentSuccess; } });
+Object.defineProperty(exports, "reconcileTutorCreditOrders", { enumerable: true, get: function () { return tutorCredits_1.reconcileTutorCreditOrders; } });
+// ── ShikshaHub — Phase 4 Instant Help real-time matching/session/billing ───────
+var instantHelp_1 = require("./instantHelp");
+Object.defineProperty(exports, "setInstantHelpOnlineStatus", { enumerable: true, get: function () { return instantHelp_1.setInstantHelpOnlineStatus; } });
+Object.defineProperty(exports, "requestInstantHelp", { enumerable: true, get: function () { return instantHelp_1.requestInstantHelp; } });
+Object.defineProperty(exports, "respondToInstantHelpRequest", { enumerable: true, get: function () { return instantHelp_1.respondToInstantHelpRequest; } });
+Object.defineProperty(exports, "cancelInstantHelpRequest", { enumerable: true, get: function () { return instantHelp_1.cancelInstantHelpRequest; } });
+Object.defineProperty(exports, "endInstantHelpSession", { enumerable: true, get: function () { return instantHelp_1.endInstantHelpSession; } });
+Object.defineProperty(exports, "tickInstantHelp", { enumerable: true, get: function () { return instantHelp_1.tickInstantHelp; } });
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 var referral_1 = require("./referral");
 Object.defineProperty(exports, "applyReferral", { enumerable: true, get: function () { return referral_1.applyReferral; } });

@@ -7,6 +7,7 @@ import { View, Text } from "react-native";
 import { useTutorProfile } from "@gloows/shared-logic";
 import { semantic } from "@gloows/tutor-ui";
 import { LoadingState } from "@/components/ui";
+import InstantHelpBar from "@/components/InstantHelpBar";
 
 export default function AppGroupLayout() {
   const { user, authLoading } = useTutorProfile();
@@ -28,5 +29,12 @@ export default function AppGroupLayout() {
 
   if (!user) return null;
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <View style={{ flex: 1 }}>
+      <Stack screenOptions={{ headerShown: false }} />
+      {/* ShikshaHub Phase 4 — global, not per-screen: see
+         InstantHelpBar.tsx's header comment. */}
+      <InstantHelpBar />
+    </View>
+  );
 }

@@ -10,10 +10,14 @@ import { useState } from "react";
 import Link from "next/link";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "@/lib/firebase";
-import { useTutorServices, useTutorProfile, type TutorService } from "@gloows/shared-logic";
+import { useTutorServices, useTutorProfile, useTutorEarnings, type TutorService } from "@gloows/shared-logic";
 import { useTutorT } from "@gloows/tutor-i18n";
 import { Badge, Button, Card, EmptyState, LoadingState } from "@/components/ui";
 import BottomNav from "@/components/BottomNav";
+
+const setInstantHelpOnlineStatusCall = httpsCallable<{ online: boolean }, { online: boolean }>(
+  functions, "setInstantHelpOnlineStatus"
+);
 
 const updateServiceCall = httpsCallable<
   { serviceId: string; published?: boolean },
@@ -31,10 +35,32 @@ const TYPE_LABEL: Record<TutorService["serviceType"], string> = {
 
 export default function ServicesPage() {
   const { t } = useTutorT();
-  const { user } = useTutorProfile();
+  const { user, tutorProfile } = useTutorProfile();
   const { services, loading } = useTutorServices(user?.uid);
+  const { balance: earningsBalance } = useTutorEarnings();
   const [actingOn, setActingOn] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
+  const [togglingOnline, setTogglingOnline] = useState(false);
+  const [onlineError, setOnlineError] = useState("");
+
+  // ShikshaHub Phase 4 — the online toggle is only offered once there's at
+  // least one published instant_help service; setInstantHelpOnlineStatus
+  // enforces this same rule server-side (see instantHelp.ts), this is just
+  // the UI staying consistent with it rather than showing a dead control.
+  const hasPublishedInstantHelp = services.some((s) => s.serviceType === "instant_help" && s.published);
+  const isOnline = tutorProfile?.isOnlineForInstantHelp === true;
+
+  async function toggleOnline() {
+    setTogglingOnline(true);
+    setOnlineError("");
+    try {
+      await setInstantHelpOnlineStatusCall({ online: !isOnline });
+    } catch (e: any) {
+      setOnlineError(e?.message ?? "Could not update your online status.");
+    } finally {
+      setTogglingOnline(false);
+    }
+  }
 
   async function togglePublish(service: TutorService) {
     setActingOn(service.id!);
@@ -68,6 +94,38 @@ export default function ServicesPage() {
             <Button variant="secondary" className="w-auto px-4">{t("addService", "Add service")}</Button>
           </Link>
         </div>
+
+        {hasPublishedInstantHelp && (
+          <Card className="mb-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-slate-100 text-sm font-bold">
+                  {t("instantHelpOnlineTitle", "Instant Help availability")}
+                </p>
+                <p className="text-slate-500 text-xs mt-0.5">
+                  {isOnline
+                    ? t("instantHelpOnlineOn", "Students can send you Instant Help requests right now")
+                    : t("instantHelpOnlineOff", "You're offline — students can't reach you for Instant Help")}
+                </p>
+                {earningsBalance != null && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    {t("instantHelpEarnings", "Earnings balance")}: <span className="text-slate-300 font-bold">{earningsBalance}</span>
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={toggleOnline}
+                disabled={togglingOnline}
+                className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition-colors disabled:opacity-50 ${
+                  isOnline ? "bg-success/20 text-success" : "bg-slate-700 text-slate-300"
+                }`}
+              >
+                {isOnline ? t("goOffline", "🟢 Online") : t("goOnline", "Go Online")}
+              </button>
+            </div>
+            {onlineError && <p className="text-danger text-xs font-semibold mt-2">{onlineError}</p>}
+          </Card>
+        )}
 
         {loading ? (
           <LoadingState />

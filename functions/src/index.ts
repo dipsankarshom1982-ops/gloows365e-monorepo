@@ -118,6 +118,24 @@ export { requestBooking, respondToBooking, cancelBooking } from "./tutorBooking"
 // one-time/short-term/long-term, instant-help config-only) ─────────────────────
 export { createService, updateService, deleteService, syncTutorServiceMarketplace } from "./tutorServices";
 
+// ── ShikshaHub — Phase 4 Instant Help credits (pay-as-you-go, funds
+// per-minute billing — see tutorCredits.ts) ─────────────────────────────────────
+export {
+  createTutorCreditOrder,
+  tutorCreditPaymentSuccess,
+  reconcileTutorCreditOrders,
+} from "./tutorCredits";
+
+// ── ShikshaHub — Phase 4 Instant Help real-time matching/session/billing ───────
+export {
+  setInstantHelpOnlineStatus,
+  requestInstantHelp,
+  respondToInstantHelpRequest,
+  cancelInstantHelpRequest,
+  endInstantHelpSession,
+  tickInstantHelp,
+} from "./instantHelp";
+
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 export { applyReferral, getReferralLeaderboard } from "./referral";
 

@@ -798,5 +798,61 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 🎓 SHIKSHAHUB — Phase 4 Instant Help credits. Same shape/reasoning as
+    // aiGuruCredits/{uid} above: balance + ledger are Admin-SDK-only, every
+    // mutation goes through functions/src/tutorCredits.ts (purchases) or
+    // functions/src/instantHelp.ts (per-minute spend) so a client can never
+    // grant or spend its own credits.
+    match /tutorCredits/{uid} {
+      allow read:  if request.auth.uid == uid || request.auth.token.admin == true;
+      allow write: if false;
+      match /transactions/{txId} {
+        allow read:                   if request.auth.uid == uid || request.auth.token.admin == true;
+        allow create, update, delete: if false;
+      }
+    }
+    match /tutorCreditPacks/{packId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+    // Server-only — same purchase-tamper-proofing reasoning as
+    // aiGuruCreditOrders/{orderId} above.
+    match /tutorCreditOrders/{orderId} {
+      allow read, write: if false;
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 4 a tutor's Instant Help earnings. Owner+admin
+    // read, Admin-SDK-only write — credited exclusively by
+    // functions/src/instantHelp.ts's settleInstantHelpSession().
+    match /tutorEarnings/{uid} {
+      allow read:  if request.auth.uid == uid || request.auth.token.admin == true;
+      allow write: if false;
+      match /transactions/{txId} {
+        allow read:                   if request.auth.uid == uid || request.auth.token.admin == true;
+        allow create, update, delete: if false;
+      }
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 4 Instant Help matching. Same closed-write
+    // shape as bookings/{id} — every write (create via requestInstantHelp,
+    // the pending->accepted/declined/expired transition via
+    // respondToInstantHelpRequest / the scheduled tickInstantHelp) goes
+    // through functions/src/instantHelp.ts's Admin-SDK callables, which
+    // bypass these rules entirely.
+    match /instantHelpRequests/{requestId} {
+      allow read: if request.auth != null
+        && (resource.data.studentUid == request.auth.uid || resource.data.tutorUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    // Same closed-write shape — created by respondToInstantHelpRequest,
+    // updated only by endInstantHelpSession / the scheduled
+    // tickInstantHelp's billing settlement, both Admin-SDK.
+    match /instantHelpSessions/{sessionId} {
+      allow read: if request.auth != null
+        && (resource.data.studentUid == request.auth.uid || resource.data.tutorUid == request.auth.uid);
+      allow write: if false;
+    }
+
   }
 }

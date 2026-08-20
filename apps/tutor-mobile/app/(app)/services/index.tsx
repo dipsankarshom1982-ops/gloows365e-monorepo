@@ -7,14 +7,15 @@ import { httpsCallable } from "firebase/functions";
 import { useTranslation } from "react-i18next";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
-import { semantic, spacing } from "@gloows/tutor-ui";
-import { useTutorServices, useTutorProfile, type TutorService } from "@gloows/shared-logic";
+import { semantic, spacing, radii } from "@gloows/tutor-ui";
+import { useTutorServices, useTutorProfile, useTutorEarnings, type TutorService } from "@gloows/shared-logic";
 import { functions } from "@/lib/firebase";
 import { Badge, Button, Card, EmptyState, LoadingState } from "@/components/ui";
 import BottomNav from "@/components/BottomNav";
 
 const updateServiceCall = httpsCallable<{ serviceId: string; published?: boolean }, { serviceId: string }>(functions, "updateService");
 const deleteServiceCall = httpsCallable<{ serviceId: string }, { serviceId: string }>(functions, "deleteService");
+const setInstantHelpOnlineStatusCall = httpsCallable<{ online: boolean }, { online: boolean }>(functions, "setInstantHelpOnlineStatus");
 
 const TYPE_LABEL: Record<TutorService["serviceType"], string> = {
   one_time: "One-time",
@@ -25,10 +26,28 @@ const TYPE_LABEL: Record<TutorService["serviceType"], string> = {
 
 export default function ServicesScreen() {
   const { t } = useTranslation();
-  const { user } = useTutorProfile();
+  const { user, tutorProfile } = useTutorProfile();
   const { services, loading } = useTutorServices(user?.uid);
+  const { balance: earningsBalance } = useTutorEarnings();
   const [actingOn, setActingOn] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
+  const [togglingOnline, setTogglingOnline] = useState(false);
+  const [onlineError, setOnlineError] = useState("");
+
+  const hasPublishedInstantHelp = services.some((s) => s.serviceType === "instant_help" && s.published);
+  const isOnline = tutorProfile?.isOnlineForInstantHelp === true;
+
+  async function toggleOnline() {
+    setTogglingOnline(true);
+    setOnlineError("");
+    try {
+      await setInstantHelpOnlineStatusCall({ online: !isOnline });
+    } catch (e: any) {
+      setOnlineError(e?.message ?? "Could not update your online status.");
+    } finally {
+      setTogglingOnline(false);
+    }
+  }
 
   async function togglePublish(service: TutorService) {
     setActingOn(service.id!);
@@ -62,6 +81,44 @@ export default function ServicesScreen() {
             <Button title={t("addService")} variant="secondary" onPress={() => router.push("/services/new")} />
           </View>
         </View>
+
+        {hasPublishedInstantHelp && (
+          <View style={{ paddingHorizontal: spacing.xl, marginBottom: spacing.md }}>
+            <Card>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: semantic.textPrimary, fontSize: 13, fontWeight: "700" }}>
+                    {t("instantHelpOnlineTitle", "Instant Help availability")}
+                  </Text>
+                  <Text style={{ color: semantic.textMuted, fontSize: 11, marginTop: 2 }}>
+                    {isOnline
+                      ? t("instantHelpOnlineOn", "Students can send you Instant Help requests right now")
+                      : t("instantHelpOnlineOff", "You're offline — students can't reach you for Instant Help")}
+                  </Text>
+                  {earningsBalance != null && (
+                    <Text style={{ color: semantic.textMuted, fontSize: 11, marginTop: 4 }}>
+                      {t("instantHelpEarnings", "Earnings balance")}: <Text style={{ color: semantic.textPrimary, fontWeight: "700" }}>{earningsBalance}</Text>
+                    </Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  onPress={toggleOnline}
+                  disabled={togglingOnline}
+                  style={{
+                    borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8,
+                    backgroundColor: isOnline ? "rgba(16,185,129,0.2)" : semantic.surfaceElevated,
+                    opacity: togglingOnline ? 0.5 : 1,
+                  }}
+                >
+                  <Text style={{ color: isOnline ? semantic.success : semantic.textSecondary, fontSize: 11, fontWeight: "900" }}>
+                    {isOnline ? t("goOffline", "🟢 Online") : t("goOnline", "Go Online")}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {onlineError ? <Text style={{ color: semantic.danger, fontSize: 11, fontWeight: "600", marginTop: 8 }}>{onlineError}</Text> : null}
+            </Card>
+          </View>
+        )}
 
         {loading ? (
           <LoadingState />

@@ -174,7 +174,7 @@
   "serviceCreditsPerMinuteLabel": "Credits per minute",
   "serviceMinDurationLabel": "Min. duration (min)",
   "serviceMaxDurationLabel": "Max. duration (min)",
-  "serviceInstantHelpNote": "Instant Help booking isn't available yet — this configures the service for a future release.",
+  "serviceInstantHelpNote": "Once published, go online from My Services to let students request Instant Help in real time.",
   "serviceDurationLabel": "Session length (min)",
   "serviceNumberOfSessionsLabel": "Total sessions",
   "serviceSessionsPerWeekLabel": "Sessions/week",
@@ -183,5 +183,17 @@
   "serviceTrialAvailableLabel": "Offer a trial session",
   "serviceSaveLabel": "Save service",
   "edit": "Edit",
-  "delete": "Delete"
+  "delete": "Delete",
+
+  "instantHelpOnlineTitle": "Instant Help availability",
+  "instantHelpOnlineOn": "Students can send you Instant Help requests right now",
+  "instantHelpOnlineOff": "You're offline — students can't reach you for Instant Help",
+  "instantHelpEarnings": "Earnings balance",
+  "goOnline": "Go Online",
+  "goOffline": "🟢 Online",
+  "instantHelpSessionActive": "Instant Help session active",
+  "endSession": "End Session",
+  "instantHelpIncoming": "Instant Help request",
+  "accept": "Accept",
+  "decline": "Decline"
 }

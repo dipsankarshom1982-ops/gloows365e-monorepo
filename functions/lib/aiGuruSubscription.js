@@ -81,11 +81,46 @@ exports.aiGuruCreateSubscription = functionsV1
     }
 });
 // ── Serve Razorpay checkout HTML page ─────────────────────────────────────────
-// Called by the app — opens in Chrome — no data: URI needed
+// Called by the app — opens in Chrome — no data: URI needed.
+//
+// `purpose` distinguishes what this checkout is paying for — defaults to
+// "sub" so existing subscription-checkout links behave exactly as before.
+// "credits" posts to aiGuruCreditPaymentSuccess instead of
+// aiGuruPaymentSuccess on success; the credit endpoint only needs the three
+// Razorpay fields (it resolves uid/packId/credits server-side from the
+// order doc written at aiGuruCreateCreditOrder time — see aiGuruCredits.ts
+// for why that matters).
 exports.aiGuruCheckoutPage = (0, https_1.onRequest)({ timeoutSeconds: 10, memory: "128MiB" }, async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*");
-    const { key, order_id, amount, plan, email, uid, planId, cycle } = req.query;
+    const { key, order_id, amount, plan, email, uid, planId, cycle, purpose } = req.query;
+    const isCredits = purpose === "credits";
+    // ShikshaHub Phase 4 — reuses this same generic checkout page for tutor
+    // credits rather than duplicating it, same extension pattern "credits"
+    // itself used alongside the original "sub" purpose (see this
+    // function's header comment).
+    const isTutorCredits = purpose === "tutorcredits";
     const cfBase = `https://us-central1-${process.env.GCLOUD_PROJECT ?? "gloows-03b6sz"}.cloudfunctions.net`;
+    const successEndpoint = isCredits
+        ? "aiGuruCreditPaymentSuccess"
+        : isTutorCredits
+            ? "tutorCreditPaymentSuccess"
+            : "aiGuruPaymentSuccess";
+    // Every value below came from a URL query string a user could edit —
+    // JSON.stringify (not raw interpolation) is what keeps an edited query
+    // param from breaking out of the string literal into executable script.
+    const j = (v) => JSON.stringify(String(v ?? ""));
+    // amount must stay a numeric literal (Razorpay's own options object
+    // expects a number, not a string) — validated via Number(), not
+    // interpolated raw, so a non-numeric query param can't inject anything.
+    const amt = Number(amount) || 0;
+    const subLabel = isCredits ? "AI Guru Credits" : isTutorCredits ? "Instant Help Credits" : "Premium Subscription";
+    // Both credits flavors' verify endpoints resolve uid/packId/credits
+    // themselves from their own order doc (see aiGuruCredits.ts /
+    // tutorCredits.ts) — only the three Razorpay fields need to travel
+    // from this page back to the server.
+    const verifyBodyExtra = (isCredits || isTutorCredits)
+        ? ""
+        : `uid: ${j(uid)}, planId: ${j(planId)}, cycle: ${j(cycle)},`;
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -113,9 +148,9 @@ exports.aiGuruCheckoutPage = (0, https_1.onRequest)({ timeoutSeconds: 10, memory
 <body>
   <div class="box">
     <div class="logo">Gl<span>oows</span><span class="pill">365</span>E</div>
-    <div class="sub">Premium Subscription</div>
+    <div class="sub">${subLabel}</div>
     <div id="msg" class="msg">Opening payment…</div>
-    <button class="btn" id="payBtn" onclick="openRzp()">Pay ₹${Math.round(Number(amount) / 100)}</button>
+    <button class="btn" id="payBtn" onclick="openRzp()">Pay ₹${Math.round(amt / 100)}</button>
   </div>
 <script>
 var paid = false;
@@ -123,23 +158,23 @@ function openRzp() {
   document.getElementById("payBtn").disabled = true;
   document.getElementById("msg").innerText = "Loading Razorpay…";
   var options = {
-    key: "${key}",
-    order_id: "${order_id}",
-    amount: ${amount},
+    key: ${j(key)},
+    order_id: ${j(order_id)},
+    amount: ${amt},
     currency: "INR",
     name: "GLOOWS365E",
-    description: "${plan}",
-    prefill: { email: "${email}" },
+    description: ${j(plan)},
+    prefill: { email: ${j(email)} },
     theme: { color: "#6366f1" },
     handler: function(r) {
       paid = true;
       document.getElementById("msg").innerHTML = '<div class="success">✅ Payment Successful!<br>Return to the app.</div>';
       document.getElementById("payBtn").style.display = "none";
-      fetch("${cfBase}/aiGuruPaymentSuccess", {
+      fetch(${j(`${cfBase}/${successEndpoint}`)}, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          uid: "${uid}", planId: "${planId}", cycle: "${cycle}",
+          ${verifyBodyExtra}
           razorpay_payment_id: r.razorpay_payment_id,
           razorpay_order_id: r.razorpay_order_id,
           razorpay_signature: r.razorpay_signature

@@ -10,6 +10,7 @@ import {
   fetchTutorById,
   fetchTutorServices,
   requestBookingCall,
+  requestInstantHelpCall,
   listenToBooking,
   slotOptionsForDate,
   type MarketplaceTutor,
@@ -219,6 +220,22 @@ function ServiceBookingPanel({ tutor, services, colors, t }: {
 
   if (bookingId) return <BookingStatusView bookingId={bookingId} booking={booking} colors={colors} t={t} />;
 
+  async function handleRequestInstantHelp() {
+    if (!service || !isInstantHelp) return;
+    setPhase("submitting");
+    setErrorMsg("");
+    try {
+      await requestInstantHelpCall(tutor.uid, service.id!);
+      // No local "waiting" state — components/InstantHelpBar.tsx (mounted
+      // globally in app/_layout.tsx) picks up the new pending request via
+      // its own live listener from anywhere in the app.
+      setPhase("idle");
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? "Could not send the request. Please try again.");
+      setPhase("error");
+    }
+  }
+
   async function handleSubmit() {
     const selectedSlot = slots.find((s) => s.start === slotStart);
     if (!service || isInstantHelp || !selectedSlot) return;
@@ -258,15 +275,42 @@ function ServiceBookingPanel({ tutor, services, colors, t }: {
       </View>
 
       {isInstantHelp ? (
-        <View style={{ paddingVertical: 8 }}>
-          <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textSecondary }}>
-            {t("serviceInstantHelpComingSoon") ?? "Instant Help isn't bookable yet."}
-          </Text>
-          {service?.creditsPerMinute != null && (
-            <Text style={{ marginTop: 4, fontWeight: "800", color: colors.text }}>
-              {service.creditsPerMinute} {t("creditsPerMinuteSuffix") ?? "credits/min"}
+        <View style={{ gap: 8, paddingVertical: 4 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10 }}>
+            <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary }}>{t("shikshaHubFeeLabel") ?? "Fee"}</Text>
+            <Text style={{ fontSize: 16, fontWeight: "900", color: colors.text }}>
+              {service?.creditsPerMinute ?? "—"} {t("creditsPerMinuteSuffix") ?? "credits/min"}
             </Text>
+          </View>
+
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: tutor.isOnlineForInstantHelp ? "#10b981" : colors.textSecondary }} />
+            <Text style={{ fontSize: 11.5, fontWeight: "700", color: tutor.isOnlineForInstantHelp ? "#10b981" : colors.textSecondary }}>
+              {tutor.isOnlineForInstantHelp
+                ? (t("instantHelpTutorOnline") ?? "Online now")
+                : (t("instantHelpTutorOffline") ?? "Offline — can't request right now")}
+            </Text>
+          </View>
+
+          {phase === "error" && (
+            <Text style={{ fontSize: 11.5, fontWeight: "600", color: "#ef4444" }}>{errorMsg}</Text>
           )}
+
+          <TouchableOpacity
+            onPress={handleRequestInstantHelp}
+            disabled={!tutor.isOnlineForInstantHelp || phase === "submitting"}
+            style={[S.submitBtn, (!tutor.isOnlineForInstantHelp || phase === "submitting") && { opacity: 0.55 }]}
+          >
+            <Text style={S.submitBtnText}>
+              {phase === "submitting" ? (t("shikshaHubRequesting") ?? "Sending request…") : (t("instantHelpAskNow") ?? "Ask Now")}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => router.push("/shikshahub/credits" as any)}>
+            <Text style={{ textAlign: "center", fontSize: 11.5, fontWeight: "700", color: "#0d9488" }}>
+              {t("instantHelpBuyCreditsLink") ?? "Buy credits →"}
+            </Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <>

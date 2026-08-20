@@ -66,6 +66,13 @@ export type TutorProfile = {
   // requestBooking before it's snapshotted onto a booking.
   sessionFee?: number;
   availability?: TutorWeeklyAvailability;
+  // ShikshaHub Phase 4 — live presence flag for Instant Help, distinct
+  // from any tutorServices/{id}.availability (a static weekly-hours
+  // config). Tutor-toggled via functions/src/instantHelp.ts's
+  // setInstantHelpOnlineStatus; requestInstantHelp re-checks this
+  // server-side before creating a request, same "never trust a stale
+  // client-read flag" rule tutor.verified already follows there.
+  isOnlineForInstantHelp?: boolean;
   [key: string]: any;
 };
 
@@ -91,6 +98,10 @@ export type TutorMarketplaceProfile = {
   // options without ever widening tutors/{uid}'s own owner+admin-only read.
   sessionFee?: number;
   availability?: TutorWeeklyAvailability;
+  // ShikshaHub Phase 4 — mirrored so students browsing the marketplace can
+  // see live Instant Help availability without reading tutors/{uid}
+  // directly. See TutorProfile.isOnlineForInstantHelp above.
+  isOnlineForInstantHelp?: boolean;
   updatedAt?: unknown;
 };
 

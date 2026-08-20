@@ -27,6 +27,10 @@ const SAFE_FIELDS = [
   // fee and compute slot options without widening tutors/{uid}'s own
   // owner+admin-only read (see that collection's firestore.rules match).
   "sessionFee", "availability",
+  // ShikshaHub Phase 4 — live Instant Help presence toggle (set only by
+  // functions/src/instantHelp.ts's setInstantHelpOnlineStatus). Public-safe
+  // the same way sessionFee/availability are: a boolean, no PII.
+  "isOnlineForInstantHelp",
 ] as const;
 
 export const syncTutorMarketplaceProfile = onDocumentWritten(

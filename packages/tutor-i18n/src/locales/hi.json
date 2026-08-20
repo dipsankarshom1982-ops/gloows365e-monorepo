@@ -174,7 +174,7 @@
   "serviceCreditsPerMinuteLabel": "प्रति मिनट क्रेडिट",
   "serviceMinDurationLabel": "न्यूनतम अवधि (मिनट)",
   "serviceMaxDurationLabel": "अधिकतम अवधि (मिनट)",
-  "serviceInstantHelpNote": "इंस्टेंट हेल्प बुकिंग अभी उपलब्ध नहीं है — यह भविष्य के रिलीज़ के लिए सेवा को कॉन्फ़िगर करता है।",
+  "serviceInstantHelpNote": "प्रकाशित होने के बाद, माय सर्विसेज़ से ऑनलाइन जाएं ताकि छात्र रीयल-टाइम में इंस्टेंट हेल्प का अनुरोध कर सकें।",
   "serviceDurationLabel": "सेशन की लंबाई (मिनट)",
   "serviceNumberOfSessionsLabel": "कुल सेशन",
   "serviceSessionsPerWeekLabel": "सेशन/सप्ताह",
@@ -183,5 +183,17 @@
   "serviceTrialAvailableLabel": "ट्रायल सेशन प्रदान करें",
   "serviceSaveLabel": "सेवा सहेजें",
   "edit": "संपादित करें",
-  "delete": "हटाएँ"
+  "delete": "हटाएँ",
+
+  "instantHelpOnlineTitle": "इंस्टेंट हेल्प उपलब्धता",
+  "instantHelpOnlineOn": "छात्र अभी आपको इंस्टेंट हेल्प अनुरोध भेज सकते हैं",
+  "instantHelpOnlineOff": "आप ऑफ़लाइन हैं — छात्र इंस्टेंट हेल्प के लिए आप तक नहीं पहुँच सकते",
+  "instantHelpEarnings": "कमाई शेष",
+  "goOnline": "ऑनलाइन जाएं",
+  "goOffline": "🟢 ऑनलाइन",
+  "instantHelpSessionActive": "इंस्टेंट हेल्प सेशन सक्रिय है",
+  "endSession": "सेशन समाप्त करें",
+  "instantHelpIncoming": "इंस्टेंट हेल्प अनुरोध",
+  "accept": "स्वीकार करें",
+  "decline": "अस्वीकार करें"
 }

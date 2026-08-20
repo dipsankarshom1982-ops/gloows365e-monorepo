@@ -20,7 +20,10 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { functions } from "@/lib/firebase";
 import { where } from "firebase/firestore";
-import type { Booking, BookingSessionType, TutorService, TutorWeeklyAvailability } from "@gloows/shared-logic";
+import type {
+  Booking, BookingSessionType, TutorService, TutorWeeklyAvailability,
+  InstantHelpRequest, InstantHelpSession, TutorCreditPack,
+} from "@gloows/shared-logic";
 
 export interface MarketplaceTutor {
   uid: string;
@@ -38,6 +41,11 @@ export interface MarketplaceTutor {
   // fields that aren't available" rule, same as every other field here).
   sessionFee: number | null;
   availability: TutorWeeklyAvailability | null;
+  // ShikshaHub Phase 4 — live Instant Help presence (see
+  // tutorMarketplace.ts's SAFE_FIELDS). Defaults false, never null/
+  // undefined — "not online" is the correct default for any tutor who
+  // predates this field, same as every other boolean flag in this file.
+  isOnlineForInstantHelp: boolean;
 }
 
 const COLLECTION = "tutorMarketplaceProfiles";
@@ -56,6 +64,7 @@ function fromDoc(d: any): MarketplaceTutor {
     tutorRole: data.tutorRole ?? "TUTOR",
     sessionFee: Number.isInteger(data.sessionFee) && data.sessionFee > 0 ? data.sessionFee : null,
     availability: data.availability ?? null,
+    isOnlineForInstantHelp: data.isOnlineForInstantHelp === true,
   };
 }
 
@@ -196,4 +205,86 @@ export function listenToBooking(bookingId: string, onChange: (booking: Booking |
     (snap) => onChange(snap.exists() ? ({ id: snap.id, ...snap.data() } as Booking) : null),
     () => onChange(null)
   );
+}
+
+// ─── ShikshaHub Phase 4 — Instant Help matching/session/billing ────────────
+// Thin httpsCallable wrappers over functions/src/instantHelp.ts — no
+// business logic here, everything (eligibility, balance checks, race
+// closing, billing) is server-side. Live state (incoming requests, own
+// pending request, active session) is watched via the
+// useIncomingInstantHelpRequests/useMyInstantHelpRequest/
+// useActiveInstantHelpSession hooks in @gloows/shared-logic, not polled
+// from here.
+
+export async function setInstantHelpOnlineStatusCall(online: boolean): Promise<{ online: boolean }> {
+  const fn = httpsCallable<{ online: boolean }, { online: boolean }>(functions, "setInstantHelpOnlineStatus");
+  const res = await fn({ online });
+  return res.data;
+}
+
+export async function requestInstantHelpCall(
+  tutorUid: string,
+  serviceId: string
+): Promise<{ requestId: string; status: InstantHelpRequest["status"] }> {
+  const fn = httpsCallable<{ tutorUid: string; serviceId: string }, { requestId: string; status: InstantHelpRequest["status"] }>(
+    functions, "requestInstantHelp"
+  );
+  const res = await fn({ tutorUid, serviceId });
+  return res.data;
+}
+
+export async function cancelInstantHelpRequestCall(
+  requestId: string
+): Promise<{ status: InstantHelpRequest["status"] }> {
+  const fn = httpsCallable<{ requestId: string }, { status: InstantHelpRequest["status"] }>(
+    functions, "cancelInstantHelpRequest"
+  );
+  const res = await fn({ requestId });
+  return res.data;
+}
+
+export async function respondToInstantHelpRequestCall(
+  requestId: string,
+  action: "accepted" | "declined"
+): Promise<{ status: InstantHelpRequest["status"]; sessionId?: string }> {
+  const fn = httpsCallable<
+    { requestId: string; action: "accepted" | "declined" },
+    { status: InstantHelpRequest["status"]; sessionId?: string }
+  >(functions, "respondToInstantHelpRequest");
+  const res = await fn({ requestId, action });
+  return res.data;
+}
+
+export async function endInstantHelpSessionCall(
+  sessionId: string
+): Promise<{ status: InstantHelpSession["status"]; endReason?: string; minutesCharged: number }> {
+  const fn = httpsCallable<
+    { sessionId: string },
+    { status: InstantHelpSession["status"]; endReason?: string; minutesCharged: number }
+  >(functions, "endInstantHelpSession");
+  const res = await fn({ sessionId });
+  return res.data;
+}
+
+// ─── ShikshaHub Phase 4 — tutor credits (funds Instant Help billing) ───────
+
+const CREDIT_PACKS_COLLECTION = "tutorCreditPacks";
+
+export async function fetchTutorCreditPacks(): Promise<TutorCreditPack[]> {
+  const db = getFirestore();
+  const snap = await getDocs(collection(db, CREDIT_PACKS_COLLECTION));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() } as TutorCreditPack))
+    .filter((p) => p.isActive !== false);
+}
+
+export async function createTutorCreditOrderCall(
+  packId: string
+): Promise<{ razorpayOrderId: string; amountPaise: number; credits: number; packName: string }> {
+  const fn = httpsCallable<
+    { packId: string },
+    { razorpayOrderId: string; amountPaise: number; credits: number; packName: string }
+  >(functions, "createTutorCreditOrder");
+  const res = await fn({ packId });
+  return res.data;
 }

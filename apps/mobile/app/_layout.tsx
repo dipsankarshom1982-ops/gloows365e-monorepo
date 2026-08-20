@@ -1,10 +1,13 @@
+import "@/lib/firebase";
 import { AppConfigProvider } from "@/context/AppConfigContext";
-import { FeatureFlagsProvider } from "@/context/FeatureFlagsContext";
+import { FeatureFlagsProvider, StudentProfileProvider } from "@gloows/shared-logic";
 import { LanguageProvider } from "@/context/LanguageContext";
-import { StudentProfileProvider } from "@/context/StudentProfileContext";
 import { ThemeProvider, useTheme } from "@/context/ThemeContext";
+import { useSeekhoStore } from "@/store/seekhoStore";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { setupGlobalErrorHandlers } from "@/services/crashReporter";
+import { silentlyRegisterForPushNotifications } from "@/hooks/usePushNotifications";
+import InstantHelpBar from "@/components/InstantHelpBar";
 import {
   AntDesign, Feather,
   FontAwesome,
@@ -15,8 +18,9 @@ import {
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
-import { StatusBar } from "react-native";
+import { useEffect, useRef } from "react";
+import { StatusBar, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -48,22 +52,48 @@ export default function RootLayout() {
     if (fontsLoaded) SplashScreen.hideAsync();
   }, [fontsLoaded]);
 
+  // Auto-register for push notifications once per app session, the first
+  // time a logged-in user's profile loads — covers both fresh logins and
+  // existing sessions resumed on app start. Silent (no permission-denied
+  // Alert) and skipped if the user previously opted out via Settings — see
+  // silentlyRegisterForPushNotifications in hooks/usePushNotifications.ts.
+  const pushRegisteredRef = useRef(false);
+
   if (!fontsLoaded) return null;
 
   return (
-    <ErrorBoundary>
-      <ThemeProvider>
-        <ThemeStatusBar />
-        <LanguageProvider>
-          <StudentProfileProvider>
-            <AppConfigProvider>
-              <FeatureFlagsProvider>
-                <Stack screenOptions={{ headerShown: false }} />
-              </FeatureFlagsProvider>
-            </AppConfigProvider>
-          </StudentProfileProvider>
-        </LanguageProvider>
-      </ThemeProvider>
-    </ErrorBoundary>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ErrorBoundary>
+        <ThemeProvider>
+          <ThemeStatusBar />
+          <LanguageProvider>
+            <StudentProfileProvider
+              onProfileLoaded={(profile) => {
+                if (profile.class && profile.board) {
+                  useSeekhoStore.getState().setClassBoard(Number(profile.class), profile.board as any);
+                }
+                if (!pushRegisteredRef.current) {
+                  pushRegisteredRef.current = true;
+                  silentlyRegisterForPushNotifications();
+                }
+              }}
+            >
+              <AppConfigProvider>
+                <FeatureFlagsProvider>
+                  <View style={{ flex: 1 }}>
+                    <Stack screenOptions={{ headerShown: false }} />
+                    {/* ShikshaHub Phase 4 — global, not per-screen: see
+                       components/InstantHelpBar.tsx's header comment.
+                       Safe pre-login too — its hooks no-op without a uid. */}
+                    <InstantHelpBar />
+                  </View>
+                </FeatureFlagsProvider>
+              </AppConfigProvider>
+            </StudentProfileProvider>
+          </LanguageProvider>
+        </ThemeProvider>
+      </ErrorBoundary>
+    </GestureHandlerRootView>
   );
 }
+

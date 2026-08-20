@@ -32,6 +32,9 @@ export * from "./hooks/useTutorBookings";
 export * from "./hooks/useTutorClasses";
 export * from "./hooks/useTutorServices";
 export * from "./hooks/useTutorStudents";
+export * from "./hooks/useTutorCreditsBalance";
+export * from "./hooks/useTutorEarnings";
+export * from "./hooks/useInstantHelp";
 
 // ─── Services ────────────────────────────────────────────────────────────
 export * from "./services/aiGuruApi";
@@ -47,4 +50,6 @@ export * from "./types/tutorBatch";
 export * from "./types/tutorClass";
 export * from "./types/tutorService";
 export * from "./types/tutorStudent";
+export * from "./types/tutorCredits";
+export * from "./types/instantHelp";
 export * from "./types/vcoins";

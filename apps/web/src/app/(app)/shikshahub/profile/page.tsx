@@ -34,6 +34,7 @@ import {
   fetchTutorServices,
   requestBookingCall,
   cancelBookingCall,
+  requestInstantHelpCall,
   listenToBooking,
   slotOptionsForDate,
   type MarketplaceTutor,
@@ -313,6 +314,24 @@ function ServiceBookingPanel({ tutor, services }: { tutor: MarketplaceTutor; ser
 
   if (bookingId) return <BookingStatusView bookingId={bookingId} booking={booking} />;
 
+  async function handleRequestInstantHelp() {
+    if (!service || !isInstantHelp) return;
+    setPhase("submitting");
+    setErrorMsg("");
+    try {
+      await requestInstantHelpCall(tutor.uid, service.id!);
+      // No local "waiting" state to set here — apps/web's global
+      // InstantHelpBar (mounted in the app layout) picks up the new
+      // pending request via its own live listener and renders the
+      // waiting/countdown/cancel UI from anywhere in the app, same as
+      // it'll later pick up the resulting session.
+      setPhase("idle");
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? "Could not send the request. Please try again.");
+      setPhase("error");
+    }
+  }
+
   async function handleSubmit() {
     if (!service || isInstantHelp || !selectedSlot) return;
     setPhase("submitting");
@@ -355,13 +374,46 @@ function ServiceBookingPanel({ tutor, services }: { tutor: MarketplaceTutor; ser
       )}
 
       {isInstantHelp ? (
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)", padding: "8px 0" }}>
-          {t("serviceInstantHelpComingSoon", "Instant Help isn't bookable yet.")}
-          {service?.creditsPerMinute != null && (
-            <div style={{ marginTop: 4, fontWeight: 800, color: "var(--text)" }}>
-              {service.creditsPerMinute} {t("creditsPerMinuteSuffix", "credits/min")}
-            </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "4px 0" }}>
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            borderTop: "1px solid var(--border)", paddingTop: 10,
+          }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)" }}>{t("shikshaHubFeeLabel", "Fee")}</span>
+            <span style={{ fontSize: 16, fontWeight: 900, color: "var(--text)" }}>
+              {service?.creditsPerMinute ?? "—"} {t("creditsPerMinuteSuffix", "credits/min")}
+            </span>
+          </div>
+
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700,
+            color: tutor.isOnlineForInstantHelp ? "#10b981" : "var(--text-muted)",
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: tutor.isOnlineForInstantHelp ? "#10b981" : "var(--text-muted)" }} />
+            {tutor.isOnlineForInstantHelp
+              ? t("instantHelpTutorOnline", "Online now")
+              : t("instantHelpTutorOffline", "Offline — can't request right now")}
+          </div>
+
+          {phase === "error" && (
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: "#ef4444" }}>{errorMsg}</div>
           )}
+
+          <button
+            onClick={handleRequestInstantHelp}
+            disabled={!tutor.isOnlineForInstantHelp || phase === "submitting"}
+            style={{
+              width: "100%", border: "none", borderRadius: 14, padding: "13px 0", fontSize: 14, fontWeight: 800,
+              cursor: !tutor.isOnlineForInstantHelp || phase === "submitting" ? "not-allowed" : "pointer",
+              opacity: !tutor.isOnlineForInstantHelp || phase === "submitting" ? 0.55 : 1,
+              background: "linear-gradient(90deg, #0f766e, #14b8a6)", color: "#fff",
+            }}
+          >
+            {phase === "submitting" ? t("shikshaHubRequesting", "Sending request…") : t("instantHelpAskNow", "Ask Now")}
+          </button>
+          <a href="/shikshahub/credits" style={{ textAlign: "center", fontSize: 11.5, fontWeight: 700, color: "#0d9488", textDecoration: "none" }}>
+            {t("instantHelpBuyCreditsLink", "Buy credits →")}
+          </a>
         </div>
       ) : (
         <>

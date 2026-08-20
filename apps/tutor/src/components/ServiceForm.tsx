@@ -167,7 +167,7 @@ export default function ServiceForm({ initial, submitting, onSubmit }: Props) {
             <Input label={t("serviceMaxDurationLabel", "Max. duration (min)")} type="number" min={1} value={values.maximumDurationMinutes} onChange={(e) => set("maximumDurationMinutes", e.target.value)} />
           </div>
           <p className="text-[11px] text-slate-500 -mt-2 mb-4">
-            {t("serviceInstantHelpNote", "Instant Help booking isn't available yet — this configures the service for a future release.")}
+            {t("serviceInstantHelpNote", "Once published, go online from My Services to let students request Instant Help in real time.")}
           </p>
         </>
       ) : (
