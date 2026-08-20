@@ -1,4 +1,4 @@
-// PATH: admin-web/src/components/Layout.tsx
+// PATH: apps/admin/src/components/Layout.tsx
 
 import { motion } from "framer-motion";
 import { ReactNode } from "react";
@@ -9,7 +9,8 @@ import { hasPermission } from "../lib/permissions";
 const NAV_GROUPS = [
   { section: "OVERVIEW", items: [
     { path: "/",                   label: "📊 Dashboard",          permKey: "dashboard" },
-    { path: "/platform-analytics", label: "📈 Platform Analytics", permKey: "platform-analytics" },
+    { path: "/platform-analytics",      label: "📈 Platform Analytics",    permKey: "platform-analytics"      },
+    { path: "/user-activity-analytics", label: "🎯 Activity & Retention",  permKey: "user-activity-analytics" },
     { path: "/crash-reports",      label: "🐛 Crash Reports",      permKey: "dashboard" },
   ]},
   { section: "ADS", items: [
@@ -33,25 +34,42 @@ const NAV_GROUPS = [
   { section: "GAMIFICATION", items: [
     { path: "/contests",         label: "🏁 Contests",         permKey: "contests" },
     { path: "/vidyastar-config", label: "⭐ VidyaStar Config", permKey: "contests" },
+    { path: "/starboard-payouts",label: "🏆 Starboard Payouts",permKey: "contests" },
+    { path: "/prize-deliveries", label: "📦 Prize Deliveries", permKey: "prize-deliveries" },
     { path: "/quizzes",          label: "🧩 Quizzes",          permKey: "quizzes" },
+    { path: "/daily-streak-quiz",label: "🔥 Daily Streak Quiz",permKey: "daily-streak-quiz" },
     { path: "/skill-battles",    label: "⚔️ Skill Battles",    permKey: "skill-battles" },
     { path: "/learnfun",         label: "🎮 LearnFun",         permKey: "learnfun" },
     { path: "/badges",           label: "🏆 Badges & Stars",   permKey: "badges" },
+  ]},
+  { section: "GLOOWS TUTOR", items: [
+    { path: "/tutor-verifications", label: "🎓 Tutor Verifications", permKey: "tutor-verifications" },
+    { path: "/tutor-payouts",       label: "💸 Tutor Payouts",       permKey: "tutor-payouts" },
+  ]},
+  { section: "FEEDBACK", items: [
+    { path: "/feedback",          label: "💬 Feedback",           permKey: "feedback" },
+    { path: "/feedback-features", label: "⭐ Feedback Features",  permKey: "feedback-features" },
   ]},
   { section: "APP CONFIG", items: [
     { path: "/feature-control",    label: "🎛️ Feature Control",   permKey: "modules" },
     { path: "/referrals",          label: "🎁 Referrals",          permKey: "modules" },
     { path: "/modules",            label: "🧩 App Modules",        permKey: "modules" },
     { path: "/subscription-plans", label: "💎 Plans",              permKey: "subscription-plans" },
+    { path: "/ai-guru-credits",    label: "🎫 AI Guru Credits",    permKey: "subscription-plans" },
     { path: "/coupons",            label: "🎟️ Coupons",            permKey: "coupons" },
     { path: "/vcoin-rules",        label: "🪙 V-Coin Rules",       permKey: "vcoin-rules" },
     { path: "/vcoin-leaderboard",  label: "🏆 V-Coin Leaderboard", permKey: "vcoin-rules" },
   ]},
   { section: "USERS", items: [
-    { path: "/students",       label: "👥 Students",           permKey: "students" },
-    { path: "/subscriptions",  label: "💰 Subscriptions",      permKey: "subscriptions" },
-    { path: "/ai-usage",       label: "🤖 AI Usage",           permKey: "ai-usage" },
-    { path: "/restart-leads",  label: "🎓 Restart Ed. Leads",  permKey: "students" }, // ← NEW
+    { path: "/students",       label: "👥 Students",          permKey: "students" },
+    { path: "/subscriptions",  label: "💰 Subscriptions",     permKey: "subscriptions" },
+    { path: "/ai-usage",       label: "🤖 AI Usage",          permKey: "ai-usage" },
+    { path: "/restart-leads",  label: "🎓 Restart Ed. Leads", permKey: "students" },
+    { path: "/waitlist",       label: "📋 Waitlist",          permKey: "students" }, // ← NEW
+  ]},
+  { section: "COMPLIANCE", items: [
+    { path: "/data-rights", label: "🔐 Data Rights",  permKey: "data-rights" },
+    { path: "/grievances",  label: "📮 Grievances",   permKey: "grievances" },
   ]},
   { section: "ADMIN", items: [
     { path: "/admins", label: "👑 Admins", permKey: "admins" },
@@ -62,10 +80,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const { user, logout, isSuperAdmin, permissions } = useAuth();
 
-  // Paths that are list pages with child routes (e.g. /ads/new, /ads/:id).
-  // These must match EXACTLY — startsWith would highlight the list page
-  // when you're on a create/edit child route.
-  const EXACT_MATCH_PATHS = ["/ads", "/contests", "/stories", "/skill-battles", "/banners", "/partners", "/badges", "/admins", "/students", "/subscriptions", "/courses", "/practice", "/quizzes"];
+  const EXACT_MATCH_PATHS = ["/ads", "/contests", "/stories", "/skill-battles", "/banners", "/partners", "/badges", "/admins", "/students", "/subscriptions", "/courses", "/practice", "/quizzes", "/daily-streak-quiz"];
 
   const isActive = (path: string) => {
     if (path === "/") return pathname === "/";

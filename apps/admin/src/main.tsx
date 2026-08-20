@@ -1,4 +1,4 @@
-// PATH: admin-web/src/main.tsx
+// PATH: apps/admin/src/main.tsx
 
 import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
@@ -8,7 +8,8 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import "./index.css";
 
 const Dashboard            = lazy(() => import("./pages/Dashboard"));
-const PlatformAnalytics    = lazy(() => import("./pages/PlatformAnalytics"));
+const PlatformAnalytics      = lazy(() => import("./pages/PlatformAnalytics"));
+const UserActivityAnalytics  = lazy(() => import("./pages/UserActivityAnalytics"));
 
 const AdsList              = lazy(() => import("./pages/AdsList"));
 const CreateAd             = lazy(() => import("./pages/CreateAd"));
@@ -33,17 +34,25 @@ const Practice             = lazy(() => import("./pages/Practice"));
 const Contests             = lazy(() => import("./pages/Contests"));
 const CreateContest        = lazy(() => import("./pages/CreateContest"));
 const VidyastarConfig      = lazy(() => import("./pages/VidyastarConfig"));
+const StarboardPayouts     = lazy(() => import("./pages/StarboardPayouts"));
+const TutorVerifications   = lazy(() => import("./pages/TutorVerifications"));
+const TutorPayouts         = lazy(() => import("./pages/TutorPayouts"));
+const PrizeDeliveries      = lazy(() => import("./pages/PrizeDeliveries"));
 const Quizzes              = lazy(() => import("./pages/Quizzes"));
 const CreateQuiz           = lazy(() => import("./pages/CreateQuiz"));
 const QuizQuestions        = lazy(() => import("./pages/QuizQuestions"));
+const DailyStreakQuiz       = lazy(() => import("./pages/DailyStreakQuiz"));
 const SkillBattles         = lazy(() => import("./pages/SkillBattles"));
 const LearnFun             = lazy(() => import("./pages/LearnFun"));
 const BadgesAndStars       = lazy(() => import("./pages/BadgesAndStars"));
 
 const AppModules           = lazy(() => import("./pages/AppModules"));
 const FeatureControl       = lazy(() => import("./pages/FeatureControl"));
+const FeedbackFeatures     = lazy(() => import("./pages/FeedbackFeatures"));
+const Feedback             = lazy(() => import("./pages/Feedback"));
 const Referrals            = lazy(() => import("./pages/Referrals"));
 const SubscriptionPlans    = lazy(() => import("./pages/SubscriptionPlans"));
+const AiGuruCredits        = lazy(() => import("./pages/AiGuruCredits"));
 const Coupons              = lazy(() => import("./pages/Coupons"));
 const VCoinRules           = lazy(() => import("./pages/VCoinRules"));
 const VCoinLeaderboard     = lazy(() => import("./pages/VCoinLeaderboard"));
@@ -51,7 +60,11 @@ const VCoinLeaderboard     = lazy(() => import("./pages/VCoinLeaderboard"));
 const Students             = lazy(() => import("./pages/Students"));
 const Subscriptions        = lazy(() => import("./pages/Subscriptions"));
 const AiUsage              = lazy(() => import("./pages/AiUsage"));
-const RestartLeads         = lazy(() => import("./pages/RestartLeads")); // ← NEW
+const RestartLeads         = lazy(() => import("./pages/RestartLeads"));
+const Waitlist             = lazy(() => import("./pages/Waitlist"));   // ← NEW
+
+const DataRightsRequests   = lazy(() => import("./pages/DataRightsRequests"));
+const Grievances           = lazy(() => import("./pages/Grievances"));
 
 const Admins               = lazy(() => import("./pages/Admins"));
 const Login                = lazy(() => import("./pages/Login"));
@@ -68,7 +81,7 @@ function PageLoader() {
 }
 
 function ProtectedRoutes() {
-  const { user, loading } = useAuth();
+  const { user, loading, isAdmin, isSuperAdmin } = useAuth();
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
@@ -81,19 +94,44 @@ function ProtectedRoutes() {
 
   if (!user) return <Navigate to="/login" replace />;
 
+  // User is authenticated but does NOT have the admin or superAdmin custom claim.
+  // This is the exact bug: any Firebase Auth account in this project could reach
+  // the admin panel because the guard only checked `user`, not `isAdmin`.
+  if (!isAdmin && !isSuperAdmin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white p-8">
+        <div className="text-center max-w-sm">
+          <div className="text-5xl mb-4">🚫</div>
+          <h1 className="text-xl font-bold mb-2">Access Denied</h1>
+          <p className="text-slate-400 text-sm mb-6">
+            Your account ({user.email}) does not have admin access.
+            Contact a super admin to grant you permissions.
+          </p>
+          <button
+            onClick={() => { import('../src/lib/firebase').then(({ auth }) => auth.signOut()); }}
+            className="px-6 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-sm font-semibold hover:bg-slate-700 transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Layout>
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/"                   element={<Dashboard />} />
-          <Route path="/platform-analytics" element={<PlatformAnalytics />} />
+          <Route path="/platform-analytics"      element={<PlatformAnalytics />} />
+          <Route path="/user-activity-analytics" element={<UserActivityAnalytics />} />
 
-          <Route path="/ads"       element={<AdsList />} />
-          <Route path="/ads/new"   element={<CreateAd />} />
-          <Route path="/ads/:id"   element={<CreateAd />} />
+          <Route path="/ads"                    element={<AdsList />} />
+          <Route path="/ads/new"                element={<CreateAd />} />
+          <Route path="/ads/:id"                element={<CreateAd />} />
           <Route path="/affiliate-products"     element={<AffiliateProducts />} />
           <Route path="/crash-reports"          element={<CrashReports />} />
-          <Route path="/analytics" element={<Analytics />} />
+          <Route path="/analytics"              element={<Analytics />} />
 
           <Route path="/banners"                    element={<Banners />} />
           <Route path="/short-reels"                element={<ShortReels />} />
@@ -116,10 +154,15 @@ function ProtectedRoutes() {
           <Route path="/contests/new"              element={<CreateContest />} />
           <Route path="/contests/:id"              element={<CreateContest />} />
           <Route path="/vidyastar-config"          element={<VidyastarConfig />} />
+          <Route path="/starboard-payouts"          element={<StarboardPayouts />} />
+          <Route path="/tutor-verifications"        element={<TutorVerifications />} />
+          <Route path="/tutor-payouts"               element={<TutorPayouts />} />
+          <Route path="/prize-deliveries"           element={<PrizeDeliveries />} />
           <Route path="/quizzes"                   element={<Quizzes />} />
           <Route path="/quizzes/new"               element={<CreateQuiz />} />
           <Route path="/quizzes/:id"               element={<CreateQuiz />} />
           <Route path="/quizzes/:quizId/questions" element={<QuizQuestions />} />
+          <Route path="/daily-streak-quiz"         element={<DailyStreakQuiz />} />
           <Route path="/skill-battles"             element={<SkillBattles />} />
           <Route path="/learnfun"                  element={<LearnFun />} />
           <Route path="/badges"                    element={<BadgesAndStars />} />
@@ -127,7 +170,10 @@ function ProtectedRoutes() {
           <Route path="/feature-control"    element={<FeatureControl />} />
           <Route path="/referrals"          element={<Referrals />} />
           <Route path="/modules"            element={<AppModules />} />
+          <Route path="/feedback-features"  element={<FeedbackFeatures />} />
+          <Route path="/feedback"           element={<Feedback />} />
           <Route path="/subscription-plans" element={<SubscriptionPlans />} />
+          <Route path="/ai-guru-credits"    element={<AiGuruCredits />} />
           <Route path="/coupons"            element={<Coupons />} />
           <Route path="/vcoin-rules"        element={<VCoinRules />} />
           <Route path="/vcoin-leaderboard"  element={<VCoinLeaderboard />} />
@@ -135,7 +181,11 @@ function ProtectedRoutes() {
           <Route path="/students"        element={<Students />} />
           <Route path="/subscriptions"   element={<Subscriptions />} />
           <Route path="/ai-usage"        element={<AiUsage />} />
-          <Route path="/restart-leads"   element={<RestartLeads />} /> {/* ← NEW */}
+          <Route path="/restart-leads"   element={<RestartLeads />} />
+          <Route path="/waitlist"        element={<Waitlist />} />  {/* ← NEW */}
+
+          <Route path="/data-rights" element={<DataRightsRequests />} />
+          <Route path="/grievances"  element={<Grievances />} />
 
           <Route path="/admins" element={<Admins />} />
 

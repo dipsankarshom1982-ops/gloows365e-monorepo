@@ -854,5 +854,33 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 🎓 SHIKSHAHUB — Phase 5 tutor earnings payout. A tutor's saved bank/
+    // UPI details — owner+admin read only (contains a bank account
+    // number), Admin-SDK-only write via saveTutorPayoutDetails.
+    match /tutorPayoutDetails/{uid} {
+      allow read:  if request.auth.uid == uid || request.auth.token.admin == true;
+      allow write: if false;
+    }
+
+    // Same closed-write shape as bookings/{id} — every write (create via
+    // requestPayout, pending->approved/rejected via reviewPayoutRequest,
+    // approved->paid via markPayoutPaid, pending->cancelled via
+    // cancelPayoutRequest) goes through functions/src/tutorPayouts.ts's
+    // Admin-SDK callables. Admin read is unrestricted (the review queue
+    // needs to see every tutor's requests); tutor read is scoped to their
+    // own.
+    match /payoutRequests/{requestId} {
+      allow read: if request.auth != null
+        && (resource.data.tutorUid == request.auth.uid || request.auth.token.admin == true);
+      allow write: if false;
+    }
+
+    // Admin-managed commission-rate / minimum-payout / enabled config —
+    // same shape as aiGuruCreditConfig/settings above.
+    match /payoutConfig/{docId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+
   }
 }

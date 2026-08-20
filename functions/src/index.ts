@@ -136,6 +136,15 @@ export {
   tickInstantHelp,
 } from "./instantHelp";
 
+// ── ShikshaHub — Phase 5 tutor earnings payout (manual/admin-processed) ────────
+export {
+  saveTutorPayoutDetails,
+  requestPayout,
+  cancelPayoutRequest,
+  reviewPayoutRequest,
+  markPayoutPaid,
+} from "./tutorPayouts";
+
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 export { applyReferral, getReferralLeaderboard } from "./referral";
 

@@ -6,7 +6,8 @@ export interface PermissionModule {
 
 export const ALL_PERMISSIONS: PermissionModule[] = [
   { key: "dashboard",           label: "📊 Dashboard",           section: "Overview"      },
-  { key: "platform-analytics",  label: "📈 Platform Analytics",  section: "Overview"      },
+  { key: "platform-analytics",      label: "📈 Platform Analytics",   section: "Overview" },
+  { key: "user-activity-analytics", label: "🎯 Activity & Retention", section: "Overview" },
   { key: "ads",                 label: "📢 Ads",                 section: "Ads"           },
   { key: "analytics",           label: "📊 Ad Analytics",        section: "Ads"           },
   { key: "banners",             label: "🎯 Banners",             section: "Content"       },
@@ -18,7 +19,9 @@ export const ALL_PERMISSIONS: PermissionModule[] = [
   { key: "courses",             label: "📚 Courses",             section: "Curriculum"    },
   { key: "practice",            label: "✍️ Practice Sets",       section: "Curriculum"    },
   { key: "contests",            label: "🏁 Contests",            section: "Gamification"  },
+  { key: "prize-deliveries",    label: "📦 Prize Deliveries",    section: "Gamification"  },
   { key: "quizzes",             label: "🧩 Quizzes",             section: "Gamification"  },
+  { key: "daily-streak-quiz",   label: "🔥 Daily Streak Quiz",   section: "Gamification"  },
   { key: "skill-battles",       label: "⚔️ Skill Battles",       section: "Gamification"  },
   { key: "learnfun",            label: "🎮 LearnFun",            section: "Gamification"  },
   { key: "badges",              label: "🏆 Badges & Stars",      section: "Gamification"  },
@@ -26,9 +29,15 @@ export const ALL_PERMISSIONS: PermissionModule[] = [
   { key: "subscription-plans",  label: "💎 Plans",               section: "App Config"    },
   { key: "coupons",             label: "🎟️ Coupons",             section: "App Config"    },
   { key: "vcoin-rules",         label: "🪙 V-Coin Rules",        section: "App Config"    },
+  { key: "feedback-features",   label: "⭐ Feedback Features",   section: "Feedback"      },
+  { key: "feedback",            label: "💬 Feedback",            section: "Feedback"      },
   { key: "students",            label: "👥 Students",            section: "Users"         },
   { key: "subscriptions",       label: "💰 Subscriptions",       section: "Users"         },
   { key: "ai-usage",            label: "🤖 AI Usage",            section: "Users"         },
+  { key: "data-rights",         label: "🔐 Data Rights",         section: "Compliance"    },
+  { key: "grievances",          label: "📮 Grievances",          section: "Compliance"    },
+  { key: "tutor-verifications", label: "🎓 Tutor Verifications", section: "Gloows Tutor"  },
+  { key: "tutor-payouts",       label: "💸 Tutor Payouts",       section: "Gloows Tutor"  },
 ];
 
 export const PERMISSION_SECTIONS = Array.from(
