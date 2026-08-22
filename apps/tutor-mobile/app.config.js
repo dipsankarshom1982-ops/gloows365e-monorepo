@@ -29,7 +29,18 @@ export default {
       output: "static",
     },
 
-    plugins: ["expo-router"],
+    plugins: [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          // No custom notification icon/color asset yet (this app has no
+          // branded icon/splash assets at all — see this file's own
+          // header comment) — falls back to the app's default icon.
+          androidMode: "default",
+        },
+      ],
+    ],
 
     experiments: {
       typedRoutes: true,

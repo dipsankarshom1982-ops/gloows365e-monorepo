@@ -10,18 +10,16 @@
 // subcollection, so no rules change was needed for either side to read
 // its own inbox.
 //
-// Push (students only, this phase — see this phase's scoping discussion):
-// reuses students/{uid}.pushToken and the exact same Expo push-send
-// pattern dailyStreakQuiz.ts/seekho.ts already use
+// Push: reuses students/{uid}.pushToken (student) / tutors/{uid}.pushToken
+// (tutor — added by the tutor push notifications phase, apps/tutor-mobile
+// only; apps/tutor (web) has no push infra, deliberately out of scope —
+// see that phase's own scoping discussion) and the exact same Expo
+// push-send pattern dailyStreakQuiz.ts/seekho.ts already use
 // (https://exp.host/--/api/v2/push/send). That pattern is duplicated
 // locally there too ("consolidate into a shared module if a third caller
 // shows up" — its own comment) rather than exported from either file, so
 // this keeps that same convention instead of refactoring two unrelated,
 // already-working functions to import from here.
-//
-// Tutors have no push-token registration anywhere in this codebase yet
-// (neither apps/tutor nor apps/tutor-mobile) — notifyTutor is in-app only
-// by design, not a missing feature here.
 //
 // Both notify functions are best-effort: a notification failure must
 // never fail the ShikshaHub action that triggered it (a session ending,
@@ -76,11 +74,20 @@ export async function notifyStudent(uid: string, notif: ShikshaHubNotification):
   }
 }
 
-/** Tutor-facing: in-app notification only — no push-token infra exists for tutors yet. */
+/** Tutor-facing: in-app notification + best-effort push (apps/tutor-mobile only — see this file's header comment). */
 export async function notifyTutor(uid: string, notif: ShikshaHubNotification): Promise<void> {
   try {
     await writeInAppNotification(uid, notif);
   } catch (e) {
     console.warn(`shikshahubNotify: in-app write failed for tutor ${uid}:`, e);
+  }
+  try {
+    const snap = await db.doc(`tutors/${uid}`).get();
+    const pushToken = snap.exists ? (snap.data()?.pushToken as string | undefined) : undefined;
+    if (pushToken) {
+      await sendExpoPushBatch([{ to: pushToken, title: notif.title, body: notif.body }]);
+    }
+  } catch (e) {
+    console.warn(`shikshahubNotify: push send failed for tutor ${uid}:`, e);
   }
 }

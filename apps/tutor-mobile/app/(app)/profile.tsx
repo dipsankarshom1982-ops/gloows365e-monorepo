@@ -2,16 +2,18 @@ import { useEffect, useState } from "react";
 import { doc, setDoc } from "firebase/firestore";
 import { useTranslation } from "react-i18next";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ScrollView, Text } from "react-native";
+import { ScrollView, Switch, Text, View } from "react-native";
 import { semantic, spacing } from "@gloows/tutor-ui";
 import { useTutorProfile } from "@gloows/shared-logic";
 import { db } from "@/lib/firebase";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { Button, Input, LoadingState } from "@/components/ui";
 import BottomNav from "@/components/BottomNav";
 
 export default function ProfileScreen() {
   const { t } = useTranslation();
   const { user, tutorProfile, profileLoading } = useTutorProfile();
+  const { enabled: notificationsEnabled, loading: notifLoading, toggle: toggleNotifications } = usePushNotifications();
 
   const [qualification, setQualification] = useState("");
   const [subjects, setSubjects]           = useState("");
@@ -72,6 +74,21 @@ export default function ProfileScreen() {
         />
         {saved && <Text style={{ color: semantic.success, fontSize: 12, fontWeight: "700", marginBottom: spacing.md }}>{t("profileSaved")}</Text>}
         <Button title={saving ? t("loading") : t("saveProfile")} onPress={handleSave} loading={saving} />
+
+        <View style={{
+          flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+          marginTop: spacing.xl, paddingTop: spacing.xl, borderTopWidth: 1, borderTopColor: semantic.border,
+        }}>
+          <Text style={{ color: semantic.textPrimary, fontSize: 14, fontWeight: "700" }}>
+            {t("pushNotificationsLabel")}
+          </Text>
+          <Switch
+            value={notificationsEnabled}
+            onValueChange={toggleNotifications}
+            disabled={notifLoading}
+            trackColor={{ false: semantic.border, true: semantic.accent }}
+          />
+        </View>
       </ScrollView>
       <BottomNav />
     </SafeAreaView>
