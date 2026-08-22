@@ -20,6 +20,7 @@ import { doc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useTutorProfile, type TutorWeekday, type TutorWeeklyAvailability } from "@gloows/shared-logic";
 import { useTutorT } from "@gloows/tutor-i18n";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { Button, Input, LoadingState, Textarea } from "@/components/ui";
 import BottomNav from "@/components/BottomNav";
 
@@ -40,6 +41,7 @@ const EMPTY_AVAILABILITY: TutorWeeklyAvailability = Object.fromEntries(
 export default function ProfilePage() {
   const { t } = useTutorT();
   const { user, tutorProfile, profileLoading } = useTutorProfile();
+  const { enabled: notificationsEnabled, loading: notifLoading, toggle: toggleNotifications } = usePushNotifications();
 
   const [qualification, setQualification] = useState("");
   const [subjects, setSubjects]           = useState("");
@@ -164,6 +166,25 @@ export default function ProfilePage() {
           {saved && <p className="text-success text-xs font-semibold mb-4">{t("profileSaved")}</p>}
           <Button type="submit" disabled={saving}>{saving ? t("loading") : t("saveProfile")}</Button>
         </form>
+
+        <div className="mt-6 pt-6 border-t border-slate-700 flex items-center justify-between">
+          <span className="text-sm font-bold text-slate-100">{t("pushNotificationsLabel")}</span>
+          <button
+            role="switch"
+            aria-checked={notificationsEnabled}
+            onClick={toggleNotifications}
+            disabled={notifLoading}
+            className={`w-11 h-6 rounded-full relative transition-colors disabled:opacity-50 ${
+              notificationsEnabled ? "bg-brand-600" : "bg-surface2 border border-slate-600"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                notificationsEnabled ? "translate-x-5" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
       </div>
       <BottomNav />
     </div>

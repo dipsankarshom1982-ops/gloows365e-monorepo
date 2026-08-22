@@ -10,16 +10,20 @@
 // subcollection, so no rules change was needed for either side to read
 // its own inbox.
 //
-// Push: reuses students/{uid}.pushToken (student) / tutors/{uid}.pushToken
-// (tutor — added by the tutor push notifications phase, apps/tutor-mobile
-// only; apps/tutor (web) has no push infra, deliberately out of scope —
-// see that phase's own scoping discussion) and the exact same Expo
-// push-send pattern dailyStreakQuiz.ts/seekho.ts already use
-// (https://exp.host/--/api/v2/push/send). That pattern is duplicated
-// locally there too ("consolidate into a shared module if a third caller
-// shows up" — its own comment) rather than exported from either file, so
-// this keeps that same convention instead of refactoring two unrelated,
-// already-working functions to import from here.
+// Push: reuses students/{uid}.pushToken (student) and, on the tutor side,
+// TWO independent token fields for two unrelated mechanisms —
+// tutors/{uid}.pushToken (apps/tutor-mobile's Expo token, tutor push
+// notifications phase) sent via the exact same Expo push-send pattern
+// dailyStreakQuiz.ts/seekho.ts already use
+// (https://exp.host/--/api/v2/push/send — duplicated locally there too,
+// "consolidate into a shared module if a third caller shows up" per its
+// own comment, so this keeps that convention rather than refactoring two
+// already-working functions to import from here), and
+// tutors/{uid}.webPushToken (apps/tutor's browser Web Push token, Web
+// push notifications phase) sent via the Admin SDK's
+// admin.messaging().send() — no separate server key needed, unlike Expo.
+// Both can be present at once (a tutor may use the mobile app AND the
+// web dashboard) and are attempted independently.
 //
 // Both notify functions are best-effort: a notification failure must
 // never fail the ShikshaHub action that triggered it (a session ending,
@@ -74,7 +78,12 @@ export async function notifyStudent(uid: string, notif: ShikshaHubNotification):
   }
 }
 
-/** Tutor-facing: in-app notification + best-effort push (apps/tutor-mobile only — see this file's header comment). */
+/** Tutor-facing: in-app notification + best-effort push. Two push
+ *  mechanisms can coexist independently — apps/tutor-mobile's Expo token
+ *  (pushToken) and apps/tutor's web push token (webPushToken, Web push
+ *  notifications phase) — since they're unrelated token formats sent
+ *  through unrelated APIs. Neither ever blocks the other or the in-app
+ *  write above; each is its own best-effort attempt. */
 export async function notifyTutor(uid: string, notif: ShikshaHubNotification): Promise<void> {
   try {
     await writeInAppNotification(uid, notif);
@@ -83,9 +92,17 @@ export async function notifyTutor(uid: string, notif: ShikshaHubNotification): P
   }
   try {
     const snap = await db.doc(`tutors/${uid}`).get();
-    const pushToken = snap.exists ? (snap.data()?.pushToken as string | undefined) : undefined;
+    const data = snap.exists ? snap.data() : undefined;
+    const pushToken = data?.pushToken as string | undefined;
+    const webPushToken = data?.webPushToken as string | undefined;
     if (pushToken) {
       await sendExpoPushBatch([{ to: pushToken, title: notif.title, body: notif.body }]);
+    }
+    if (webPushToken) {
+      await admin.messaging().send({
+        token: webPushToken,
+        notification: { title: notif.title, body: notif.body },
+      }).catch((e) => console.warn(`shikshahubNotify: web push send failed for tutor ${uid}:`, e?.message ?? e));
     }
   } catch (e) {
     console.warn(`shikshahubNotify: push send failed for tutor ${uid}:`, e);
