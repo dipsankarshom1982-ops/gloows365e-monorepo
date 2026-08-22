@@ -329,3 +329,32 @@ export async function submitBookingReviewCall(
   const res = await fn({ bookingId, rating, reviewText });
   return res.data;
 }
+
+// ─── ShikshaHub messaging phase — tutor-student conversations ──────────────
+// See functions/src/tutorMessaging.ts's header comment for the full
+// design (one conversation per student-tutor pair, tutor can only ever
+// reply not initiate). conversationIdFor mirrors that file's own
+// deterministic-id formula so the client can link straight to a thread
+// (/shikshahub/messages/thread?peer={tutorUid}) without a network round
+// trip just to resolve which conversation doc it is.
+
+export function conversationIdFor(studentUid: string, tutorUid: string): string {
+  return `${studentUid}_${tutorUid}`;
+}
+
+export async function sendTutorMessageCall(
+  peerUid: string,
+  text: string
+): Promise<{ conversationId: string; messageId: string }> {
+  const fn = httpsCallable<{ peerUid: string; text: string }, { conversationId: string; messageId: string }>(
+    functions, "sendTutorMessage"
+  );
+  const res = await fn({ peerUid, text });
+  return res.data;
+}
+
+export async function markConversationReadCall(conversationId: string): Promise<{ conversationId: string }> {
+  const fn = httpsCallable<{ conversationId: string }, { conversationId: string }>(functions, "markConversationRead");
+  const res = await fn({ conversationId });
+  return res.data;
+}

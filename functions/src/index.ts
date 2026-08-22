@@ -151,6 +151,9 @@ export {
 // ── ShikshaHub — Phase 6 tutor ratings & reviews (Instant Help sessions) ───────
 export { submitTutorReview, hideTutorReview, replyToTutorReview } from "./tutorReviews";
 
+// ── ShikshaHub — tutor-student messaging phase ─────────────────────────────────
+export { sendTutorMessage, markConversationRead } from "./tutorMessaging";
+
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 export { applyReferral, getReferralLeaderboard } from "./referral";
 

@@ -103,12 +103,20 @@ export default function ShikshaHubHomeScreen() {
               {t("shikshaHubSubtitle") ?? "Verified tutors, ready to teach — browse and find the right fit"}
             </Text>
           </View>
-          <TouchableOpacity
-            onPress={() => router.push("/shikshahub/bookings")}
-            style={S.myBookingsBtn}
-          >
-            <Text style={S.myBookingsBtnText}>{t("shikshaHubMyBookingsTitle") ?? "My Bookings"}</Text>
-          </TouchableOpacity>
+          <View style={{ gap: 6 }}>
+            <TouchableOpacity
+              onPress={() => router.push("/shikshahub/bookings")}
+              style={S.myBookingsBtn}
+            >
+              <Text style={S.myBookingsBtnText}>{t("shikshaHubMyBookingsTitle") ?? "My Bookings"}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.push("/shikshahub/messages")}
+              style={S.myBookingsBtn}
+            >
+              <Text style={S.myBookingsBtnText}>💬 {t("shikshaHubMessagesTitle") ?? "Messages"}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 

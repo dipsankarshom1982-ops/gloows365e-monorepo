@@ -190,16 +190,28 @@ function Hero() {
             {t("shikshaHubSubtitle", "Find verified tutors who match your learning needs.")}
           </div>
         </div>
-        <Link
-          href="/shikshahub/bookings"
-          style={{
-            flexShrink: 0, marginTop: 4, background: "rgba(255,255,255,0.16)", color: "#fff",
-            border: "1px solid rgba(255,255,255,0.3)", borderRadius: 12, padding: "8px 14px",
-            fontSize: 12, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap",
-          }}
-        >
-          {t("shikshaHubMyBookingsTitle", "My Bookings")}
-        </Link>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+          <Link
+            href="/shikshahub/bookings"
+            style={{
+              marginTop: 4, background: "rgba(255,255,255,0.16)", color: "#fff",
+              border: "1px solid rgba(255,255,255,0.3)", borderRadius: 12, padding: "8px 14px",
+              fontSize: 12, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap", textAlign: "center",
+            }}
+          >
+            {t("shikshaHubMyBookingsTitle", "My Bookings")}
+          </Link>
+          <Link
+            href="/shikshahub/messages"
+            style={{
+              background: "rgba(255,255,255,0.16)", color: "#fff",
+              border: "1px solid rgba(255,255,255,0.3)", borderRadius: 12, padding: "8px 14px",
+              fontSize: 12, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap", textAlign: "center",
+            }}
+          >
+            💬 {t("shikshaHubMessagesTitle", "Messages")}
+          </Link>
+        </div>
       </div>
     </div>
   );

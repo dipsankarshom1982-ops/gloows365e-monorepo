@@ -160,6 +160,13 @@
   "shikshaHubCancelBooking": "Cancel booking",
   "shikshaHubCancelling": "Cancelling…",
 
+  "myMessagesTitle": "My Messages",
+  "noMessagesTitle": "No messages yet",
+  "noMessagesSubtitle": "Students who message you will show up here.",
+  "noMessagesInThreadHint": "No messages in this conversation yet.",
+  "messagePlaceholder": "Write a message…",
+  "sendMessage": "Send",
+
   "myReviewsTitle": "My Reviews",
   "noReviewsTitle": "No reviews yet",
   "noReviewsSubtitle": "Reviews from students you've taught will show up here.",

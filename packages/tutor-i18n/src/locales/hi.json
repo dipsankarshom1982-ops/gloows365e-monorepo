@@ -160,6 +160,13 @@
   "shikshaHubCancelBooking": "बुकिंग रद्द करें",
   "shikshaHubCancelling": "रद्द किया जा रहा है…",
 
+  "myMessagesTitle": "मेरे संदेश",
+  "noMessagesTitle": "अभी तक कोई संदेश नहीं",
+  "noMessagesSubtitle": "जो छात्र आपको संदेश भेजेंगे, वे यहाँ दिखाई देंगे।",
+  "noMessagesInThreadHint": "इस बातचीत में अभी तक कोई संदेश नहीं है।",
+  "messagePlaceholder": "एक संदेश लिखें…",
+  "sendMessage": "भेजें",
+
   "myReviewsTitle": "मेरी समीक्षाएँ",
   "noReviewsTitle": "अभी तक कोई समीक्षा नहीं",
   "noReviewsSubtitle": "जिन छात्रों को आपने पढ़ाया है, उनकी समीक्षाएँ यहाँ दिखाई देंगी।",

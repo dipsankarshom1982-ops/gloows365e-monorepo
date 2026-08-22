@@ -901,5 +901,27 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 🎓 SHIKSHAHUB — tutor-student messaging phase. One conversation per
+    // student-tutor pair: tutorConversations/{studentUid}_{tutorUid} — read
+    // scoped to the two participants only (unlike tutorReviews, this is
+    // private, not a public marketplace listing). Admin-SDK-only write via
+    // sendTutorMessage (create/append)/markConversationRead (unread reset),
+    // same closed-write shape every ShikshaHub collection uses. messages is
+    // a subcollection, not a top-level one, so its read rule looks up the
+    // parent conversation doc's participants via get() rather than
+    // duplicating studentUid/tutorUid onto every message.
+    match /tutorConversations/{conversationId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == resource.data.studentUid || request.auth.uid == resource.data.tutorUid);
+      allow write: if false;
+
+      match /messages/{messageId} {
+        allow read: if request.auth != null
+          && (request.auth.uid == get(/databases/$(database)/documents/tutorConversations/$(conversationId)).data.studentUid
+              || request.auth.uid == get(/databases/$(database)/documents/tutorConversations/$(conversationId)).data.tutorUid);
+        allow write: if false;
+      }
+    }
+
   }
 }

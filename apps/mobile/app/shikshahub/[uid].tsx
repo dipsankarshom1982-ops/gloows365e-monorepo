@@ -135,6 +135,15 @@ export default function ShikshaHubProfileScreen() {
               {(t("shikshaHubInterested") ?? "Interested in learning with") + " " + (tutor.name || "this tutor") + "?"}
             </Text>
             <BookingPanel tutor={tutor} colors={colors} t={t} />
+
+            <TouchableOpacity
+              onPress={() => router.push({ pathname: "/shikshahub/messages/thread", params: { peer: tutor.uid } } as any)}
+              style={[S.contactBtn, { borderColor: colors.border }]}
+            >
+              <Text style={{ color: colors.text, fontSize: 14, fontWeight: "800" }}>
+                {t("shikshaHubContactTutor") ?? "Contact Tutor"}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
@@ -614,6 +623,7 @@ const S = StyleSheet.create({
 
   bookingCard: { marginTop: 6, borderWidth: 1, borderRadius: 18, padding: 16, gap: 12, backgroundColor: "rgba(20,184,166,0.06)" },
   bookingTitle: { fontSize: 13.5, fontWeight: "800" },
+  contactBtn: { borderWidth: 1, borderRadius: 14, paddingVertical: 13, alignItems: "center" },
   bookingLabel: { fontSize: 10.5, fontWeight: "800", marginBottom: 5 },
   bookingInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13, fontWeight: "600" },
 

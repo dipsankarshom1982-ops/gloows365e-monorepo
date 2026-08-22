@@ -187,7 +187,16 @@ function ShikshaHubProfileContent() {
 
               <BookingPanel tutor={tutor} />
 
-              <ActionButton label={t("shikshaHubContactTutor", "Contact Tutor")} />
+              <button
+                onClick={() => router.push(`/shikshahub/messages/thread?peer=${tutor.uid}`)}
+                style={{
+                  width: "100%", border: "1px solid var(--border)", borderRadius: 14,
+                  padding: "13px 0", fontSize: 14, fontWeight: 800, cursor: "pointer",
+                  background: "var(--bg-card)", color: "var(--text)",
+                }}
+              >
+                {t("shikshaHubContactTutor", "Contact Tutor")}
+              </button>
             </div>
           </div>
         </div>
@@ -235,27 +244,6 @@ function ReviewsSection({ tutorUid }: { tutorUid: string }) {
         ))}
       </div>
     </div>
-  );
-}
-
-/** UI-only placeholder — messaging has no backend yet (Phase 1 only
- *  covers booking, see this file's header comment), so this stays
- *  disabled rather than wired to fake behaviour. */
-function ActionButton({ label, primary }: { label: string; primary?: boolean }) {
-  return (
-    <button
-      disabled
-      title="Coming soon"
-      style={{
-        width: "100%", border: primary ? "none" : "1px solid var(--border)",
-        borderRadius: 14, padding: "13px 0", fontSize: 14, fontWeight: 800,
-        cursor: "not-allowed", opacity: 0.55,
-        background: primary ? "linear-gradient(90deg, #0f766e, #14b8a6)" : "var(--bg-card)",
-        color: primary ? "#fff" : "var(--text)",
-      }}
-    >
-      {label}
-    </button>
   );
 }
 
