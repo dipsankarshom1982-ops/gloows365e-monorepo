@@ -95,6 +95,11 @@ export default function ServicesScreen() {
                       ? t("instantHelpOnlineOn", "Students can send you Instant Help requests right now")
                       : t("instantHelpOnlineOff", "You're offline — students can't reach you for Instant Help")}
                   </Text>
+                  {tutorProfile?.ratingAverage != null && (
+                    <Text style={{ color: semantic.textMuted, fontSize: 11, marginTop: 4 }}>
+                      {t("ratingLabel", "Rating")}: <Text style={{ color: semantic.textPrimary, fontWeight: "700" }}>⭐ {tutorProfile.ratingAverage.toFixed(1)} ({tutorProfile.ratingCount})</Text>
+                    </Text>
+                  )}
                   {earningsBalance != null && (
                     <Text style={{ color: semantic.textMuted, fontSize: 11, marginTop: 4 }}>
                       {t("instantHelpEarnings", "Earnings balance")}: <Text style={{ color: semantic.textPrimary, fontWeight: "700" }}>{earningsBalance}</Text>

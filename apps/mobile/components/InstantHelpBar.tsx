@@ -5,12 +5,18 @@
 // session can be running, no matter which screen a student happens to be
 // on. Hooks all no-op without a uid, so this is also safe to mount before
 // login (renders nothing).
+//
+// ShikshaHub Phase 6 — see apps/web's mirrored header comment: when
+// `session` transitions to null, this checks for an existing review and
+// shows an inline prompt if there isn't one yet.
 
-import { useEffect, useState } from "react";
-import { View, Text, TouchableOpacity } from "react-native";
-import { useStudentProfile, useMyInstantHelpRequest, useActiveInstantHelpSession } from "@gloows/shared-logic";
+import { useEffect, useRef, useState } from "react";
+import { View, Text, TextInput, TouchableOpacity } from "react-native";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { useStudentProfile, useMyInstantHelpRequest, useActiveInstantHelpSession, type InstantHelpSession } from "@gloows/shared-logic";
 import { useAppTranslation } from "@/context/LanguageContext";
-import { cancelInstantHelpRequestCall, endInstantHelpSessionCall } from "@/lib/shikshahub";
+import { cancelInstantHelpRequestCall, endInstantHelpSessionCall, submitTutorReviewCall } from "@/lib/shikshahub";
 
 function useNowTicker(intervalMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -41,6 +47,22 @@ export default function InstantHelpBar() {
   const [error, setError] = useState("");
   const now = useNowTicker();
 
+  const [pendingReview, setPendingReview] = useState<InstantHelpSession | null>(null);
+  const [rating, setRating] = useState(0);
+  const [reviewText, setReviewText] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const prevSessionRef = useRef<InstantHelpSession | null>(null);
+
+  useEffect(() => {
+    const prev = prevSessionRef.current;
+    if (prev?.id && !session) {
+      getDoc(doc(db, "tutorReviews", prev.id)).then((snap) => {
+        if (!snap.exists()) setPendingReview(prev);
+      }).catch(() => {});
+    }
+    prevSessionRef.current = session;
+  }, [session]);
+
   async function cancelRequest() {
     if (!request?.id) return;
     setActingOn(true);
@@ -67,7 +89,22 @@ export default function InstantHelpBar() {
     }
   }
 
-  if (!session && !request) return null;
+  async function submitReview() {
+    if (!pendingReview?.id || rating < 1) return;
+    setSubmittingReview(true);
+    try {
+      await submitTutorReviewCall(pendingReview.id, rating, reviewText.trim() || undefined);
+      setPendingReview(null);
+      setRating(0);
+      setReviewText("");
+    } catch (e: any) {
+      setError(e?.message ?? "Could not submit review.");
+    } finally {
+      setSubmittingReview(false);
+    }
+  }
+
+  if (!session && !request && !pendingReview) return null;
 
   return (
     <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: 90, paddingHorizontal: 16 }}>
@@ -114,6 +151,46 @@ export default function InstantHelpBar() {
             <Text style={{ color: "#fff", fontSize: 11, fontWeight: "700" }}>{t("cancelRequest") ?? "Cancel Request"}</Text>
           </TouchableOpacity>
           {error ? <Text style={{ color: "#fecaca", fontSize: 11, fontWeight: "600", marginTop: 6 }}>{error}</Text> : null}
+        </View>
+      ) : pendingReview ? (
+        <View style={{ borderRadius: 14, padding: 14, backgroundColor: "#1e293b", borderWidth: 1, borderColor: "#334155" }}>
+          <Text style={{ color: "#f1f5f9", fontSize: 13, fontWeight: "800" }}>
+            {t("reviewPromptTitle") ?? "How was your session with"} {pendingReview.tutorName || "your tutor"}?
+          </Text>
+          <View style={{ flexDirection: "row", gap: 4, marginTop: 8 }}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <TouchableOpacity key={n} onPress={() => setRating(n)}>
+                <Text style={{ fontSize: 26, opacity: n <= rating ? 1 : 0.3 }}>⭐</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TextInput
+            value={reviewText}
+            onChangeText={setReviewText}
+            placeholder={t("reviewTextPlaceholder") ?? "Optional: share more about your experience"}
+            placeholderTextColor="#64748b"
+            multiline
+            maxLength={1000}
+            style={{ marginTop: 8, borderRadius: 10, borderWidth: 1, borderColor: "#334155", backgroundColor: "#0f172a", color: "#f1f5f9", fontSize: 12, padding: 8, minHeight: 44, textAlignVertical: "top" }}
+          />
+          {error ? <Text style={{ color: "#ef4444", fontSize: 11, fontWeight: "600", marginTop: 6 }}>{error}</Text> : null}
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+            <TouchableOpacity
+              onPress={() => setPendingReview(null)}
+              style={{ flex: 1, borderWidth: 1, borderColor: "#334155", borderRadius: 10, paddingVertical: 9, alignItems: "center" }}
+            >
+              <Text style={{ color: "#94a3b8", fontSize: 11, fontWeight: "700" }}>{t("reviewSkip") ?? "Skip"}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={submitReview}
+              disabled={rating < 1 || submittingReview}
+              style={{ flex: 1, backgroundColor: "#0d9488", borderRadius: 10, paddingVertical: 9, alignItems: "center", opacity: rating < 1 || submittingReview ? 0.5 : 1 }}
+            >
+              <Text style={{ color: "#fff", fontSize: 11, fontWeight: "700" }}>
+                {submittingReview ? (t("reviewSubmitting") ?? "Submitting…") : (t("reviewSubmit") ?? "Submit Review")}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       ) : null}
     </View>

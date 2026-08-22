@@ -107,6 +107,11 @@ export default function ServicesPage() {
                     ? t("instantHelpOnlineOn", "Students can send you Instant Help requests right now")
                     : t("instantHelpOnlineOff", "You're offline — students can't reach you for Instant Help")}
                 </p>
+                {tutorProfile?.ratingAverage != null && (
+                  <p className="text-slate-500 text-xs mt-1">
+                    {t("ratingLabel", "Rating")}: <span className="text-slate-300 font-bold">⭐ {tutorProfile.ratingAverage.toFixed(1)} ({tutorProfile.ratingCount})</span>
+                  </p>
+                )}
                 {earningsBalance != null && (
                   <p className="text-slate-500 text-xs mt-1">
                     {t("instantHelpEarnings", "Earnings balance")}: <span className="text-slate-300 font-bold">{earningsBalance}</span>

@@ -46,6 +46,11 @@ export interface MarketplaceTutor {
   // undefined — "not online" is the correct default for any tutor who
   // predates this field, same as every other boolean flag in this file.
   isOnlineForInstantHelp: boolean;
+  // ShikshaHub Phase 6 — public rating aggregate. null (not 0) when the
+  // tutor has no reviews yet, so the UI can distinguish "unrated" from
+  // "rated 0" and hide the rating row entirely rather than show "0.0".
+  ratingCount: number;
+  ratingAverage: number | null;
 }
 
 const COLLECTION = "tutorMarketplaceProfiles";
@@ -65,6 +70,8 @@ function fromDoc(d: any): MarketplaceTutor {
     sessionFee: Number.isInteger(data.sessionFee) && data.sessionFee > 0 ? data.sessionFee : null,
     availability: data.availability ?? null,
     isOnlineForInstantHelp: data.isOnlineForInstantHelp === true,
+    ratingCount: Number.isInteger(data.ratingCount) && data.ratingCount > 0 ? data.ratingCount : 0,
+    ratingAverage: typeof data.ratingAverage === "number" && Number(data.ratingCount) > 0 ? data.ratingAverage : null,
   };
 }
 
@@ -286,5 +293,22 @@ export async function createTutorCreditOrderCall(
     { razorpayOrderId: string; amountPaise: number; credits: number; packName: string }
   >(functions, "createTutorCreditOrder");
   const res = await fn({ packId });
+  return res.data;
+}
+
+// ─── ShikshaHub Phase 6 — tutor ratings & reviews ───────────────────────────
+// Reviewable only off a completed (status "ended") Instant Help session —
+// see functions/src/tutorReviews.ts's header comment for why scheduled
+// bookings aren't reviewable yet.
+
+export async function submitTutorReviewCall(
+  sessionId: string,
+  rating: number,
+  reviewText?: string
+): Promise<{ reviewId: string }> {
+  const fn = httpsCallable<{ sessionId: string; rating: number; reviewText?: string }, { reviewId: string }>(
+    functions, "submitTutorReview"
+  );
+  const res = await fn({ sessionId, rating, reviewText });
   return res.data;
 }

@@ -145,6 +145,9 @@ export {
   markPayoutPaid,
 } from "./tutorPayouts";
 
+// ── ShikshaHub — Phase 6 tutor ratings & reviews (Instant Help sessions) ───────
+export { submitTutorReview, hideTutorReview } from "./tutorReviews";
+
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 export { applyReferral, getReferralLeaderboard } from "./referral";
 

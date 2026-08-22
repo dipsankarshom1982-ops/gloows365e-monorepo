@@ -73,6 +73,13 @@ export type TutorProfile = {
   // server-side before creating a request, same "never trust a stale
   // client-read flag" rule tutor.verified already follows there.
   isOnlineForInstantHelp?: boolean;
+  // ShikshaHub Phase 6 — maintained transactionally by
+  // functions/src/tutorReviews.ts's submitTutorReview/hideTutorReview,
+  // never recomputed by scanning tutorReviews client-side. See
+  // packages/shared-logic/src/types/review.ts's TutorRatingFields.
+  ratingSum?: number;
+  ratingCount?: number;
+  ratingAverage?: number;
   [key: string]: any;
 };
 
@@ -102,6 +109,10 @@ export type TutorMarketplaceProfile = {
   // see live Instant Help availability without reading tutors/{uid}
   // directly. See TutorProfile.isOnlineForInstantHelp above.
   isOnlineForInstantHelp?: boolean;
+  // ShikshaHub Phase 6 — mirrored so students browsing the marketplace see
+  // a tutor's rating without reading tutors/{uid} directly.
+  ratingCount?: number;
+  ratingAverage?: number;
   updatedAt?: unknown;
 };
 

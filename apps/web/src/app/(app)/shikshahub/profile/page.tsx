@@ -40,6 +40,7 @@ import {
   type MarketplaceTutor,
 } from "@/lib/shikshahub";
 import type { Booking, BookingSessionType, TutorService } from "@gloows/shared-logic";
+import { useTutorReviews } from "@gloows/shared-logic";
 import { ShikshaHubStyles, SubjectChips, TutorAvatar, VerifiedBadge } from "../_shared";
 
 const SERVICE_TYPE_LABEL: Record<TutorService["serviceType"], string> = {
@@ -125,6 +126,12 @@ function ShikshaHubProfileContent() {
                     {tutor.name || "Tutor"}
                   </span>
                   <VerifiedBadge />
+                  {tutor.ratingAverage != null && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 800, color: "var(--text)" }}>
+                      ⭐ {tutor.ratingAverage.toFixed(1)}
+                      <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>({tutor.ratingCount})</span>
+                    </span>
+                  )}
                 </div>
 
                 {hasMeta && (
@@ -163,6 +170,8 @@ function ShikshaHubProfileContent() {
                 </div>
               </div>
             )}
+
+            <ReviewsSection tutorUid={tutor.uid} />
           </div>
 
           {/* ── RIGHT: action card ──────────────────────────────── */}
@@ -182,6 +191,38 @@ function ShikshaHubProfileContent() {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** ShikshaHub Phase 6 — non-hidden reviews for this tutor, off completed
+ *  Instant Help sessions only (see functions/src/tutorReviews.ts's header
+ *  comment). Renders nothing if there are none, same "hide fields that
+ *  aren't available" rule this page already follows elsewhere. */
+function ReviewsSection({ tutorUid }: { tutorUid: string }) {
+  const { t } = useAppTranslation();
+  const { reviews, loading } = useTutorReviews(tutorUid);
+
+  if (loading || reviews.length === 0) return null;
+
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 20, background: "var(--bg-card)", padding: 20 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 12 }}>
+        {t("reviewsTitle", "Reviews")} ({reviews.length})
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {reviews.map((r) => (
+          <div key={r.id} style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>{r.studentName || "Student"}</span>
+              <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text)" }}>{"⭐".repeat(r.rating)}</span>
+            </div>
+            {!!r.reviewText && (
+              <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 4, lineHeight: "19px" }}>{r.reviewText}</div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );

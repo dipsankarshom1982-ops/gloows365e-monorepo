@@ -47,6 +47,10 @@ export interface MarketplaceTutor {
   // ShikshaHub Phase 4 — live Instant Help presence, see
   // apps/web/src/lib/shikshahub/index.ts's mirrored comment.
   isOnlineForInstantHelp: boolean;
+  // ShikshaHub Phase 6 — public rating aggregate, see
+  // apps/web/src/lib/shikshahub/index.ts's mirrored comment.
+  ratingCount: number;
+  ratingAverage: number | null;
 }
 
 const COLLECTION = "tutorMarketplaceProfiles";
@@ -66,6 +70,8 @@ function fromDoc(d: any): MarketplaceTutor {
     sessionFee: Number.isInteger(data.sessionFee) && data.sessionFee > 0 ? data.sessionFee : null,
     availability: data.availability ?? null,
     isOnlineForInstantHelp: data.isOnlineForInstantHelp === true,
+    ratingCount: Number.isInteger(data.ratingCount) && data.ratingCount > 0 ? data.ratingCount : 0,
+    ratingAverage: typeof data.ratingAverage === "number" && Number(data.ratingCount) > 0 ? data.ratingAverage : null,
   };
 }
 
@@ -273,5 +279,18 @@ export async function createTutorCreditOrderCall(
     { razorpayOrderId: string; amountPaise: number; credits: number; packName: string }
   >(functions, "createTutorCreditOrder");
   const res = await fn({ packId });
+  return res.data;
+}
+
+// ─── ShikshaHub Phase 6 — tutor ratings & reviews ───────────────────────────
+export async function submitTutorReviewCall(
+  sessionId: string,
+  rating: number,
+  reviewText?: string
+): Promise<{ reviewId: string }> {
+  const fn = httpsCallable<{ sessionId: string; rating: number; reviewText?: string }, { reviewId: string }>(
+    functions, "submitTutorReview"
+  );
+  const res = await fn({ sessionId, rating, reviewText });
   return res.data;
 }

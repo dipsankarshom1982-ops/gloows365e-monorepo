@@ -16,6 +16,7 @@ import {
   type MarketplaceTutor,
 } from "@/lib/shikshahub";
 import type { Booking, BookingSessionType, TutorService } from "@gloows/shared-logic";
+import { useTutorReviews } from "@gloows/shared-logic";
 
 const SERVICE_TYPE_LABEL: Record<TutorService["serviceType"], string> = {
   one_time: "One-time",
@@ -94,7 +95,14 @@ export default function ShikshaHubProfileScreen() {
         </View>
 
         <View style={{ padding: 20, gap: 12 }}>
-          <Text style={[S.name, { color: colors.text }]}>{tutor.name || "Tutor"}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Text style={[S.name, { color: colors.text }]}>{tutor.name || "Tutor"}</Text>
+            {tutor.ratingAverage != null && (
+              <Text style={{ fontSize: 13, fontWeight: "800", color: colors.text }}>
+                ⭐ {tutor.ratingAverage.toFixed(1)} <Text style={{ color: colors.textSecondary, fontWeight: "600" }}>({tutor.ratingCount})</Text>
+              </Text>
+            )}
+          </View>
 
           {tutor.subjects.length > 0 && (
             <View style={S.chipRow}>
@@ -120,6 +128,8 @@ export default function ShikshaHubProfileScreen() {
             </View>
           )}
 
+          <ReviewsSection tutorUid={tutor.uid} colors={colors} t={t} />
+
           <View style={[S.bookingCard, { borderColor: colors.border }]}>
             <Text style={[S.bookingTitle, { color: colors.text }]}>
               {(t("shikshaHubInterested") ?? "Interested in learning with") + " " + (tutor.name || "this tutor") + "?"}
@@ -129,6 +139,34 @@ export default function ShikshaHubProfileScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+/** ShikshaHub Phase 6 — RN mirror of apps/web's ReviewsSection. See that
+ *  file's header comment. */
+function ReviewsSection({ tutorUid, colors, t }: { tutorUid: string; colors: any; t: (k: string) => string | undefined }) {
+  const { reviews, loading } = useTutorReviews(tutorUid);
+  if (loading || reviews.length === 0) return null;
+
+  return (
+    <View style={{ marginTop: 4 }}>
+      <Text style={[S.fieldLabel, { color: colors.textSecondary }]}>
+        {(t("reviewsTitle") ?? "Reviews") + ` (${reviews.length})`}
+      </Text>
+      <View style={{ gap: 10, marginTop: 6 }}>
+        {reviews.map((r) => (
+          <View key={r.id} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: 12.5, fontWeight: "700", color: colors.text }}>{r.studentName || "Student"}</Text>
+              <Text style={{ fontSize: 12, fontWeight: "800", color: colors.text }}>{"⭐".repeat(r.rating)}</Text>
+            </View>
+            {!!r.reviewText && (
+              <Text style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 4, lineHeight: 19 }}>{r.reviewText}</Text>
+            )}
+          </View>
+        ))}
+      </View>
+    </View>
   );
 }
 

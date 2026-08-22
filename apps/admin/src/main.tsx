@@ -37,6 +37,7 @@ const VidyastarConfig      = lazy(() => import("./pages/VidyastarConfig"));
 const StarboardPayouts     = lazy(() => import("./pages/StarboardPayouts"));
 const TutorVerifications   = lazy(() => import("./pages/TutorVerifications"));
 const TutorPayouts         = lazy(() => import("./pages/TutorPayouts"));
+const TutorReviews         = lazy(() => import("./pages/TutorReviews"));
 const PrizeDeliveries      = lazy(() => import("./pages/PrizeDeliveries"));
 const Quizzes              = lazy(() => import("./pages/Quizzes"));
 const CreateQuiz           = lazy(() => import("./pages/CreateQuiz"));
@@ -157,6 +158,7 @@ function ProtectedRoutes() {
           <Route path="/starboard-payouts"          element={<StarboardPayouts />} />
           <Route path="/tutor-verifications"        element={<TutorVerifications />} />
           <Route path="/tutor-payouts"               element={<TutorPayouts />} />
+          <Route path="/tutor-reviews"               element={<TutorReviews />} />
           <Route path="/prize-deliveries"           element={<PrizeDeliveries />} />
           <Route path="/quizzes"                   element={<Quizzes />} />
           <Route path="/quizzes/new"               element={<CreateQuiz />} />

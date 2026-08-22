@@ -31,6 +31,10 @@ const SAFE_FIELDS = [
   // functions/src/instantHelp.ts's setInstantHelpOnlineStatus). Public-safe
   // the same way sessionFee/availability are: a boolean, no PII.
   "isOnlineForInstantHelp",
+  // ShikshaHub Phase 6 — public rating aggregate, maintained transactionally
+  // by functions/src/tutorReviews.ts. ratingSum is deliberately NOT mirrored
+  // (internal bookkeeping, never displayed).
+  "ratingCount", "ratingAverage",
 ] as const;
 
 export const syncTutorMarketplaceProfile = onDocumentWritten(
