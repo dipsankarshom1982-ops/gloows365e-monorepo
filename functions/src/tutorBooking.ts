@@ -434,3 +434,85 @@ export const tickBookingCompletion = functionsV1
 
     return null;
   });
+
+// ─── tickBookingReminders ─────────────────────────────────────────────────────
+// Booking session reminders phase — the only thing that ever sets
+// reminderSentAt. Today a booking sits silently between "accepted" and
+// its scheduled time with no nudge to either side; this notifies both
+// once, shortly before the session starts. Same "fetch a bounded batch,
+// evaluate in code" shape as tickBookingCompletion, but needs actual
+// millisecond arithmetic (not the simple date/time string comparison
+// that function uses) since a lead-time WINDOW — not just "has this
+// fully passed" — requires converting the IST wall-clock
+// requestedDate/requestedStartTime into a real instant to compare
+// against now + REMINDER_LEAD_MINUTES.
+const REMINDER_LEAD_MINUTES = 30;
+
+function istDateTimeToMillis(dateStr: string, timeStr: string): number {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const [hh, mm] = timeStr.split(":").map(Number);
+  // Build the wall-clock moment as if it were UTC, then subtract the IST
+  // offset — an IST clock reading "hh:mm" is that many hours behind the
+  // matching UTC instant.
+  return Date.UTC(y, (m || 1) - 1, d || 1, hh || 0, mm || 0) - IST_OFFSET_MS;
+}
+
+export const tickBookingReminders = functionsV1
+  .runWith({ timeoutSeconds: 300, memory: "256MB" })
+  .pubsub.schedule("every 15 minutes")
+  .onRun(async () => {
+    const nowMs = Date.now();
+    const windowEndMs = nowMs + REMINDER_LEAD_MINUTES * 60_000;
+
+    const snap = await db.collection("bookings")
+      .where("status", "==", "accepted")
+      .limit(500) // one run's worth — next run catches the rest
+      .get();
+
+    const due = snap.docs.filter((d) => {
+      const b = d.data();
+      if (b.reminderSentAt) return false; // already reminded — never twice
+      const bd = b.requestedDate as string | undefined;
+      const bt = b.requestedStartTime as string | undefined;
+      if (typeof bd !== "string" || typeof bt !== "string") return false;
+      const startMs = istDateTimeToMillis(bd, bt);
+      return startMs > nowMs && startMs <= windowEndMs;
+    });
+
+    if (due.length === 0) return null;
+
+    const batch = db.batch();
+    due.forEach((d) => batch.update(d.ref, {
+      reminderSentAt: admin.firestore.FieldValue.serverTimestamp(),
+    }));
+    await batch.commit();
+    console.log(`✅ tickBookingReminders: reminded ${due.length} booking(s)`);
+
+    // Best-effort — never blocks the sweep itself.
+    await Promise.allSettled(due.map((d) => {
+      const b = d.data();
+      const tutorLabel = (b.tutorName as string | undefined) || "your tutor";
+      const studentLabel = (b.studentName as string | undefined) || "the student";
+      const startTime = b.requestedStartTime as string;
+      return Promise.all([
+        notifyStudent(b.studentUid, {
+          title: "⏰ Upcoming session",
+          body: `Your session with ${tutorLabel} starts at ${startTime} today.`,
+          type: "shikshahub",
+        }),
+        notifyTutor(b.tutorUid, {
+          title: "⏰ Upcoming session",
+          body: `Your session with ${studentLabel} starts at ${startTime} today.`,
+          type: "shikshahub",
+        }),
+      ]);
+    })).then((results) => {
+      results.forEach((r, i) => {
+        if (r.status === "rejected") {
+          console.warn(`tickBookingReminders: notify failed for booking ${due[i].id}:`, r.reason);
+        }
+      });
+    });
+
+    return null;
+  });

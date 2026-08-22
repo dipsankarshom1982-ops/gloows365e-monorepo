@@ -58,4 +58,12 @@ export type Booking = {
 
   createdAt?: unknown; // Firestore Timestamp
   updatedAt?: unknown; // Firestore Timestamp
+
+  // Booking session reminders phase — internal bookkeeping only, never
+  // rendered client-side. Set once by tickBookingCompletion's sibling
+  // sweep (functions/src/tutorBooking.ts's tickBookingReminders) so a
+  // booking is only ever reminded once, same "presence marks it done"
+  // pattern this codebase already uses (e.g. hideTutorReview's
+  // hiddenReason).
+  reminderSentAt?: unknown; // Firestore Timestamp
 };
