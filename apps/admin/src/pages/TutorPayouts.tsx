@@ -8,9 +8,16 @@
 // debit + ledger write needs the same transaction-guarded logic
 // requestPayout/markPayoutPaid already implement server-side.
 //
-// Workflow: pending -> (approve|reject) -> approved -> [admin transfers
-// money themselves, outside this app] -> mark paid -> paid. Rejected/paid/
-// cancelled are terminal.
+// Workflow: pending -> (approve|reject) -> approved -> Process Payout ->
+// paid. Rejected/paid/cancelled are terminal.
+//
+// Automated payouts phase — "Mark Paid" is now "Process Payout": clicking
+// it triggers a REAL RazorpayX transfer (functions/src/tutorPayouts.ts's
+// markPayoutPaid, via razorpayXClient.ts) instead of just confirming a
+// manual one the admin already did outside the app. The approve/reject
+// gate above is unchanged — still a human decision before any money can
+// move. Once paid, the card shows the RazorpayX status/UTR
+// (reconcilePayoutStatuses keeps status fresh until it's terminal).
 
 import { useEffect, useState } from "react";
 import { collection, getDocs, orderBy, query } from "firebase/firestore";
@@ -18,6 +25,7 @@ import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../lib/firebase";
 
 type PayoutRequestStatus = "pending" | "approved" | "rejected" | "paid" | "cancelled";
+type RazorpayStatus = "queued" | "pending" | "processing" | "processed" | "reversed" | "failed" | "cancelled" | "rejected";
 
 interface PayoutRequest {
   id: string;
@@ -35,6 +43,9 @@ interface PayoutRequest {
   status: PayoutRequestStatus;
   adminNote?: string;
   requestedAt?: { toDate?: () => Date };
+  razorpayPayoutId?: string;
+  razorpayStatus?: RazorpayStatus;
+  razorpayUtr?: string | null;
 }
 
 type Filter = "pending" | "approved" | "paid" | "rejected" | "all";
@@ -46,8 +57,19 @@ const reviewPayoutRequestFn = httpsCallable<
 
 const markPayoutPaidFn = httpsCallable<
   { requestId: string; note?: string },
-  { status: PayoutRequestStatus }
+  { status: PayoutRequestStatus; razorpayStatus?: RazorpayStatus; razorpayUtr?: string | null }
 >(functions, "markPayoutPaid");
+
+const RAZORPAY_STATUS_COLORS: Record<RazorpayStatus, string> = {
+  queued:     "text-amber-400",
+  pending:    "text-amber-400",
+  processing: "text-blue-400",
+  processed:  "text-green-400",
+  reversed:   "text-red-400",
+  failed:     "text-red-400",
+  cancelled:  "text-slate-400",
+  rejected:   "text-red-400",
+};
 
 const STATUS_COLORS: Record<PayoutRequestStatus, string> = {
   pending:   "bg-amber-500/15 text-amber-400",
@@ -95,9 +117,9 @@ export default function TutorPayouts() {
     }
   }
 
-  async function handleMarkPaid(id: string) {
-    if (!window.confirm("Confirm you have ALREADY transferred this money to the tutor. This will debit their earnings balance and cannot be undone.")) return;
-    const note = window.prompt("Optional note (e.g. transaction reference):") ?? undefined;
+  async function handleProcessPayout(id: string) {
+    if (!window.confirm("Process this payout via RazorpayX now? This triggers a REAL bank transfer and debits the tutor's earnings balance — it cannot be undone.")) return;
+    const note = window.prompt("Optional note:") ?? undefined;
     await runAction(id, () => markPayoutPaidFn({ requestId: id, note: note || undefined }));
   }
 
@@ -120,7 +142,7 @@ export default function TutorPayouts() {
         <h1 className="text-3xl font-black text-white">💸 Tutor Payouts</h1>
         <p className="text-slate-400 text-sm mt-1">
           Review Instant Help earnings withdrawal requests. Approving does NOT move any money —
-          transfer it yourself via your own banking, then mark the request paid.
+          Process Payout does, via a real RazorpayX transfer.
         </p>
       </div>
 
@@ -180,6 +202,12 @@ export default function TutorPayouts() {
                 }
                 <div>Requested: {fmtDate(item.requestedAt)}</div>
                 {item.adminNote && <div className="text-slate-500 italic mt-1">Note: {item.adminNote}</div>}
+                {item.razorpayStatus && (
+                  <div className="pt-1 mt-1 border-t border-slate-800">
+                    RazorpayX: <span className={`font-semibold capitalize ${RAZORPAY_STATUS_COLORS[item.razorpayStatus]}`}>{item.razorpayStatus}</span>
+                    {item.razorpayUtr && <> · UTR <span className="text-slate-300 font-mono">{item.razorpayUtr}</span></>}
+                  </div>
+                )}
               </div>
 
               {item.status === "pending" && (
@@ -202,11 +230,11 @@ export default function TutorPayouts() {
               )}
               {item.status === "approved" && (
                 <button
-                  onClick={() => handleMarkPaid(item.id)}
+                  onClick={() => handleProcessPayout(item.id)}
                   disabled={actingOn === item.id}
                   className="w-full bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-2 rounded-lg disabled:opacity-50"
                 >
-                  {actingOn === item.id ? "Processing…" : "Mark Paid (I've transferred the money)"}
+                  {actingOn === item.id ? "Processing via RazorpayX…" : "💸 Process Payout"}
                 </button>
               )}
               {rowError[item.id] && <p className="text-red-400 text-xs font-semibold">{rowError[item.id]}</p>}

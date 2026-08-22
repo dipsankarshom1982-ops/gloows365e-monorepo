@@ -5,13 +5,16 @@
 // it) with the missing piece: a real way for a tutor to withdraw it.
 // Same v1 onCall convention as every other ShikshaHub callable.
 //
-// Approved Phase 5 scope: manual/admin-processed payouts, NOT an automated
-// bank-transfer API (RazorpayX/Payouts is explicitly later-phase scope —
-// see this repo's Phase 4 discussion). A tutor requests a withdrawal; an
-// admin reviews (approve/reject) and, once approved, transfers the money
-// themselves outside the app via their own banking, then calls
-// markPayoutPaid — the ONE moment the balance is actually debited. 1
-// credit = ₹1 (approved Phase 5 rate, no separate conversion table).
+// Original Phase 5 scope: manual/admin-processed payouts — a tutor
+// requests a withdrawal, an admin reviews (approve/reject) and, once
+// approved, transferred the money themselves outside the app via their
+// own banking, then called markPayoutPaid to confirm it.
+//
+// Automated payouts phase — markPayoutPaid now triggers a REAL RazorpayX
+// transfer (see razorpayXClient.ts) instead of just confirming a manual
+// one; reviewPayoutRequest's admin-approval gate is unchanged, so a human
+// still signs off before any money moves. 1 credit = ₹1 (approved Phase 5
+// rate, no separate conversion table) — unchanged.
 //
 // Platform commission (approved Phase 5 scope: the platform DOES take a
 // cut, unlike Phase 4's Instant Help settlement which is a 100%
@@ -35,6 +38,7 @@
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { notifyTutor } from "./shikshahubNotify";
+import { createRazorpayXPayout, fetchRazorpayXPayoutStatus, RazorpayXError, type RazorpayXFundAccount } from "./razorpayXClient";
 
 const db = admin.firestore();
 
@@ -337,14 +341,30 @@ export const reviewPayoutRequest = functionsV1
   });
 
 // ─── markPayoutPaid (admin) ──────────────────────────────────────────────────
-// The one moment tutorEarnings.balance actually moves — after the admin
-// has already transferred the money themselves outside the app. Re-checks
-// balance sufficiency defensively (nothing else should have changed it
-// since approval, since a tutor can only have one open request at a time,
-// but this is the same belt-and-suspenders re-check every other
-// ShikshaHub money-adjacent callable already applies).
+// Automated payouts phase — this used to be the admin confirming they'd
+// already transferred the money manually outside the app; it's now the
+// moment that REALLY triggers the transfer, via RazorpayX's Payout
+// Composite API (razorpayXClient.ts). The admin-approval gate
+// (reviewPayoutRequest) is unchanged — a human still signs off before
+// this ever runs, just no more manual banking after that.
+//
+// The RazorpayX API call happens BEFORE any Firestore write (it's
+// external I/O, which never belongs inside a db.runTransaction callback —
+// same rule this codebase's transaction-throw bug from Phase 4 already
+// taught). tutorEarnings.balance is only ever debited AFTER RazorpayX
+// actually accepts the payout (any of queued/pending/processing/
+// processed — Razorpay has committed to moving the money at that point,
+// same "order accepted" moment Phase 4's Razorpay Orders flow already
+// treats as final). A hard failure (bad credentials, insufficient
+// RazorpayX balance, invalid account, etc.) leaves the request
+// "approved" — untouched, safely retryable, since the idempotency key
+// (this request's own id) guarantees RazorpayX itself can never process
+// two real transfers for one request even across retries.
 export const markPayoutPaid = functionsV1
-  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .runWith({
+    timeoutSeconds: 30, memory: "256MB",
+    secrets: ["RAZORPAYX_KEY_ID", "RAZORPAYX_KEY_SECRET", "RAZORPAYX_ACCOUNT_NUMBER"],
+  })
   .https.onCall(async (data: { requestId?: string; note?: string }, context) => {
     if (!context.auth?.token?.admin) {
       throw new functionsV1.https.HttpsError("permission-denied", "Admins only");
@@ -355,7 +375,52 @@ export const markPayoutPaid = functionsV1
       throw new functionsV1.https.HttpsError("invalid-argument", "requestId is required");
     }
 
+    const keyId        = process.env["RAZORPAYX_KEY_ID"]        ?? "";
+    const keySecret     = process.env["RAZORPAYX_KEY_SECRET"]    ?? "";
+    const accountNumber = process.env["RAZORPAYX_ACCOUNT_NUMBER"] ?? "";
+    if (!keyId || !keySecret || !accountNumber) {
+      console.error("markPayoutPaid: RazorpayX secrets missing — keyId:", !!keyId, "keySecret:", !!keySecret, "accountNumber:", !!accountNumber);
+      throw new functionsV1.https.HttpsError("failed-precondition", "RazorpayX not configured — secrets missing");
+    }
+
     const requestRef = db.doc(`payoutRequests/${requestId}`);
+    const preSnap = await requestRef.get();
+    if (!preSnap.exists) {
+      throw new functionsV1.https.HttpsError("not-found", "Payout request not found");
+    }
+    const preRequest = preSnap.data()!;
+    if (preRequest.status !== "approved") {
+      throw new functionsV1.https.HttpsError("failed-precondition", `Request must be "approved" first (currently "${preRequest.status}")`);
+    }
+
+    const detailsSnap = await db.doc(`tutorPayoutDetails/${preRequest.tutorUid}`).get();
+    if (!detailsSnap.exists) {
+      throw new functionsV1.https.HttpsError("failed-precondition", "Tutor's payout details are missing — cannot process");
+    }
+    const details = detailsSnap.data()!;
+    const fundAccount: RazorpayXFundAccount = details.method === "upi"
+      ? { method: "upi", accountHolderName: details.accountHolderName ?? "", upiId: details.upiId ?? "" }
+      : { method: "bank_transfer", accountHolderName: details.accountHolderName ?? "", accountNumber: details.accountNumber ?? "", ifsc: details.ifsc ?? "" };
+
+    const payoutAmount = Number(preRequest.payoutAmount) || 0;
+    let payoutResult;
+    try {
+      payoutResult = await createRazorpayXPayout({
+        keyId, keySecret, accountNumber,
+        idempotencyKey: requestId,
+        amountRupees: payoutAmount,
+        referenceId: requestId,
+        narration: "ShikshaHub tutor payout",
+        tutorName: preRequest.tutorName ?? "",
+        fundAccount,
+      });
+    } catch (e: any) {
+      const reason = e instanceof RazorpayXError ? e.message : (e?.message ?? "RazorpayX payout failed");
+      console.error(`markPayoutPaid: RazorpayX payout failed for request ${requestId}:`, reason);
+      throw new functionsV1.https.HttpsError("internal", `RazorpayX payout failed: ${reason}`);
+    }
+
+    const requestedAmount = Number(preRequest.requestedAmount) || 0;
     const result = await db.runTransaction(async (tx) => {
       const snap = await tx.get(requestRef);
       if (!snap.exists) {
@@ -363,17 +428,23 @@ export const markPayoutPaid = functionsV1
       }
       const request = snap.data()!;
       if (request.status !== "approved") {
-        throw new functionsV1.https.HttpsError("failed-precondition", `Request must be "approved" first (currently "${request.status}")`);
+        // The RazorpayX transfer has ALREADY happened at this point —
+        // this branch means our own books somehow drifted from what we
+        // just paid for real. Extremely unlikely (single-admin-triggered,
+        // nothing else moves "approved"->"paid"), but loud logging here
+        // is deliberate: this is the one case worth a human looking at.
+        console.error(`markPayoutPaid: *** POST-PAYOUT STATE MISMATCH *** request ${requestId} was "${request.status}" after a real RazorpayX payout (${payoutResult!.id}) already succeeded — needs manual reconciliation.`);
+        throw new functionsV1.https.HttpsError("failed-precondition", `Request is already "${request.status}" — the transfer succeeded (RazorpayX id ${payoutResult!.id}) but needs manual reconciliation`);
       }
 
-      const requestedAmount = Number(request.requestedAmount) || 0;
       const balanceRef = db.doc(`tutorEarnings/${request.tutorUid}`);
       const balanceSnap = await tx.get(balanceRef);
       const balance = balanceSnap.exists ? Number(balanceSnap.data()?.balance ?? 0) : 0;
       if (requestedAmount > balance) {
+        console.error(`markPayoutPaid: *** POST-PAYOUT BALANCE MISMATCH *** request ${requestId} balance (₹${balance}) < requestedAmount (₹${requestedAmount}) after a real RazorpayX payout (${payoutResult!.id}) already succeeded — needs manual reconciliation.`);
         throw new functionsV1.https.HttpsError(
           "failed-precondition",
-          `Tutor's balance (₹${balance}) is now less than the requested amount (₹${requestedAmount}) — cannot mark paid`
+          `Tutor's balance (₹${balance}) is now less than the requested amount (₹${requestedAmount}) — the transfer succeeded (RazorpayX id ${payoutResult!.id}) but needs manual reconciliation`
         );
       }
 
@@ -392,7 +463,10 @@ export const markPayoutPaid = functionsV1
         title: "Payout processed",
         description: `₹${request.payoutAmount} paid out (₹${request.commissionAmount} platform commission on ₹${requestedAmount})`,
         referenceId: requestId,
-        metadata: { commissionAmount: request.commissionAmount, payoutAmount: request.payoutAmount, method: request.method },
+        metadata: {
+          commissionAmount: request.commissionAmount, payoutAmount: request.payoutAmount, method: request.method,
+          razorpayPayoutId: payoutResult!.id, razorpayStatus: payoutResult!.status, razorpayUtr: payoutResult!.utr,
+        },
         createdAt: now,
       });
 
@@ -401,16 +475,84 @@ export const markPayoutPaid = functionsV1
         adminNote: note ?? request.adminNote ?? null,
         paidAt: now,
         updatedAt: now,
+        razorpayPayoutId: payoutResult!.id,
+        razorpayStatus: payoutResult!.status,
+        razorpayUtr: payoutResult!.utr,
       });
 
       return { status: "paid" as PayoutRequestStatus, tutorUid: request.tutorUid, payoutAmount: Number(request.payoutAmount) || 0 };
     });
 
-    console.log(`✅ Payout request ${requestId} marked paid by admin ${adminUid}`);
+    console.log(`✅ Payout request ${requestId} marked paid by admin ${adminUid} — RazorpayX payout ${payoutResult.id} (${payoutResult.status})`);
     await notifyTutor(result.tutorUid, {
       title: "💸 Payout paid",
       body: `₹${result.payoutAmount} has been transferred to your account.`,
       type: "payout",
     }).catch((e) => console.warn("markPayoutPaid: notifyTutor failed:", e));
-    return { status: result.status };
+    return { status: result.status, razorpayStatus: payoutResult.status, razorpayUtr: payoutResult.utr };
+  });
+
+// ─── reconcilePayoutStatuses ──────────────────────────────────────────────────
+// Automated payouts phase — status-sync only, mirrors
+// functions/src/tutorCredits.ts's reconcileTutorCreditOrders. Refreshes
+// razorpayStatus/razorpayUtr for any "paid" request whose last known
+// RazorpayX status wasn't terminal yet (a bank transfer initiated via
+// IMPS/UPI is usually near-instant, but NEFT/RTGS or a queued-for-balance
+// payout can take longer to actually settle). Deliberately never reverses
+// tutorEarnings.balance or flips a request's own status back — the
+// balance was already debited the moment RazorpayX accepted the payout in
+// markPayoutPaid, same "accepted means final" rule Phase 4's Razorpay
+// Orders reconciliation already follows. A payout that later comes back
+// "reversed" or "failed" needs a human to look at it, not a silent
+// auto-refund — that's genuinely later-phase scope if ever needed.
+const TERMINAL_RAZORPAY_STATUSES = new Set(["processed", "reversed", "failed", "cancelled", "rejected"]);
+
+export const reconcilePayoutStatuses = functionsV1
+  .runWith({
+    timeoutSeconds: 300, memory: "256MB",
+    secrets: ["RAZORPAYX_KEY_ID", "RAZORPAYX_KEY_SECRET"],
+  })
+  .pubsub.schedule("every 15 minutes")
+  .onRun(async () => {
+    const keyId    = process.env["RAZORPAYX_KEY_ID"]     ?? "";
+    const keySecret = process.env["RAZORPAYX_KEY_SECRET"] ?? "";
+    if (!keyId || !keySecret) {
+      console.error("reconcilePayoutStatuses: RazorpayX secrets missing, skipping run");
+      return;
+    }
+
+    // Fetch a bounded batch of "paid" requests and filter in code — same
+    // shape tickInstantHelp/tickBookingCompletion already use — rather
+    // than relying on Firestore's not-in-with-a-possibly-missing-field
+    // query semantics. Requests paid via the pre-automation manual flow
+    // (this phase's predecessor) have no razorpayPayoutId at all and are
+    // correctly skipped below, not endlessly re-swept.
+    const snap = await db.collection("payoutRequests")
+      .where("status", "==", "paid")
+      .orderBy("paidAt", "desc")
+      .limit(200)
+      .get();
+
+    const pending = snap.docs.filter((d) => {
+      const data = d.data();
+      return !!data.razorpayPayoutId && !TERMINAL_RAZORPAY_STATUSES.has(data.razorpayStatus);
+    });
+
+    if (pending.length === 0) return;
+
+    for (const doc of pending) {
+      const razorpayPayoutId = doc.data().razorpayPayoutId as string;
+      try {
+        const latest = await fetchRazorpayXPayoutStatus({ keyId, keySecret, payoutId: razorpayPayoutId });
+        if (latest.status === doc.data().razorpayStatus) continue;
+        await doc.ref.update({
+          razorpayStatus: latest.status,
+          razorpayUtr: latest.utr,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`✅ Reconciled payout status: ${doc.id} razorpayPayoutId=${razorpayPayoutId} -> ${latest.status}`);
+      } catch (e: any) {
+        console.error(`reconcilePayoutStatuses failed for ${doc.id} (razorpayPayoutId=${razorpayPayoutId}):`, e?.message);
+      }
+    }
   });

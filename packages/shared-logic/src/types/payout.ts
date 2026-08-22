@@ -86,6 +86,18 @@ export type PayoutRequest = {
   reviewedAt?: unknown; // Firestore Timestamp
   paidAt?: unknown; // Firestore Timestamp
   updatedAt?: unknown; // Firestore Timestamp
+
+  // Automated payouts phase — set by markPayoutPaid at the moment it
+  // actually triggers a real RazorpayX transfer, then kept fresh by
+  // reconcilePayoutStatuses (functions/src/tutorPayouts.ts) until the
+  // status is terminal. Absent entirely on any request paid before this
+  // phase existed (the original manual-transfer flow) — same
+  // presence/absence-is-the-signal pattern this codebase already uses
+  // elsewhere (see bookings/{id}'s serviceId, tutorReviews/{id}'s
+  // sessionId/bookingId).
+  razorpayPayoutId?: string;
+  razorpayStatus?: "queued" | "pending" | "processing" | "processed" | "reversed" | "failed" | "cancelled" | "rejected";
+  razorpayUtr?: string | null;
 };
 
 // tutorEarnings/{tutorUid}/transactions/{txId} gets a new ledger entry type

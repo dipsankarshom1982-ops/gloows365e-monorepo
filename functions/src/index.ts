@@ -136,7 +136,8 @@ export {
   tickInstantHelp,
 } from "./instantHelp";
 
-// ── ShikshaHub — Phase 5 tutor earnings payout (manual/admin-processed) ────────
+// ── ShikshaHub — tutor earnings payout (Phase 5 manual flow, automated via
+//    RazorpayX in the automated payouts phase — see markPayoutPaid) ────────
 export {
   saveTutorPayoutDetails,
   requestPayout,
@@ -144,6 +145,7 @@ export {
   reviewPayoutRequest,
   markPayoutPaid,
   updatePayoutConfig,
+  reconcilePayoutStatuses,
 } from "./tutorPayouts";
 
 // ── ShikshaHub — Phase 6 tutor ratings & reviews (Instant Help sessions) ───────
