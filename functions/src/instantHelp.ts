@@ -42,6 +42,7 @@
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { notifyStudent, notifyTutor } from "./shikshahubNotify";
 
 const db = admin.firestore();
 
@@ -230,6 +231,14 @@ export const requestInstantHelp = functionsV1
     });
 
     console.log(`✅ Instant Help requested: ${result.requestId} student=${studentUid} tutor=${tutorUid} service=${serviceId}`);
+
+    // Best-effort — never fails the request itself.
+    await notifyTutor(tutorUid, {
+      title: "⚡ New Instant Help request",
+      body: `${(studentSnap.data()?.name as string | undefined) || "A student"} wants help with ${service.subject ?? "a subject"}`,
+      type: "instant_help",
+    }).catch((e) => console.warn("requestInstantHelp: notifyTutor failed:", e));
+
     return { requestId: result.requestId, status: "pending" as InstantHelpRequestStatus };
   });
 
@@ -269,8 +278,8 @@ export const respondToInstantHelpRequest = functionsV1
       | { kind: "already_resolved"; status: string }
       | { kind: "expired" }
       | { kind: "insufficient_balance" }
-      | { kind: "declined" }
-      | { kind: "accepted"; sessionId: string };
+      | { kind: "declined"; studentUid: string; tutorName: string }
+      | { kind: "accepted"; sessionId: string; studentUid: string; tutorName: string };
 
     const outcome: Outcome = await db.runTransaction(async (tx) => {
       const snap = await tx.get(requestRef);
@@ -295,7 +304,7 @@ export const respondToInstantHelpRequest = functionsV1
           respondedAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        return { kind: "declined" };
+        return { kind: "declined", studentUid: request.studentUid, tutorName: request.tutorName ?? "" };
       }
 
       // action === "accepted" — defense-in-depth re-check of the balance
@@ -341,7 +350,7 @@ export const respondToInstantHelpRequest = functionsV1
         updatedAt: nowFv,
       });
 
-      return { kind: "accepted", sessionId: sessionRef.id };
+      return { kind: "accepted", sessionId: sessionRef.id, studentUid: request.studentUid, tutorName: request.tutorName ?? "" };
     });
 
     switch (outcome.kind) {
@@ -358,11 +367,21 @@ export const respondToInstantHelpRequest = functionsV1
       case "declined": {
         const result = { status: "declined" as InstantHelpRequestStatus };
         console.log(`✅ Instant Help request ${requestId} declined by tutor ${tutorUid}`);
+        await notifyStudent(outcome.studentUid, {
+          title: "Instant Help request declined",
+          body: `${outcome.tutorName || "The tutor"} couldn't take your request right now.`,
+          type: "instant_help",
+        }).catch((e) => console.warn("respondToInstantHelpRequest: notifyStudent failed:", e));
         return result;
       }
       case "accepted": {
         const result = { status: "accepted" as InstantHelpRequestStatus, sessionId: outcome.sessionId };
         console.log(`✅ Instant Help request ${requestId} accepted by tutor ${tutorUid}`);
+        await notifyStudent(outcome.studentUid, {
+          title: "✅ Instant Help request accepted",
+          body: `${outcome.tutorName || "Your tutor"} is ready — your session has started.`,
+          type: "instant_help",
+        }).catch((e) => console.warn("respondToInstantHelpRequest: notifyStudent failed:", e));
         return result;
       }
     }
@@ -418,13 +437,29 @@ export const cancelInstantHelpRequest = functionsV1
 // tickInstantHelp (with neither — a session-status-blind sweep). Idempotent
 // against a session that's already "ended" (returns its final state as a
 // no-op) so a race between the two callers is harmless.
+type SettleResult = {
+  status: InstantHelpSessionStatus;
+  endReason?: InstantHelpEndReason;
+  minutesCharged: number;
+  // Only meaningful when this specific call is the one that ended the
+  // session (never set on the "already ended"/no-op branches below) — the
+  // notify-both-sides step after the transaction fires only when true, so
+  // a race between endInstantHelpSession and tickInstantHelp can never
+  // double-notify.
+  justEnded?: boolean;
+  studentUid?: string;
+  tutorUid?: string;
+  studentName?: string;
+  tutorName?: string;
+};
+
 async function settleInstantHelpSession(
   sessionId: string,
   opts?: { callerUid?: string; manualEndReason?: InstantHelpEndReason }
 ): Promise<{ status: InstantHelpSessionStatus; endReason?: InstantHelpEndReason; minutesCharged: number }> {
   const sessionRef = db.doc(`instantHelpSessions/${sessionId}`);
 
-  return db.runTransaction(async (tx) => {
+  const result: SettleResult = await db.runTransaction(async (tx) => {
     const snap = await tx.get(sessionRef);
     if (!snap.exists) {
       throw new functionsV1.https.HttpsError("not-found", "Session not found");
@@ -531,8 +566,30 @@ async function settleInstantHelpSession(
       status: (willEnd ? "ended" : "active") as InstantHelpSessionStatus,
       endReason,
       minutesCharged: minutesToCharge,
+      justEnded: willEnd,
+      studentUid: session.studentUid,
+      tutorUid: session.tutorUid,
+      studentName: session.studentName ?? "",
+      tutorName: session.tutorName ?? "",
     };
   });
+
+  if (result.justEnded && result.studentUid && result.tutorUid) {
+    await Promise.all([
+      notifyStudent(result.studentUid, {
+        title: "Instant Help session ended",
+        body: `Your session with ${result.tutorName || "your tutor"} has ended — ${result.minutesCharged} minute${result.minutesCharged === 1 ? "" : "s"} charged.`,
+        type: "instant_help",
+      }),
+      notifyTutor(result.tutorUid, {
+        title: "Instant Help session ended",
+        body: `Your session with ${result.studentName || "the student"} has ended — you earned for ${result.minutesCharged} minute${result.minutesCharged === 1 ? "" : "s"}.`,
+        type: "instant_help",
+      }),
+    ]).catch((e) => console.warn(`settleInstantHelpSession: notify failed for session ${sessionId}:`, e));
+  }
+
+  return { status: result.status, endReason: result.endReason, minutesCharged: result.minutesCharged };
 }
 
 // ─── endInstantHelpSession ──────────────────────────────────────────────────

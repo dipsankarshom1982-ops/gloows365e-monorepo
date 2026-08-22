@@ -141,6 +141,10 @@
   "todaysClassesLabel": "आज की कक्षाएं",
   "moreTitle": "और",
   "moreNavLabel": "और",
+  "notificationsTitle": "सूचनाएं",
+  "markAllRead": "सभी पढ़ी हुई चिह्नित करें",
+  "noNotificationsTitle": "सब कुछ देख लिया गया!",
+  "noNotificationsSubtitle": "यहां आपको इंस्टेंट हेल्प अनुरोध, भुगतान अपडेट और समीक्षाएं दिखेंगी।",
 
   "shikshaHubSessionFeeLabel": "सेशन शुल्क (₹, प्रति सेशन)",
   "shikshaHubFeeInvalid": "सेशन शुल्क 0 से अधिक एक पूर्ण संख्या होनी चाहिए",

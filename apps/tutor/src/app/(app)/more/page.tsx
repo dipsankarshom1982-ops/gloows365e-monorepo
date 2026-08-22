@@ -8,10 +8,12 @@
 
 import Link from "next/link";
 import { useTutorT } from "@gloows/tutor-i18n";
+import { useTutorProfile, useUnreadNotificationCount } from "@gloows/shared-logic";
 import { Card } from "@/components/ui";
 import BottomNav from "@/components/BottomNav";
 
 const ITEMS = [
+  { href: "/notifications", titleKey: "notificationsTitle", icon: "🔔" },
   { href: "/batches",      titleKey: "batchesTitle",      icon: "📚" },
   { href: "/services",     titleKey: "servicesTitle",     icon: "🧩" },
   { href: "/payouts",      titleKey: "payoutsTitle",      icon: "💸" },
@@ -22,6 +24,8 @@ const ITEMS = [
 
 export default function MorePage() {
   const { t } = useTutorT();
+  const { user } = useTutorProfile();
+  const unreadCount = useUnreadNotificationCount(user?.uid);
 
   return (
     <div className="min-h-dvh bg-bg pb-24">
@@ -32,7 +36,10 @@ export default function MorePage() {
             <Link key={item.href} href={item.href}>
               <Card className="flex items-center gap-3 hover:border-brand-500 transition-colors">
                 <span className="text-lg">{item.icon}</span>
-                <span className="font-semibold text-slate-100">{t(item.titleKey)}</span>
+                <span className="font-semibold text-slate-100 flex-1">{t(item.titleKey)}</span>
+                {item.href === "/notifications" && unreadCount > 0 && (
+                  <span className="bg-danger text-white text-[11px] font-bold px-2 py-0.5 rounded-full">{unreadCount > 9 ? "9+" : unreadCount}</span>
+                )}
               </Card>
             </Link>
           ))}

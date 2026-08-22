@@ -37,6 +37,7 @@ export * from "./hooks/useTutorEarnings";
 export * from "./hooks/useInstantHelp";
 export * from "./hooks/usePayoutRequests";
 export * from "./hooks/useTutorReviews";
+export * from "./hooks/useAppNotifications";
 
 // ─── Services ────────────────────────────────────────────────────────────
 export * from "./services/aiGuruApi";
@@ -56,4 +57,5 @@ export * from "./types/tutorCredits";
 export * from "./types/instantHelp";
 export * from "./types/payout";
 export * from "./types/review";
+export * from "./types/notification";
 export * from "./types/vcoins";

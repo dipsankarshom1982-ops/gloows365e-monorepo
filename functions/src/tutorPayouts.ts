@@ -34,6 +34,7 @@
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { notifyTutor } from "./shikshahubNotify";
 
 const db = admin.firestore();
 
@@ -321,11 +322,18 @@ export const reviewPayoutRequest = functionsV1
         reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-      return { status: newStatus };
+      return { status: newStatus, tutorUid: request.tutorUid, requestedAmount: Number(request.requestedAmount) || 0 };
     });
 
     console.log(`✅ Payout request ${requestId} ${result.status} by admin ${adminUid}`);
-    return result;
+    await notifyTutor(result.tutorUid, {
+      title: result.status === "approved" ? "✅ Payout request approved" : "Payout request rejected",
+      body: result.status === "approved"
+        ? `Your ₹${result.requestedAmount} payout request was approved — the transfer is on its way.`
+        : `Your ₹${result.requestedAmount} payout request was rejected${note ? `: ${note}` : "."}`,
+      type: "payout",
+    }).catch((e) => console.warn("reviewPayoutRequest: notifyTutor failed:", e));
+    return { status: result.status };
   });
 
 // ─── markPayoutPaid (admin) ──────────────────────────────────────────────────
@@ -395,9 +403,14 @@ export const markPayoutPaid = functionsV1
         updatedAt: now,
       });
 
-      return { status: "paid" as PayoutRequestStatus };
+      return { status: "paid" as PayoutRequestStatus, tutorUid: request.tutorUid, payoutAmount: Number(request.payoutAmount) || 0 };
     });
 
     console.log(`✅ Payout request ${requestId} marked paid by admin ${adminUid}`);
-    return result;
+    await notifyTutor(result.tutorUid, {
+      title: "💸 Payout paid",
+      body: `₹${result.payoutAmount} has been transferred to your account.`,
+      type: "payout",
+    }).catch((e) => console.warn("markPayoutPaid: notifyTutor failed:", e));
+    return { status: result.status };
   });

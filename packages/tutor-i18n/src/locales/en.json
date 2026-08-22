@@ -141,6 +141,10 @@
   "todaysClassesLabel": "Today's Classes",
   "moreTitle": "More",
   "moreNavLabel": "More",
+  "notificationsTitle": "Notifications",
+  "markAllRead": "Mark all read",
+  "noNotificationsTitle": "All caught up!",
+  "noNotificationsSubtitle": "You'll see Instant Help requests, payout updates, and reviews here.",
 
   "shikshaHubSessionFeeLabel": "Session fee (₹, per session)",
   "shikshaHubFeeInvalid": "Session fee must be a whole number greater than 0",

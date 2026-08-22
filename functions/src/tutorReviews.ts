@@ -26,6 +26,7 @@
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { notifyTutor } from "./shikshahubNotify";
 
 const db = admin.firestore();
 
@@ -108,6 +109,14 @@ export const submitTutorReview = functionsV1
     });
 
     console.log(`✅ Review submitted: session=${sessionId} student=${studentUid} tutor=${tutorUid} rating=${rating}`);
+
+    const studentName = (studentSnap.exists ? (studentSnap.data()?.name as string | undefined) : undefined) || "A student";
+    await notifyTutor(tutorUid, {
+      title: "⭐ New review",
+      body: `${studentName} rated you ${rating} star${rating === 1 ? "" : "s"}${trimmedText ? `: "${trimmedText.slice(0, 80)}${trimmedText.length > 80 ? "…" : ""}"` : "."}`,
+      type: "review",
+    }).catch((e) => console.warn("submitTutorReview: notifyTutor failed:", e));
+
     return { reviewId: sessionId };
   });
 
