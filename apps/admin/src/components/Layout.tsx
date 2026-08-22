@@ -47,6 +47,7 @@ const NAV_GROUPS = [
     { path: "/tutor-payouts",       label: "💸 Tutor Payouts",       permKey: "tutor-payouts" },
     { path: "/tutor-reviews",       label: "⭐ Tutor Reviews",       permKey: "tutor-reviews" },
     { path: "/payout-settings",     label: "⚙️ Payout Settings",     permKey: "payout-settings" },
+    { path: "/shikshahub-analytics", label: "📊 ShikshaHub Analytics", permKey: "shikshahub-analytics" },
   ]},
   { section: "FEEDBACK", items: [
     { path: "/feedback",          label: "💬 Feedback",           permKey: "feedback" },
