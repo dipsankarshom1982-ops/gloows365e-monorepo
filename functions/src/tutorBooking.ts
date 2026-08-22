@@ -45,11 +45,19 @@
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { notifyStudent, notifyTutor } from "./shikshahubNotify";
 
 const db = admin.firestore();
 
 type SessionType = "trial" | "regular";
-type BookingStatus = "requested" | "accepted" | "declined" | "cancelled";
+// "completed" — booking completion phase. Added by tickBookingCompletion
+// below, never by requestBooking/respondToBooking/cancelBooking (those
+// three still only ever produce the original four statuses). No billing
+// is tied to this — bookings have never had one (see this file's header
+// comment) — "completed" exists purely so a scheduled session becomes
+// review-eligible the same way an ended Instant Help session already is
+// (see functions/src/tutorReviews.ts's submitTutorReview).
+type BookingStatus = "requested" | "accepted" | "declined" | "cancelled" | "completed";
 type ServiceType = "one_time" | "short_term" | "long_term" | "instant_help";
 type DeliveryMode = "online" | "offline" | "online_offline";
 
@@ -349,4 +357,80 @@ export const cancelBooking = functionsV1
 
     console.log(`✅ Booking ${bookingId} cancelled by ${callerUid}`);
     return result;
+  });
+
+// ─── tickBookingCompletion ───────────────────────────────────────────────────
+// Booking completion phase — the only thing that ever moves a booking to
+// "completed". Sweeps "accepted" bookings whose scheduled end has passed
+// (requestedDate/requestedEndTime compared as plain IST wall-clock
+// strings, same no-timezone convention this file has followed since
+// Phase 1 — see isValidCalendarDate's header comment) and flips them.
+// Booking granularity doesn't need Instant Help's 1-minute
+// tickInstantHelp cadence, so this runs every 15 minutes. No billing
+// side-effect - bookings have never had one. Single equality-filter
+// query (status=="accepted"), same "fetch a bounded batch, evaluate in
+// code" shape tickInstantHelp already uses, so no new Firestore index is
+// needed.
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+function nowIST(): { date: string; time: string } {
+  const ist = new Date(Date.now() + IST_OFFSET_MS);
+  const iso = ist.toISOString();
+  return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
+}
+
+export const tickBookingCompletion = functionsV1
+  .runWith({ timeoutSeconds: 300, memory: "256MB" })
+  .pubsub.schedule("every 15 minutes")
+  .onRun(async () => {
+    const { date: todayDate, time: nowTime } = nowIST();
+
+    const snap = await db.collection("bookings")
+      .where("status", "==", "accepted")
+      .limit(500) // one run's worth — next run catches the rest
+      .get();
+
+    const toComplete = snap.docs.filter((d) => {
+      const b = d.data();
+      const bd = b.requestedDate as string | undefined;
+      const bt = b.requestedEndTime as string | undefined;
+      if (typeof bd !== "string" || typeof bt !== "string") return false;
+      return bd < todayDate || (bd === todayDate && bt <= nowTime);
+    });
+
+    if (toComplete.length === 0) return null;
+
+    const batch = db.batch();
+    toComplete.forEach((d) => batch.update(d.ref, {
+      status: "completed" as BookingStatus,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }));
+    await batch.commit();
+    console.log(`✅ tickBookingCompletion: completed ${toComplete.length} booking(s)`);
+
+    // Best-effort — never blocks the sweep itself.
+    await Promise.allSettled(toComplete.map((d) => {
+      const b = d.data();
+      const tutorLabel = (b.tutorName as string | undefined) || "your tutor";
+      const studentLabel = (b.studentName as string | undefined) || "the student";
+      return Promise.all([
+        notifyStudent(b.studentUid, {
+          title: "Booking completed",
+          body: `Your session with ${tutorLabel} is complete — leave a review!`,
+          type: "shikshahub",
+        }),
+        notifyTutor(b.tutorUid, {
+          title: "Booking completed",
+          body: `Your session with ${studentLabel} is complete.`,
+          type: "shikshahub",
+        }),
+      ]);
+    })).then((results) => {
+      results.forEach((r, i) => {
+        if (r.status === "rejected") {
+          console.warn(`tickBookingCompletion: notify failed for booking ${toComplete[i].id}:`, r.reason);
+        }
+      });
+    });
+
+    return null;
   });

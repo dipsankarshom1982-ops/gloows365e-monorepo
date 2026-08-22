@@ -21,6 +21,8 @@ const STATUS_TONE: Record<Booking["status"], "default" | "success" | "warning" |
   accepted:  "success",
   declined:  "danger",
   cancelled: "default",
+  // Booking completion phase.
+  completed: "success",
 };
 
 const respondToBookingCall = httpsCallable<

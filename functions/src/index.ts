@@ -112,7 +112,7 @@ export { registerTutorAccount, submitTutorVerification, reviewTutorVerification 
 export { syncTutorMarketplaceProfile } from "./tutorMarketplace";
 
 // ── ShikshaHub — Phase 1 minimum viable tutor booking ───────────────────────────
-export { requestBooking, respondToBooking, cancelBooking } from "./tutorBooking";
+export { requestBooking, respondToBooking, cancelBooking, tickBookingCompletion } from "./tutorBooking";
 
 // ── ShikshaHub — Phase 3 tutor services (multi-service, online/offline,
 // one-time/short-term/long-term, instant-help config-only) ─────────────────────

@@ -7,15 +7,17 @@
 // (cancelBookingCall) — any party can cancel per the approved Phase 2
 // scope.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { useTheme } from "@/context/ThemeContext";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useStudentProfile, useStudentBookings, type Booking } from "@gloows/shared-logic";
-import { cancelBookingCall } from "@/lib/shikshahub";
+import { cancelBookingCall, submitBookingReviewCall } from "@/lib/shikshahub";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import {
-  ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -24,7 +26,95 @@ const STATUS_META: Record<Booking["status"], { label: string; color: string }> =
   accepted:  { label: "Accepted",  color: "#22c55e" },
   declined:  { label: "Declined",  color: "#ef4444" },
   cancelled: { label: "Cancelled", color: "#94a3b8" },
+  // Booking completion phase.
+  completed: { label: "Completed", color: "#0d9488" },
 };
+
+// Booking completion phase — RN mirror of apps/web's BookingReviewCta.
+function BookingReviewCta({ bookingId, t }: { bookingId: string; t: (k: string) => string | undefined }) {
+  const [checked, setChecked] = useState(false);
+  const [alreadyReviewed, setAlreadyReviewed] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [reviewText, setReviewText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    getDoc(doc(db, "tutorReviews", bookingId))
+      .then((snap) => setAlreadyReviewed(snap.exists()))
+      .catch(() => {})
+      .finally(() => setChecked(true));
+  }, [bookingId]);
+
+  async function submit() {
+    if (rating < 1) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await submitBookingReviewCall(bookingId, rating, reviewText.trim() || undefined);
+      setSubmitted(true);
+      setOpen(false);
+    } catch (e: any) {
+      setError(e?.message ?? "Could not submit review.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!checked || alreadyReviewed || submitted) return null;
+
+  if (!open) {
+    return (
+      <TouchableOpacity
+        onPress={() => setOpen(true)}
+        style={{ marginTop: 12, borderWidth: 1, borderColor: "#0d9488", backgroundColor: "rgba(13,148,136,0.08)", borderRadius: 10, paddingVertical: 8, paddingHorizontal: 14, alignSelf: "flex-start" }}
+      >
+        <Text style={{ color: "#0d9488", fontSize: 12, fontWeight: "700" }}>{t("shikshaHubLeaveReview") ?? "⭐ Leave a review"}</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View style={{ marginTop: 12, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "#334155", backgroundColor: "#0f172a" }}>
+      <View style={{ flexDirection: "row", gap: 4 }}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <TouchableOpacity key={n} onPress={() => setRating(n)}>
+            <Text style={{ fontSize: 22, opacity: n <= rating ? 1 : 0.3 }}>⭐</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <TextInput
+        value={reviewText}
+        onChangeText={setReviewText}
+        placeholder={t("shikshaHubReviewTextPlaceholder") ?? "Optional: share more about your experience"}
+        placeholderTextColor="#64748b"
+        multiline
+        maxLength={1000}
+        style={{ marginTop: 8, borderRadius: 8, borderWidth: 1, borderColor: "#334155", backgroundColor: "#1e293b", color: "#f1f5f9", fontSize: 12, padding: 8, minHeight: 44, textAlignVertical: "top" }}
+      />
+      {error ? <Text style={{ marginTop: 6, fontSize: 11.5, fontWeight: "600", color: "#ef4444" }}>{error}</Text> : null}
+      <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+        <TouchableOpacity
+          onPress={() => setOpen(false)}
+          style={{ flex: 1, borderWidth: 1, borderColor: "#334155", borderRadius: 8, paddingVertical: 8, alignItems: "center" }}
+        >
+          <Text style={{ color: "#94a3b8", fontSize: 12, fontWeight: "700" }}>{t("shikshaHubReviewSkip") ?? "Skip"}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={submit}
+          disabled={rating < 1 || submitting}
+          style={{ flex: 1, backgroundColor: "#0d9488", borderRadius: 8, paddingVertical: 8, alignItems: "center", opacity: rating < 1 || submitting ? 0.5 : 1 }}
+        >
+          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>
+            {submitting ? (t("shikshaHubReviewSubmitting") ?? "Submitting…") : (t("shikshaHubReviewSubmit") ?? "Submit Review")}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
 
 export default function ShikshaHubMyBookingsScreen() {
   const { colors } = useTheme();
@@ -109,6 +199,8 @@ export default function ShikshaHubMyBookingsScreen() {
                 {rowError[b.id!] && (
                   <Text style={S.errorText}>{rowError[b.id!]}</Text>
                 )}
+
+                {b.status === "completed" && <BookingReviewCta bookingId={b.id!} t={t} />}
               </View>
             );
           })}

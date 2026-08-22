@@ -294,3 +294,20 @@ export async function submitTutorReviewCall(
   const res = await fn({ sessionId, rating, reviewText });
   return res.data;
 }
+
+// Booking completion phase — the same submitTutorReview callable, but for
+// a completed (status "completed") scheduled bookings/{id} instead of an
+// ended Instant Help session. Kept separate rather than widening
+// submitTutorReviewCall's signature so InstantHelpBar's existing call
+// site above never has to change.
+export async function submitBookingReviewCall(
+  bookingId: string,
+  rating: number,
+  reviewText?: string
+): Promise<{ reviewId: string }> {
+  const fn = httpsCallable<{ bookingId: string; rating: number; reviewText?: string }, { reviewId: string }>(
+    functions, "submitTutorReview"
+  );
+  const res = await fn({ bookingId, rating, reviewText });
+  return res.data;
+}

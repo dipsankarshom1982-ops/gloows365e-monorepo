@@ -12,7 +12,12 @@
 
 export type BookingSessionType = "trial" | "regular";
 
-export type BookingStatus = "requested" | "accepted" | "declined" | "cancelled";
+// "completed" — booking completion phase: functions/src/tutorBooking.ts's
+// tickBookingCompletion (scheduled, every 15 min) is the only thing that
+// ever sets this, once an "accepted" booking's scheduled end time has
+// passed. Review-eligibility marker only — bookings still carry no
+// billing (see this type's own header comment above).
+export type BookingStatus = "requested" | "accepted" | "declined" | "cancelled" | "completed";
 
 export type Booking = {
   id?: string; // Firestore doc ID (auto-generated, not a stored field)

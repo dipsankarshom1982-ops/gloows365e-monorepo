@@ -37,47 +37,89 @@ function roundToOneDecimal(n: number): number {
 }
 
 // ─── submitTutorReview ───────────────────────────────────────────────────────
+// Booking completion phase — extended to accept EITHER an Instant Help
+// sessionId (original Phase 6 path, unchanged) OR a scheduled bookingId
+// (new). Exactly one of the two must be given; whichever is resolves the
+// same {tutorUid, studentUid, subject, serviceId} shape the rest of this
+// function was already written against, so the transaction/aggregate
+// logic below is identical either way.
 export const submitTutorReview = functionsV1
   .runWith({ timeoutSeconds: 30, memory: "256MB" })
   .https.onCall(async (
-    data: { sessionId?: string; rating?: number; reviewText?: string },
+    data: { sessionId?: string; bookingId?: string; rating?: number; reviewText?: string },
     context
   ) => {
     if (!context.auth) {
       throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
     }
     const studentUid = context.auth.uid;
-    const { sessionId, rating, reviewText } = data ?? {};
+    const { sessionId, bookingId, rating, reviewText } = data ?? {};
 
-    if (!sessionId || typeof sessionId !== "string") {
-      throw new functionsV1.https.HttpsError("invalid-argument", "sessionId is required");
+    if (sessionId && bookingId) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "Provide either sessionId or bookingId, not both");
+    }
+    if (!sessionId && !bookingId) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "sessionId or bookingId is required");
     }
     if (!Number.isInteger(rating) || (rating as number) < 1 || (rating as number) > 5) {
       throw new functionsV1.https.HttpsError("invalid-argument", "rating must be an integer from 1 to 5");
     }
     const trimmedText = typeof reviewText === "string" ? reviewText.trim().slice(0, MAX_REVIEW_TEXT_LENGTH) : "";
 
-    const sessionSnap = await db.doc(`instantHelpSessions/${sessionId}`).get();
-    if (!sessionSnap.exists) {
-      throw new functionsV1.https.HttpsError("not-found", "Session not found");
-    }
-    const session = sessionSnap.data()!;
-    if (session.studentUid !== studentUid) {
-      throw new functionsV1.https.HttpsError("permission-denied", "This session doesn't belong to you");
-    }
-    if (session.status !== "ended") {
-      throw new functionsV1.https.HttpsError("failed-precondition", "You can only review a session after it has ended");
+    let sourceId: string;
+    let tutorUid: string;
+    let subject: string;
+    let serviceId: string | null;
+
+    if (sessionId) {
+      if (typeof sessionId !== "string") {
+        throw new functionsV1.https.HttpsError("invalid-argument", "sessionId must be a string");
+      }
+      const sessionSnap = await db.doc(`instantHelpSessions/${sessionId}`).get();
+      if (!sessionSnap.exists) {
+        throw new functionsV1.https.HttpsError("not-found", "Session not found");
+      }
+      const session = sessionSnap.data()!;
+      if (session.studentUid !== studentUid) {
+        throw new functionsV1.https.HttpsError("permission-denied", "This session doesn't belong to you");
+      }
+      if (session.status !== "ended") {
+        throw new functionsV1.https.HttpsError("failed-precondition", "You can only review a session after it has ended");
+      }
+      sourceId = sessionId;
+      tutorUid = session.tutorUid as string;
+      subject = (session.subject as string | undefined) ?? "";
+      serviceId = (session.serviceId as string | undefined) ?? null;
+    } else {
+      const id = bookingId as string;
+      if (typeof id !== "string") {
+        throw new functionsV1.https.HttpsError("invalid-argument", "bookingId must be a string");
+      }
+      const bookingSnap = await db.doc(`bookings/${id}`).get();
+      if (!bookingSnap.exists) {
+        throw new functionsV1.https.HttpsError("not-found", "Booking not found");
+      }
+      const booking = bookingSnap.data()!;
+      if (booking.studentUid !== studentUid) {
+        throw new functionsV1.https.HttpsError("permission-denied", "This booking doesn't belong to you");
+      }
+      if (booking.status !== "completed") {
+        throw new functionsV1.https.HttpsError("failed-precondition", "You can only review a booking after it's completed");
+      }
+      sourceId = id;
+      tutorUid = booking.tutorUid as string;
+      subject = (booking.subject as string | undefined) ?? "";
+      serviceId = (booking.serviceId as string | undefined) ?? null;
     }
 
     const studentSnap = await db.doc(`students/${studentUid}`).get();
-    const tutorUid = session.tutorUid as string;
-    const reviewRef = db.doc(`tutorReviews/${sessionId}`);
+    const reviewRef = db.doc(`tutorReviews/${sourceId}`);
     const tutorRef = db.doc(`tutors/${tutorUid}`);
 
     await db.runTransaction(async (tx) => {
       const [existingReview, tutorSnap] = await Promise.all([tx.get(reviewRef), tx.get(tutorRef)]);
       if (existingReview.exists) {
-        throw new functionsV1.https.HttpsError("failed-precondition", "This session has already been reviewed");
+        throw new functionsV1.https.HttpsError("failed-precondition", "This has already been reviewed");
       }
 
       const tutor = tutorSnap.exists ? tutorSnap.data()! : {};
@@ -87,11 +129,11 @@ export const submitTutorReview = functionsV1
 
       const now = admin.firestore.FieldValue.serverTimestamp();
       tx.set(reviewRef, {
-        sessionId,
+        ...(sessionId ? { sessionId } : { bookingId: sourceId }),
         studentUid,
         tutorUid,
-        serviceId: session.serviceId ?? null,
-        subject: session.subject ?? "",
+        serviceId,
+        subject,
         rating,
         reviewText: trimmedText,
         studentName: (studentSnap.exists ? (studentSnap.data()?.name as string | undefined) : undefined) ?? "",
@@ -108,7 +150,7 @@ export const submitTutorReview = functionsV1
       }, { merge: true });
     });
 
-    console.log(`✅ Review submitted: session=${sessionId} student=${studentUid} tutor=${tutorUid} rating=${rating}`);
+    console.log(`✅ Review submitted: ${sessionId ? `session=${sessionId}` : `booking=${sourceId}`} student=${studentUid} tutor=${tutorUid} rating=${rating}`);
 
     const studentName = (studentSnap.exists ? (studentSnap.data()?.name as string | undefined) : undefined) || "A student";
     await notifyTutor(tutorUid, {
@@ -117,7 +159,7 @@ export const submitTutorReview = functionsV1
       type: "review",
     }).catch((e) => console.warn("submitTutorReview: notifyTutor failed:", e));
 
-    return { reviewId: sessionId };
+    return { reviewId: sourceId };
   });
 
 // ─── hideTutorReview (admin) ─────────────────────────────────────────────────

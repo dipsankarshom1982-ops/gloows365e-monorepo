@@ -1,29 +1,35 @@
 // packages/shared-logic/src/types/review.ts
-// ShikshaHub Phase 6 — tutor ratings & reviews. Approved Phase 6 scope:
-// reviewable only off a completed instantHelpSessions/{id} (status ===
-// "ended") — bookings/{id} has no "completed" concept at all today (only
-// requested/accepted/declined/cancelled), so scheduled one-time/short-term/
-// long-term sessions are explicitly NOT reviewable yet; adding that is
-// later-phase scope, same "don't invent scope" discipline every prior
-// phase followed.
+// ShikshaHub Phase 6 — tutor ratings & reviews. Originally scoped to a
+// completed instantHelpSessions/{id} (status === "ended") only —
+// bookings/{id} had no "completed" concept at all then.
 //
-// One review per session: tutorReviews/{sessionId} — the session's own id
-// IS the review doc id, so "has this session already been reviewed" is a
-// single doc read, and a student can never leave two reviews for the same
-// session by construction (submitTutorReview's transaction checks
-// existence before creating).
+// Booking completion phase — extended to ALSO cover a completed
+// bookings/{id} (status === "completed", see
+// functions/src/tutorBooking.ts's tickBookingCompletion). A review is
+// sourced from exactly one of sessionId/bookingId, never both — which
+// field is present is itself the signal for which kind of session this
+// review was left for, same "presence/absence of a field is a reliable
+// signal" pattern bookings/{id}'s own serviceId/serviceName/etc already
+// follow (see packages/shared-logic/src/types/booking.ts).
+//
+// One review per source: tutorReviews/{sessionId|bookingId} — the source
+// doc's own id IS the review doc id, so "has this already been reviewed"
+// is a single doc read, and a student can never leave two reviews for the
+// same session/booking by construction (submitTutorReview's transaction
+// checks existence before creating).
 
-// tutorReviews/{sessionId} — client never writes this directly
+// tutorReviews/{sessionId|bookingId} — client never writes this directly
 // (firestore.rules: allow write: if false). submitTutorReview (student,
-// owner of the session) creates it; hideTutorReview (admin) is the only
-// thing that ever updates it afterward.
+// owner of the session/booking) creates it; hideTutorReview (admin) is
+// the only thing that ever updates it afterward.
 export type TutorReview = {
-  id?: string; // = the instantHelpSessions/{id} it was left for
-  sessionId: string;
+  id?: string; // = the instantHelpSessions/{id} or bookings/{id} it was left for
+  sessionId?: string; // present only for an Instant Help session review
+  bookingId?: string; // present only for a scheduled booking review
   studentUid: string;
   tutorUid: string;
   serviceId?: string;
-  subject?: string; // display snapshot, from the session
+  subject?: string; // display snapshot, from the session/booking
   rating: number; // 1-5 integer
 
   // reviewText is capped and trimmed server-side (see

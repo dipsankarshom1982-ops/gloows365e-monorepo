@@ -14,7 +14,11 @@ import { db, functions } from "../lib/firebase";
 
 interface TutorReview {
   id: string;
-  sessionId: string;
+  // Booking completion phase — a review comes from exactly one of these
+  // two (never both), same presence/absence-is-the-signal pattern
+  // bookings/{id} itself uses (see functions/src/tutorReviews.ts).
+  sessionId?: string;
+  bookingId?: string;
   studentUid: string;
   tutorUid: string;
   studentName?: string;
@@ -139,7 +143,10 @@ export default function TutorReviews() {
               </div>
 
               <div className="text-xs text-slate-400 space-y-0.5">
-                <div>Session: <span className="text-slate-300 font-mono">{item.sessionId.slice(0, 14)}…</span></div>
+                <div>
+                  {item.sessionId ? "Session" : "Booking"}:{" "}
+                  <span className="text-slate-300 font-mono">{(item.sessionId ?? item.bookingId ?? "").slice(0, 14)}…</span>
+                </div>
                 <div>Left: {fmtDate(item.createdAt)}</div>
                 {item.hidden && item.hiddenReason && <div className="text-slate-500 italic mt-1">Reason: {item.hiddenReason}</div>}
               </div>

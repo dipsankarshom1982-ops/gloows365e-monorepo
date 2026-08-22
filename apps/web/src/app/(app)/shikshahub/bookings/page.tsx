@@ -9,12 +9,14 @@
 // scope. Never writes bookings/{id} directly; the callable is the only
 // path, matching firestore.rules' `allow write: if false`.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useStudentProfile, type Booking } from "@gloows/shared-logic";
 import { useStudentBookings } from "@gloows/shared-logic";
-import { cancelBookingCall } from "@/lib/shikshahub";
+import { cancelBookingCall, submitBookingReviewCall } from "@/lib/shikshahub";
 import { ShikshaHubStyles } from "../_shared";
 
 const STATUS_META: Record<Booking["status"], { label: string; color: string }> = {
@@ -22,7 +24,111 @@ const STATUS_META: Record<Booking["status"], { label: string; color: string }> =
   accepted:  { label: "Accepted",  color: "#22c55e" },
   declined:  { label: "Declined",  color: "#ef4444" },
   cancelled: { label: "Cancelled", color: "var(--text-muted)" },
+  // Booking completion phase.
+  completed: { label: "Completed", color: "#0d9488" },
 };
+
+// Booking completion phase — inline "leave a review" form for a completed
+// booking with no review yet. Same star-rating shape as Phase 6's
+// InstantHelpBar review prompt, just embedded per-row instead of a
+// floating global widget (bookings are discovered on this list, not via
+// a "just ended" live moment the way an Instant Help session is).
+function BookingReviewCta({ bookingId }: { bookingId: string }) {
+  const { t } = useAppTranslation();
+  const [checked, setChecked] = useState(false);
+  const [alreadyReviewed, setAlreadyReviewed] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [reviewText, setReviewText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    getDoc(doc(db, "tutorReviews", bookingId))
+      .then((snap) => setAlreadyReviewed(snap.exists()))
+      .catch(() => {})
+      .finally(() => setChecked(true));
+  }, [bookingId]);
+
+  async function submit() {
+    if (rating < 1) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await submitBookingReviewCall(bookingId, rating, reviewText.trim() || undefined);
+      setSubmitted(true);
+      setOpen(false);
+    } catch (e: any) {
+      setError(e?.message ?? "Could not submit review.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!checked || alreadyReviewed || submitted) return null;
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          marginTop: 12, border: "1px solid #0d9488", background: "rgba(13,148,136,0.08)",
+          color: "#0d9488", borderRadius: 10, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+        }}
+      >
+        {t("shikshaHubLeaveReview", "⭐ Leave a review")}
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid var(--border)", background: "var(--bg)" }}>
+      <div style={{ display: "flex", gap: 4 }}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            onClick={() => setRating(n)}
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, opacity: n <= rating ? 1 : 0.3, padding: 0 }}
+          >
+            ⭐
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={reviewText}
+        onChange={(e) => setReviewText(e.target.value)}
+        placeholder={t("shikshaHubReviewTextPlaceholder", "Optional: share more about your experience")}
+        maxLength={1000}
+        rows={3}
+        style={{
+          marginTop: 8, width: "100%", borderRadius: 8, border: "1px solid var(--border)",
+          background: "var(--bg-card)", color: "var(--text)", fontSize: 12, padding: 8, resize: "vertical",
+        }}
+      />
+      {error && <div style={{ marginTop: 6, fontSize: 11.5, fontWeight: 600, color: "#ef4444" }}>{error}</div>}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button
+          onClick={() => setOpen(false)}
+          style={{ flex: 1, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-muted)", borderRadius: 8, padding: "8px 0", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+        >
+          {t("shikshaHubReviewSkip", "Skip")}
+        </button>
+        <button
+          onClick={submit}
+          disabled={rating < 1 || submitting}
+          style={{
+            flex: 1, border: "none", background: "#0d9488", color: "#fff", borderRadius: 8, padding: "8px 0",
+            fontSize: 12, fontWeight: 700, cursor: rating < 1 || submitting ? "not-allowed" : "pointer",
+            opacity: rating < 1 || submitting ? 0.5 : 1,
+          }}
+        >
+          {submitting ? t("shikshaHubReviewSubmitting", "Submitting…") : t("shikshaHubReviewSubmit", "Submit Review")}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function ShikshaHubMyBookingsPage() {
   const { t } = useAppTranslation();
@@ -127,6 +233,8 @@ export default function ShikshaHubMyBookingsPage() {
                       {rowError[b.id!]}
                     </div>
                   )}
+
+                  {b.status === "completed" && <BookingReviewCta bookingId={b.id!} />}
                 </div>
               );
             })}

@@ -264,6 +264,8 @@ const STATUS_META: Record<Booking["status"], { label: string; color: string }> =
   accepted:  { label: "Accepted",  color: "#22c55e" },
   declined:  { label: "Declined",  color: "#ef4444" },
   cancelled: { label: "Cancelled", color: "var(--text-muted)" },
+  // Booking completion phase.
+  completed: { label: "Completed", color: "#0d9488" },
 };
 
 /** ShikshaHub Phase 1/3 booking form. No payment anywhere in here — submit
