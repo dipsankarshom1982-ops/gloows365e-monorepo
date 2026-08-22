@@ -19,6 +19,14 @@
 // all client-side over the same fetchAllTutors() result, same as the
 // existing subject-chip filter, since this fetches every verified tutor
 // with no pagination already.
+//
+// More discovery filters phase — three more client-side filters over the
+// same fetchAllTutors() result, same "hide fields that aren't available"
+// rule the rating filter above already follows (a tutor missing the
+// relevant field is excluded, never assumed to pass): a session-fee price
+// band, an "online now" toggle reusing isOnlineForInstantHelp (already
+// synced live for Instant Help matching — see MarketplaceTutor's own
+// comment), and a minimum-years-experience threshold.
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -32,6 +40,13 @@ import {
 import { ShikshaHubStyles, SubjectChips, VerifiedBadge } from "./_shared";
 
 type SortMode = "name" | "rating";
+// "under500" / "500to1000" / "1000plus" — fixed buckets over sessionFee
+// (whole INR, per session). No user-typed min/max input since there's no
+// server-side range query behind this (everything here is a client-side
+// filter over one already-fetched array) — a small fixed set of bands is
+// simpler than a slider for the same result, and matches this file's
+// existing chip-based filter UI throughout.
+type PriceBand = "under500" | "500to1000" | "1000plus";
 
 export default function ShikshaHubPage() {
   const router = useRouter();
@@ -41,6 +56,9 @@ export default function ShikshaHubPage() {
   const [subject, setSubject] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("name");
   const [minRating, setMinRating] = useState<number | null>(null);
+  const [priceBand, setPriceBand] = useState<PriceBand | null>(null);
+  const [onlineOnly, setOnlineOnly] = useState(false);
+  const [minExperience, setMinExperience] = useState<number | null>(null);
 
   useEffect(() => {
     fetchAllTutors().then(setTutors).finally(() => setLoading(false));
@@ -51,6 +69,20 @@ export default function ShikshaHubPage() {
     let result = subject ? tutors.filter((tu) => tu.subjects.includes(subject)) : tutors;
     if (minRating != null) {
       result = result.filter((tu) => tu.ratingAverage != null && tu.ratingAverage >= minRating);
+    }
+    if (priceBand != null) {
+      result = result.filter((tu) => {
+        if (tu.sessionFee == null) return false;
+        if (priceBand === "under500") return tu.sessionFee < 500;
+        if (priceBand === "500to1000") return tu.sessionFee >= 500 && tu.sessionFee <= 1000;
+        return tu.sessionFee > 1000;
+      });
+    }
+    if (onlineOnly) {
+      result = result.filter((tu) => tu.isOnlineForInstantHelp);
+    }
+    if (minExperience != null) {
+      result = result.filter((tu) => tu.teachingExperienceYears != null && tu.teachingExperienceYears >= minExperience);
     }
     if (sortMode === "rating") {
       // Unrated tutors sink to the bottom rather than being hidden —
@@ -65,7 +97,7 @@ export default function ShikshaHubPage() {
       });
     }
     return result;
-  }, [tutors, subject, sortMode, minRating]);
+  }, [tutors, subject, sortMode, minRating, priceBand, onlineOnly, minExperience]);
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
@@ -94,6 +126,22 @@ export default function ShikshaHubPage() {
             <Chip label={t("shikshaHubAllRatings", "All ratings")} active={minRating === null} onClick={() => setMinRating(null)} />
             <Chip label="4★+" active={minRating === 4} onClick={() => setMinRating(4)} />
             <Chip label="3★+" active={minRating === 3} onClick={() => setMinRating(3)} />
+          </div>
+          <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+          <div style={{ display: "flex", gap: 6 }}>
+            <Chip label={t("shikshaHubAnyPrice", "Any price")} active={priceBand === null} onClick={() => setPriceBand(null)} />
+            <Chip label={t("shikshaHubPriceUnder500", "Under ₹500")} active={priceBand === "under500"} onClick={() => setPriceBand("under500")} />
+            <Chip label={t("shikshaHubPrice500to1000", "₹500–1000")} active={priceBand === "500to1000"} onClick={() => setPriceBand("500to1000")} />
+            <Chip label={t("shikshaHubPrice1000Plus", "₹1000+")} active={priceBand === "1000plus"} onClick={() => setPriceBand("1000plus")} />
+          </div>
+          <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+          <Chip label={`🟢 ${t("shikshaHubOnlineNow", "Online now")}`} active={onlineOnly} onClick={() => setOnlineOnly((v) => !v)} />
+          <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+          <div style={{ display: "flex", gap: 6 }}>
+            <Chip label={t("shikshaHubAnyExperience", "Any experience")} active={minExperience === null} onClick={() => setMinExperience(null)} />
+            <Chip label={t("shikshaHubExp1Plus", "1+ yrs")} active={minExperience === 1} onClick={() => setMinExperience(1)} />
+            <Chip label={t("shikshaHubExp3Plus", "3+ yrs")} active={minExperience === 3} onClick={() => setMinExperience(3)} />
+            <Chip label={t("shikshaHubExp5Plus", "5+ yrs")} active={minExperience === 5} onClick={() => setMinExperience(5)} />
           </div>
         </div>
       )}

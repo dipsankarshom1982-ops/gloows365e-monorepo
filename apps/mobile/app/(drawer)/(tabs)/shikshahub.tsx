@@ -28,6 +28,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Header from "@/components/header";
 
 type SortMode = "name" | "rating";
+// See apps/web/src/app/(app)/shikshahub/page.tsx's mirrored comment —
+// fixed sessionFee buckets, no typed min/max, same reasoning.
+type PriceBand = "under500" | "500to1000" | "1000plus";
 
 export default function ShikshaHubHomeScreen() {
   const { colors } = useTheme();
@@ -38,6 +41,9 @@ export default function ShikshaHubHomeScreen() {
   const [subject, setSubject] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("name");
   const [minRating, setMinRating] = useState<number | null>(null);
+  const [priceBand, setPriceBand] = useState<PriceBand | null>(null);
+  const [onlineOnly, setOnlineOnly] = useState(false);
+  const [minExperience, setMinExperience] = useState<number | null>(null);
 
   useEffect(() => {
     fetchAllTutors().then(setTutors).finally(() => setLoading(false));
@@ -49,6 +55,20 @@ export default function ShikshaHubHomeScreen() {
     if (minRating != null) {
       result = result.filter((tu) => tu.ratingAverage != null && tu.ratingAverage >= minRating);
     }
+    if (priceBand != null) {
+      result = result.filter((tu) => {
+        if (tu.sessionFee == null) return false;
+        if (priceBand === "under500") return tu.sessionFee < 500;
+        if (priceBand === "500to1000") return tu.sessionFee >= 500 && tu.sessionFee <= 1000;
+        return tu.sessionFee > 1000;
+      });
+    }
+    if (onlineOnly) {
+      result = result.filter((tu) => tu.isOnlineForInstantHelp);
+    }
+    if (minExperience != null) {
+      result = result.filter((tu) => tu.teachingExperienceYears != null && tu.teachingExperienceYears >= minExperience);
+    }
     if (sortMode === "rating") {
       result = [...result].sort((a, b) => {
         const ar = a.ratingAverage ?? -1;
@@ -58,7 +78,7 @@ export default function ShikshaHubHomeScreen() {
       });
     }
     return result;
-  }, [tutors, subject, sortMode, minRating]);
+  }, [tutors, subject, sortMode, minRating, priceBand, onlineOnly, minExperience]);
 
   if (!authLoading && !user) {
     return (
@@ -109,6 +129,18 @@ export default function ShikshaHubHomeScreen() {
           <Chip label={t("shikshaHubAllRatings") ?? "All ratings"} active={minRating === null} onPress={() => setMinRating(null)} />
           <Chip label="4★+" active={minRating === 4} onPress={() => setMinRating(4)} />
           <Chip label="3★+" active={minRating === 3} onPress={() => setMinRating(3)} />
+          <View style={{ width: 1, alignSelf: "stretch", backgroundColor: colors.border, marginHorizontal: 2 }} />
+          <Chip label={t("shikshaHubAnyPrice") ?? "Any price"} active={priceBand === null} onPress={() => setPriceBand(null)} />
+          <Chip label={t("shikshaHubPriceUnder500") ?? "Under ₹500"} active={priceBand === "under500"} onPress={() => setPriceBand("under500")} />
+          <Chip label={t("shikshaHubPrice500to1000") ?? "₹500–1000"} active={priceBand === "500to1000"} onPress={() => setPriceBand("500to1000")} />
+          <Chip label={t("shikshaHubPrice1000Plus") ?? "₹1000+"} active={priceBand === "1000plus"} onPress={() => setPriceBand("1000plus")} />
+          <View style={{ width: 1, alignSelf: "stretch", backgroundColor: colors.border, marginHorizontal: 2 }} />
+          <Chip label={`🟢 ${t("shikshaHubOnlineNow") ?? "Online now"}`} active={onlineOnly} onPress={() => setOnlineOnly((v) => !v)} />
+          <View style={{ width: 1, alignSelf: "stretch", backgroundColor: colors.border, marginHorizontal: 2 }} />
+          <Chip label={t("shikshaHubAnyExperience") ?? "Any experience"} active={minExperience === null} onPress={() => setMinExperience(null)} />
+          <Chip label={t("shikshaHubExp1Plus") ?? "1+ yrs"} active={minExperience === 1} onPress={() => setMinExperience(1)} />
+          <Chip label={t("shikshaHubExp3Plus") ?? "3+ yrs"} active={minExperience === 3} onPress={() => setMinExperience(3)} />
+          <Chip label={t("shikshaHubExp5Plus") ?? "5+ yrs"} active={minExperience === 5} onPress={() => setMinExperience(5)} />
         </ScrollView>
       )}
 
