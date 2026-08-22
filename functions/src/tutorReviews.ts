@@ -26,11 +26,12 @@
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
-import { notifyTutor } from "./shikshahubNotify";
+import { notifyStudent, notifyTutor } from "./shikshahubNotify";
 
 const db = admin.firestore();
 
 const MAX_REVIEW_TEXT_LENGTH = 1000;
+const MAX_REPLY_TEXT_LENGTH = 500;
 
 function roundToOneDecimal(n: number): number {
   return Math.round(n * 10) / 10;
@@ -160,6 +161,57 @@ export const submitTutorReview = functionsV1
     }).catch((e) => console.warn("submitTutorReview: notifyTutor failed:", e));
 
     return { reviewId: sourceId };
+  });
+
+// ─── replyToTutorReview ──────────────────────────────────────────────────────
+// Tutor reply to reviews phase — the tutor being reviewed can post one
+// public reply to a review left on them. Ownership is the only check
+// (review.tutorUid === caller); a review already being hidden by admin
+// moderation doesn't block a reply — the reply just inherits the same
+// hidden-from-public-view state as the review itself, since it lives on
+// the same doc (useTutorReviews' where(hidden==false) already excludes
+// hidden docs entirely, reply included). Re-calling this on a review that
+// already has a reply overwrites it — one reply slot per review, always
+// editable by the tutor who owns it, same as any other "the owner can
+// always update their own content" field in this app.
+export const replyToTutorReview = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (data: { reviewId?: string; replyText?: string }, context) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const tutorUid = context.auth.uid;
+    const { reviewId, replyText } = data ?? {};
+    if (!reviewId || typeof reviewId !== "string") {
+      throw new functionsV1.https.HttpsError("invalid-argument", "reviewId is required");
+    }
+    const trimmed = typeof replyText === "string" ? replyText.trim().slice(0, MAX_REPLY_TEXT_LENGTH) : "";
+    if (!trimmed) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "replyText is required");
+    }
+
+    const reviewRef = db.doc(`tutorReviews/${reviewId}`);
+    const reviewSnap = await reviewRef.get();
+    if (!reviewSnap.exists) {
+      throw new functionsV1.https.HttpsError("not-found", "Review not found");
+    }
+    const review = reviewSnap.data()!;
+    if (review.tutorUid !== tutorUid) {
+      throw new functionsV1.https.HttpsError("permission-denied", "This review isn't yours to reply to");
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await reviewRef.update({ tutorReply: trimmed, tutorReplyAt: now, updatedAt: now });
+
+    console.log(`✅ Tutor ${tutorUid} replied to review ${reviewId}`);
+
+    await notifyStudent(review.studentUid as string, {
+      title: "💬 Your tutor replied",
+      body: `Your tutor replied to your review: "${trimmed.slice(0, 80)}${trimmed.length > 80 ? "…" : ""}"`,
+      type: "review",
+    }).catch((e) => console.warn("replyToTutorReview: notifyStudent failed:", e));
+
+    return { reviewId, tutorReply: trimmed };
   });
 
 // ─── hideTutorReview (admin) ─────────────────────────────────────────────────

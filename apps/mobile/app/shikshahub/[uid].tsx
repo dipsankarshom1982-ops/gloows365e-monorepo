@@ -163,6 +163,14 @@ function ReviewsSection({ tutorUid, colors, t }: { tutorUid: string; colors: any
             {!!r.reviewText && (
               <Text style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 4, lineHeight: 19 }}>{r.reviewText}</Text>
             )}
+            {!!r.tutorReply && (
+              <View style={{ marginTop: 8, marginLeft: 12, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: "#14b8a6" }}>
+                <Text style={{ fontSize: 11, fontWeight: "800", color: "#14b8a6" }}>
+                  {t("tutorReplyLabel") ?? "Reply from tutor"}
+                </Text>
+                <Text style={{ fontSize: 12.5, color: colors.textSecondary, marginTop: 2, lineHeight: 19 }}>{r.tutorReply}</Text>
+              </View>
+            )}
           </View>
         ))}
       </View>

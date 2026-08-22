@@ -221,6 +221,16 @@ function ReviewsSection({ tutorUid }: { tutorUid: string }) {
             {!!r.reviewText && (
               <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 4, lineHeight: "19px" }}>{r.reviewText}</div>
             )}
+            {!!r.tutorReply && (
+              <div style={{
+                marginTop: 8, marginLeft: 12, paddingLeft: 10, borderLeft: "2px solid #14b8a6",
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: "#14b8a6" }}>
+                  {t("tutorReplyLabel", "Reply from tutor")}
+                </div>
+                <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 2, lineHeight: "19px" }}>{r.tutorReply}</div>
+              </div>
+            )}
           </div>
         ))}
       </div>

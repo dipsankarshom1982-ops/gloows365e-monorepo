@@ -16,6 +16,7 @@ const ITEMS = [
   { href: "/services",     titleKey: "servicesTitle",     icon: "🧩" },
   { href: "/payouts",      titleKey: "payoutsTitle",      icon: "💸" },
   { href: "/bookings",     titleKey: "shikshaHubBookingRequestsTitle", icon: "🎓" },
+  { href: "/reviews",      titleKey: "myReviewsTitle",    icon: "⭐" },
   { href: "/profile",      titleKey: "profileTitle",      icon: "👤" },
   { href: "/verification", titleKey: "verificationTitle", icon: "📄" },
 ] as const;

@@ -48,6 +48,17 @@ export type TutorReview = {
   hiddenBy?: string; // admin uid
   hiddenReason?: string;
 
+  // Tutor reply to reviews phase — the tutor being reviewed (tutorUid) can
+  // post one public reply. Absence means no reply yet, same "presence
+  // marks it done" pattern this codebase already uses elsewhere (e.g.
+  // bookings/{id}'s reminderSentAt). A hidden review's reply is hidden
+  // right along with it since both live on the same doc — no separate
+  // visibility rule needed. Client never writes this directly (closed-
+  // write collection); replyToTutorReview (the owning tutor, via the
+  // Admin SDK) is the only thing that ever sets it.
+  tutorReply?: string;
+  tutorReplyAt?: unknown; // Firestore Timestamp
+
   createdAt?: unknown; // Firestore Timestamp
   updatedAt?: unknown; // Firestore Timestamp
 };

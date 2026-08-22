@@ -160,6 +160,16 @@
   "shikshaHubCancelBooking": "Cancel booking",
   "shikshaHubCancelling": "Cancelling…",
 
+  "myReviewsTitle": "My Reviews",
+  "noReviewsTitle": "No reviews yet",
+  "noReviewsSubtitle": "Reviews from students you've taught will show up here.",
+  "replyToReview": "Reply",
+  "editReply": "Edit reply",
+  "yourReplyLabel": "Your reply",
+  "replyPlaceholder": "Write a public reply to this review…",
+  "postReply": "Post reply",
+  "postingReply": "Posting…",
+
   "servicesTitle": "My Services",
   "addService": "Add service",
   "noServicesTitle": "No services yet",

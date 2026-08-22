@@ -160,6 +160,16 @@
   "shikshaHubCancelBooking": "बुकिंग रद्द करें",
   "shikshaHubCancelling": "रद्द किया जा रहा है…",
 
+  "myReviewsTitle": "मेरी समीक्षाएँ",
+  "noReviewsTitle": "अभी तक कोई समीक्षा नहीं",
+  "noReviewsSubtitle": "जिन छात्रों को आपने पढ़ाया है, उनकी समीक्षाएँ यहाँ दिखाई देंगी।",
+  "replyToReview": "जवाब दें",
+  "editReply": "जवाब संपादित करें",
+  "yourReplyLabel": "आपका जवाब",
+  "replyPlaceholder": "इस समीक्षा का सार्वजनिक जवाब लिखें…",
+  "postReply": "जवाब पोस्ट करें",
+  "postingReply": "पोस्ट किया जा रहा है…",
+
   "servicesTitle": "मेरी सेवाएँ",
   "addService": "सेवा जोड़ें",
   "noServicesTitle": "अभी तक कोई सेवा नहीं",
