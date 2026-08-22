@@ -27,6 +27,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import Header from "@/components/header";
 
+type SortMode = "name" | "rating";
+
 export default function ShikshaHubHomeScreen() {
   const { colors } = useTheme();
   const { t } = useAppTranslation();
@@ -34,16 +36,29 @@ export default function ShikshaHubHomeScreen() {
   const [tutors, setTutors]   = useState<MarketplaceTutor[]>([]);
   const [loading, setLoading] = useState(true);
   const [subject, setSubject] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<SortMode>("name");
+  const [minRating, setMinRating] = useState<number | null>(null);
 
   useEffect(() => {
     fetchAllTutors().then(setTutors).finally(() => setLoading(false));
   }, []);
 
   const subjectChips = useMemo(() => deriveSubjectChips(tutors), [tutors]);
-  const filtered = useMemo(
-    () => (subject ? tutors.filter((tu) => tu.subjects.includes(subject)) : tutors),
-    [tutors, subject]
-  );
+  const filtered = useMemo(() => {
+    let result = subject ? tutors.filter((tu) => tu.subjects.includes(subject)) : tutors;
+    if (minRating != null) {
+      result = result.filter((tu) => tu.ratingAverage != null && tu.ratingAverage >= minRating);
+    }
+    if (sortMode === "rating") {
+      result = [...result].sort((a, b) => {
+        const ar = a.ratingAverage ?? -1;
+        const br = b.ratingAverage ?? -1;
+        if (ar !== br) return br - ar;
+        return a.name.localeCompare(b.name);
+      });
+    }
+    return result;
+  }, [tutors, subject, sortMode, minRating]);
 
   if (!authLoading && !user) {
     return (
@@ -61,10 +76,20 @@ export default function ShikshaHubHomeScreen() {
       <Header />
 
       <View style={S.titleWrap}>
-        <Text style={[S.title, { color: colors.text }]}>🎓 {t("shikshaHubTitle") ?? "ShikshaHub"}</Text>
-        <Text style={[S.subtitle, { color: colors.textSecondary }]}>
-          {t("shikshaHubSubtitle") ?? "Verified tutors, ready to teach — browse and find the right fit"}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[S.title, { color: colors.text }]}>🎓 {t("shikshaHubTitle") ?? "ShikshaHub"}</Text>
+            <Text style={[S.subtitle, { color: colors.textSecondary }]}>
+              {t("shikshaHubSubtitle") ?? "Verified tutors, ready to teach — browse and find the right fit"}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => router.push("/shikshahub/bookings")}
+            style={S.myBookingsBtn}
+          >
+            <Text style={S.myBookingsBtnText}>{t("shikshaHubMyBookingsTitle") ?? "My Bookings"}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {!loading && subjectChips.length > 0 && (
@@ -73,6 +98,17 @@ export default function ShikshaHubHomeScreen() {
           {subjectChips.map((s) => (
             <Chip key={s} label={s} active={subject === s} onPress={() => setSubject(s)} />
           ))}
+        </ScrollView>
+      )}
+
+      {!loading && tutors.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={S.chipRow}>
+          <Chip label={t("shikshaHubSortByName") ?? "Name"} active={sortMode === "name"} onPress={() => setSortMode("name")} />
+          <Chip label={`⭐ ${t("shikshaHubSortByRating") ?? "Top rated"}`} active={sortMode === "rating"} onPress={() => setSortMode("rating")} />
+          <View style={{ width: 1, alignSelf: "stretch", backgroundColor: colors.border, marginHorizontal: 2 }} />
+          <Chip label={t("shikshaHubAllRatings") ?? "All ratings"} active={minRating === null} onPress={() => setMinRating(null)} />
+          <Chip label="4★+" active={minRating === 4} onPress={() => setMinRating(4)} />
+          <Chip label="3★+" active={minRating === 3} onPress={() => setMinRating(3)} />
         </ScrollView>
       )}
 
@@ -129,7 +165,14 @@ function TutorCard({ tutor, colors, onPress }: { tutor: MarketplaceTutor; colors
         )}
       </View>
       <View style={S.cardBody}>
-        <Text style={[S.cardName, { color: colors.text }]} numberOfLines={1}>{tutor.name || "Tutor"}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+          <Text style={[S.cardName, { color: colors.text, flexShrink: 1 }]} numberOfLines={1}>{tutor.name || "Tutor"}</Text>
+          {tutor.ratingAverage != null && (
+            <Text style={{ fontSize: 11, fontWeight: "800", color: colors.text, flexShrink: 0 }}>
+              ⭐ {tutor.ratingAverage.toFixed(1)}
+            </Text>
+          )}
+        </View>
         {!!tutor.qualification && (
           <Text style={[S.cardMeta, { color: colors.textSecondary }]} numberOfLines={1}>{tutor.qualification}</Text>
         )}
@@ -150,6 +193,8 @@ const S = StyleSheet.create({
   titleWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
   title: { fontSize: 22, fontWeight: "900" },
   subtitle: { fontSize: 12, fontWeight: "600", marginTop: 4 },
+  myBookingsBtn: { flexShrink: 0, marginTop: 2, borderWidth: 1, borderColor: "#14b8a6", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  myBookingsBtnText: { fontSize: 11.5, fontWeight: "700", color: "#14b8a6" },
 
   chipRow: { paddingHorizontal: 16, gap: 8, paddingBottom: 12 },
   chip: { borderWidth: 1, borderColor: "#334155", borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },

@@ -10,10 +10,15 @@
 //
 // UI-only redesign pass (data layer / fetchAllTutors untouched): responsive
 // card grid (1/2/3/4 cols by viewport, see _shared.tsx's .shikshahub-grid),
-// richer per-card info, and a slightly more polished hero. No rating field
-// is rendered anywhere — functions/src/tutorMarketplace.ts's SAFE_FIELDS
-// list (mirrored into MarketplaceTutor) has no such field, so there is
-// nothing real to show; not shown here rather than invented.
+// richer per-card info, and a slightly more polished hero.
+//
+// Tutor discovery phase — MarketplaceTutor has carried ratingCount/
+// ratingAverage since Phase 6, but nothing browsable ever surfaced it
+// (only the profile detail page did). Adds a rating badge per card, a
+// sort toggle (name / top rated), and a minimum-rating filter chip row —
+// all client-side over the same fetchAllTutors() result, same as the
+// existing subject-chip filter, since this fetches every verified tutor
+// with no pagination already.
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -26,22 +31,41 @@ import {
 } from "@/lib/shikshahub";
 import { ShikshaHubStyles, SubjectChips, VerifiedBadge } from "./_shared";
 
+type SortMode = "name" | "rating";
+
 export default function ShikshaHubPage() {
   const router = useRouter();
   const { t } = useAppTranslation();
   const [tutors, setTutors]   = useState<MarketplaceTutor[]>([]);
   const [loading, setLoading] = useState(true);
   const [subject, setSubject] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<SortMode>("name");
+  const [minRating, setMinRating] = useState<number | null>(null);
 
   useEffect(() => {
     fetchAllTutors().then(setTutors).finally(() => setLoading(false));
   }, []);
 
   const subjectChips = useMemo(() => deriveSubjectChips(tutors), [tutors]);
-  const filtered = useMemo(
-    () => (subject ? tutors.filter((tu) => tu.subjects.includes(subject)) : tutors),
-    [tutors, subject]
-  );
+  const filtered = useMemo(() => {
+    let result = subject ? tutors.filter((tu) => tu.subjects.includes(subject)) : tutors;
+    if (minRating != null) {
+      result = result.filter((tu) => tu.ratingAverage != null && tu.ratingAverage >= minRating);
+    }
+    if (sortMode === "rating") {
+      // Unrated tutors sink to the bottom rather than being hidden —
+      // "top rated" still needs somewhere to put a tutor with no reviews
+      // yet, same "don't invent a value that isn't there" rule the rest
+      // of this file already follows for every other optional field.
+      result = [...result].sort((a, b) => {
+        const ar = a.ratingAverage ?? -1;
+        const br = b.ratingAverage ?? -1;
+        if (ar !== br) return br - ar;
+        return a.name.localeCompare(b.name);
+      });
+    }
+    return result;
+  }, [tutors, subject, sortMode, minRating]);
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
@@ -49,12 +73,27 @@ export default function ShikshaHubPage() {
       <Hero />
 
       {!loading && subjectChips.length > 0 && (
-        <div className="shikshahub-container" style={{ padding: "0 16px 18px" }}>
+        <div className="shikshahub-container" style={{ padding: "0 16px 12px" }}>
           <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
             <Chip label={t("shikshaHubAllSubjects", "All")} active={subject === null} onClick={() => setSubject(null)} />
             {subjectChips.map((s) => (
               <Chip key={s} label={s} active={subject === s} onClick={() => setSubject(s)} />
             ))}
+          </div>
+        </div>
+      )}
+
+      {!loading && tutors.length > 0 && (
+        <div className="shikshahub-container" style={{ padding: "0 16px 18px", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            <Chip label={t("shikshaHubSortByName", "Name")} active={sortMode === "name"} onClick={() => setSortMode("name")} />
+            <Chip label={`⭐ ${t("shikshaHubSortByRating", "Top rated")}`} active={sortMode === "rating"} onClick={() => setSortMode("rating")} />
+          </div>
+          <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+          <div style={{ display: "flex", gap: 6 }}>
+            <Chip label={t("shikshaHubAllRatings", "All ratings")} active={minRating === null} onClick={() => setMinRating(null)} />
+            <Chip label="4★+" active={minRating === 4} onClick={() => setMinRating(4)} />
+            <Chip label="3★+" active={minRating === 3} onClick={() => setMinRating(3)} />
           </div>
         </div>
       )}
@@ -157,9 +196,17 @@ function TutorCard({ tutor, onClick }: { tutor: MarketplaceTutor; onClick: () =>
       </div>
 
       <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
-        <span style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", lineHeight: "19px" }}>
-          {tutor.name || "Tutor"}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+          <span style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", lineHeight: "19px" }}>
+            {tutor.name || "Tutor"}
+          </span>
+          {tutor.ratingAverage != null && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 3, flexShrink: 0, fontSize: 12, fontWeight: 800, color: "var(--text)" }}>
+              ⭐ {tutor.ratingAverage.toFixed(1)}
+              <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>({tutor.ratingCount})</span>
+            </span>
+          )}
+        </div>
 
         {(!!tutor.qualification || tutor.teachingExperienceYears != null) && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>
