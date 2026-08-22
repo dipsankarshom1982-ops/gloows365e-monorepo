@@ -39,6 +39,7 @@ export const ALL_PERMISSIONS: PermissionModule[] = [
   { key: "tutor-verifications", label: "🎓 Tutor Verifications", section: "Gloows Tutor"  },
   { key: "tutor-payouts",       label: "💸 Tutor Payouts",       section: "Gloows Tutor"  },
   { key: "tutor-reviews",       label: "⭐ Tutor Reviews",       section: "Gloows Tutor"  },
+  { key: "payout-settings",     label: "⚙️ Payout Settings",     section: "Gloows Tutor"  },
 ];
 
 export const PERMISSION_SECTIONS = Array.from(

@@ -61,6 +61,52 @@ async function getPayoutConfig(): Promise<{ commissionPercent: number; minimumPa
   }
 }
 
+// ─── updatePayoutConfig (admin) ──────────────────────────────────────────────
+// Phase 5 operational feature — the only writer of payoutConfig/settings.
+// firestore.rules closes direct client writes on this doc (allow write: if
+// false, same closed-write pattern every other ShikshaHub collection
+// uses) precisely so an admin can't push an unvalidated value straight
+// from the client the way aiGuruCreditConfig/settings' older convention
+// still allows elsewhere in this codebase. Read stays open to any
+// authenticated user in firestore.rules — apps/tutor's and
+// apps/tutor-mobile's payouts screens read this doc directly (client
+// getDoc) to show a tutor the current minimum/commission before they
+// request a payout, which is unaffected by closing the write side.
+export const updatePayoutConfig = functionsV1
+  .runWith({ timeoutSeconds: 15, memory: "128MB" })
+  .https.onCall(async (
+    data: { commissionPercent?: number; minimumPayoutAmount?: number; enabled?: boolean },
+    context
+  ) => {
+    if (!context.auth?.token?.admin) {
+      throw new functionsV1.https.HttpsError("permission-denied", "Admins only");
+    }
+    const adminUid = context.auth.uid;
+    const { commissionPercent, minimumPayoutAmount, enabled } = data ?? {};
+
+    if (typeof commissionPercent !== "number" || !Number.isFinite(commissionPercent) || commissionPercent < 0 || commissionPercent > 100) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "commissionPercent must be a number from 0 to 100");
+    }
+    if (typeof minimumPayoutAmount !== "number" || !Number.isInteger(minimumPayoutAmount) || minimumPayoutAmount < 0) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "minimumPayoutAmount must be a non-negative integer");
+    }
+    if (typeof enabled !== "boolean") {
+      throw new functionsV1.https.HttpsError("invalid-argument", "enabled must be a boolean");
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await db.doc("payoutConfig/settings").set({
+      commissionPercent,
+      minimumPayoutAmount,
+      enabled,
+      updatedAt: now,
+      updatedBy: adminUid,
+    }, { merge: true });
+
+    console.log(`✅ payoutConfig/settings updated by admin ${adminUid}: commissionPercent=${commissionPercent} minimumPayoutAmount=${minimumPayoutAmount} enabled=${enabled}`);
+    return { commissionPercent, minimumPayoutAmount, enabled };
+  });
+
 // ─── saveTutorPayoutDetails ──────────────────────────────────────────────────
 export const saveTutorPayoutDetails = functionsV1
   .runWith({ timeoutSeconds: 15, memory: "128MB" })

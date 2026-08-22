@@ -46,6 +46,7 @@ const NAV_GROUPS = [
     { path: "/tutor-verifications", label: "🎓 Tutor Verifications", permKey: "tutor-verifications" },
     { path: "/tutor-payouts",       label: "💸 Tutor Payouts",       permKey: "tutor-payouts" },
     { path: "/tutor-reviews",       label: "⭐ Tutor Reviews",       permKey: "tutor-reviews" },
+    { path: "/payout-settings",     label: "⚙️ Payout Settings",     permKey: "payout-settings" },
   ]},
   { section: "FEEDBACK", items: [
     { path: "/feedback",          label: "💬 Feedback",           permKey: "feedback" },

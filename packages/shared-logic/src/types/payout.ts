@@ -20,6 +20,12 @@ export type PayoutConfig = {
   commissionPercent?: number; // 0-100, defaults to DEFAULT_COMMISSION_PERCENT if doc/field missing
   minimumPayoutAmount?: number; // credits (= ₹), defaults to DEFAULT_MINIMUM_PAYOUT if missing
   enabled?: boolean; // defaults to true if missing, same "absent means on" convention as aiGuruCreditConfig
+  // Audit trail — written only by updatePayoutConfig (admin-only callable,
+  // see functions/src/tutorPayouts.ts). Client writes to this doc are
+  // closed in firestore.rules; this is the only place these two fields
+  // are ever set.
+  updatedAt?: unknown; // Firestore Timestamp
+  updatedBy?: string; // admin uid
 };
 
 // tutorPayoutDetails/{tutorUid} — a tutor's saved bank/UPI details, so they

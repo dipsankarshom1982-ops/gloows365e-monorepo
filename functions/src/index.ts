@@ -143,6 +143,7 @@ export {
   cancelPayoutRequest,
   reviewPayoutRequest,
   markPayoutPaid,
+  updatePayoutConfig,
 } from "./tutorPayouts";
 
 // ── ShikshaHub — Phase 6 tutor ratings & reviews (Instant Help sessions) ───────
