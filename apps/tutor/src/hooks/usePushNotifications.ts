@@ -25,12 +25,12 @@ const PREF_KEY = "tutor_web_push_enabled";
 
 // Firebase Console → your project → Project Settings → Cloud Messaging →
 // Web configuration → Web Push certificates → Generate key pair. Public
-// value (embedded client-side by design — a VAPID key is not a secret),
-// still a placeholder pending that key being generated for
-// gloows-03b6sz-staging — see this phase's git-review note for the
-// pending follow-up. Until it's set, registerForPushNotifications()
-// no-ops rather than calling getToken() with an empty key.
-const VAPID_KEY = "";
+// value (embedded client-side by design — a VAPID key is not a secret).
+// Generated for gloows-03b6sz (production) — matches this app's actual
+// Firebase Web App config (.env / firebase-messaging-sw.js), which has
+// no staging variant, same as every other Firebase piece apps/tutor's
+// local dev already points at.
+const VAPID_KEY = "BHawfhNzhQPd3fUSC4CFiGEC1p_H2Na-EbmbSUlWu0dgKwSOOXJqXD048nPdV3SqRE8-bzkErztGDIC3lW9ZaYY";
 
 async function savePushTokenToFirestore(token: string | null): Promise<void> {
   const uid = auth.currentUser?.uid;
