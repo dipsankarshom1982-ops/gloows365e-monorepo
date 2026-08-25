@@ -30,6 +30,18 @@
 // "not paid out", not journaled anywhere else; that's later-phase scope
 // if a full ledger is ever needed).
 //
+// Reservation model: requestPayout debits (reserves) tutorEarnings.balance
+// transactionally the moment a request is created, in the same
+// transaction that checks the tutor has no other pending/approved
+// request — not at markPayoutPaid time. cancelPayoutRequest and a
+// reviewPayoutRequest rejection both credit the reservation back;
+// approval leaves it reserved. This means markPayoutPaid never needs to
+// (and doesn't) touch the balance itself — by the time a human approves
+// and the RazorpayX transfer fires, the money is already guaranteed to be
+// there. Each transactions/{requestId} ledger doc is written once at
+// request time (status "HOLD") and updated in place as the request moves
+// through RELEASED or SUCCESS, rather than getting a second row later.
+//
 // Client never writes payoutRequests/{id} or tutorPayoutDetails/{uid}
 // directly — firestore.rules has `allow write: if false` on both, exactly
 // mirroring every other ShikshaHub collection driven entirely by
@@ -203,9 +215,10 @@ export const requestPayout = functionsV1
     const details = payoutDetailsSnap.data()!;
 
     const requestRef = db.collection("payoutRequests").doc();
+    const balanceRef = db.doc(`tutorEarnings/${tutorUid}`);
     const result = await db.runTransaction(async (tx) => {
       const [balanceSnap, openSnap] = await Promise.all([
-        tx.get(db.doc(`tutorEarnings/${tutorUid}`)),
+        tx.get(balanceRef),
         tx.get(db.collection("payoutRequests")
           .where("tutorUid", "==", tutorUid)
           .where("status", "in", ["pending", "approved"])
@@ -245,6 +258,33 @@ export const requestPayout = functionsV1
         updatedAt: now,
       });
 
+      // Reserve the funds NOW, not at markPayoutPaid time — closes the
+      // window where the balance re-check there ran only AFTER the real
+      // RazorpayX transfer had already gone out (see markPayoutPaid's
+      // header comment for why that ordering existed). With only one
+      // pending/approved request allowed per tutor (openSnap above) and
+      // the debit happening in the same transaction as the openSnap
+      // read/requestRef write, nothing else can spend this money out from
+      // under an approved request. Released back via this same
+      // transactions/{requestId} doc if the request is later cancelled or
+      // rejected — see cancelPayoutRequest / reviewPayoutRequest.
+      tx.set(balanceRef, {
+        balance: admin.firestore.FieldValue.increment(-requestedAmount),
+        updatedAt: now,
+      }, { merge: true });
+      tx.set(balanceRef.collection("transactions").doc(requestRef.id), {
+        type: "PAYOUT",
+        amount: requestedAmount,
+        source: "TUTOR_PAYOUT",
+        title: "Payout requested",
+        description: `₹${payoutAmount} to be paid out (₹${commissionAmount} platform commission on ₹${requestedAmount}) — held pending admin approval`,
+        status: "HOLD",
+        referenceId: requestRef.id,
+        metadata: { commissionAmount, payoutAmount, method: details.method },
+        createdAt: now,
+        updatedAt: now,
+      });
+
       return { requestId: requestRef.id, commissionAmount, payoutAmount };
     });
 
@@ -278,10 +318,24 @@ export const cancelPayoutRequest = functionsV1
       if (request.status !== "pending") {
         throw new functionsV1.https.HttpsError("failed-precondition", `Request is already "${request.status}"`);
       }
+      const now = admin.firestore.FieldValue.serverTimestamp();
       tx.update(requestRef, {
         status: "cancelled" as PayoutRequestStatus,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: now,
       });
+
+      // Release the hold requestPayout placed on this amount.
+      const balanceRef = db.doc(`tutorEarnings/${tutorUid}`);
+      tx.set(balanceRef, {
+        balance: admin.firestore.FieldValue.increment(Number(request.requestedAmount) || 0),
+        updatedAt: now,
+      }, { merge: true });
+      tx.set(balanceRef.collection("transactions").doc(requestId), {
+        status: "RELEASED",
+        title: "Payout request cancelled",
+        updatedAt: now,
+      }, { merge: true });
+
       return { status: "cancelled" as PayoutRequestStatus };
     });
 
@@ -319,13 +373,30 @@ export const reviewPayoutRequest = functionsV1
         throw new functionsV1.https.HttpsError("failed-precondition", `Request is already "${request.status}"`);
       }
       const newStatus: PayoutRequestStatus = action === "approve" ? "approved" : "rejected";
+      const now = admin.firestore.FieldValue.serverTimestamp();
       tx.update(requestRef, {
         status: newStatus,
         adminNote: note ?? null,
         reviewedBy: adminUid,
-        reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        reviewedAt: now,
+        updatedAt: now,
       });
+
+      if (action === "reject") {
+        // Release the hold requestPayout placed on this amount — approval
+        // deliberately leaves it reserved (markPayoutPaid relies on that).
+        const balanceRef = db.doc(`tutorEarnings/${request.tutorUid}`);
+        tx.set(balanceRef, {
+          balance: admin.firestore.FieldValue.increment(Number(request.requestedAmount) || 0),
+          updatedAt: now,
+        }, { merge: true });
+        tx.set(balanceRef.collection("transactions").doc(requestId), {
+          status: "RELEASED",
+          title: "Payout request rejected",
+          updatedAt: now,
+        }, { merge: true });
+      }
+
       return { status: newStatus, tutorUid: request.tutorUid, requestedAmount: Number(request.requestedAmount) || 0 };
     });
 
@@ -351,15 +422,18 @@ export const reviewPayoutRequest = functionsV1
 // The RazorpayX API call happens BEFORE any Firestore write (it's
 // external I/O, which never belongs inside a db.runTransaction callback —
 // same rule this codebase's transaction-throw bug from Phase 4 already
-// taught). tutorEarnings.balance is only ever debited AFTER RazorpayX
-// actually accepts the payout (any of queued/pending/processing/
-// processed — Razorpay has committed to moving the money at that point,
-// same "order accepted" moment Phase 4's Razorpay Orders flow already
-// treats as final). A hard failure (bad credentials, insufficient
-// RazorpayX balance, invalid account, etc.) leaves the request
-// "approved" — untouched, safely retryable, since the idempotency key
-// (this request's own id) guarantees RazorpayX itself can never process
-// two real transfers for one request even across retries.
+// taught). tutorEarnings.balance itself is NOT touched here — requestPayout
+// already reserved (debited) it transactionally at request time, so
+// there's nothing left to debit or re-verify by the time RazorpayX is
+// called. (Earlier versions of this function debited/re-checked balance
+// here, AFTER the transfer had already gone out — which could only ever
+// fail loudly once the money had already left. Reserving at request time
+// instead closes that window.) A hard failure (bad credentials,
+// insufficient RazorpayX balance, invalid account, etc.) leaves the
+// request "approved" and the reservation intact — untouched, safely
+// retryable, since the idempotency key (this request's own id) guarantees
+// RazorpayX itself can never process two real transfers for one request
+// even across retries.
 export const markPayoutPaid = functionsV1
   .runWith({
     timeoutSeconds: 30, memory: "256MB",
@@ -437,38 +511,29 @@ export const markPayoutPaid = functionsV1
         throw new functionsV1.https.HttpsError("failed-precondition", `Request is already "${request.status}" — the transfer succeeded (RazorpayX id ${payoutResult!.id}) but needs manual reconciliation`);
       }
 
-      const balanceRef = db.doc(`tutorEarnings/${request.tutorUid}`);
-      const balanceSnap = await tx.get(balanceRef);
-      const balance = balanceSnap.exists ? Number(balanceSnap.data()?.balance ?? 0) : 0;
-      if (requestedAmount > balance) {
-        console.error(`markPayoutPaid: *** POST-PAYOUT BALANCE MISMATCH *** request ${requestId} balance (₹${balance}) < requestedAmount (₹${requestedAmount}) after a real RazorpayX payout (${payoutResult!.id}) already succeeded — needs manual reconciliation.`);
-        throw new functionsV1.https.HttpsError(
-          "failed-precondition",
-          `Tutor's balance (₹${balance}) is now less than the requested amount (₹${requestedAmount}) — the transfer succeeded (RazorpayX id ${payoutResult!.id}) but needs manual reconciliation`
-        );
-      }
-
+      // No balance debit or sufficiency check here anymore — requestPayout
+      // already reserved (debited) this exact amount transactionally at
+      // request time, and it stays reserved through "approved" (see that
+      // function's comment). This used to re-check balance AFTER the
+      // RazorpayX transfer above had already gone out, which could only
+      // ever fail loudly after the money had already left — moving the
+      // debit earlier closes that window instead of just logging it.
       const now = admin.firestore.FieldValue.serverTimestamp();
+      const balanceRef = db.doc(`tutorEarnings/${request.tutorUid}`);
       const txRef = balanceRef.collection("transactions").doc(requestId);
 
-      tx.set(balanceRef, {
-        balance: admin.firestore.FieldValue.increment(-requestedAmount),
-        updatedAt: now,
-      }, { merge: true });
-
+      // Finalize the HOLD entry requestPayout created rather than writing
+      // a second ledger row for the same money.
       tx.set(txRef, {
-        type: "PAYOUT",
-        amount: requestedAmount,
-        source: "TUTOR_PAYOUT",
         title: "Payout processed",
+        status: "SUCCESS",
         description: `₹${request.payoutAmount} paid out (₹${request.commissionAmount} platform commission on ₹${requestedAmount})`,
-        referenceId: requestId,
         metadata: {
           commissionAmount: request.commissionAmount, payoutAmount: request.payoutAmount, method: request.method,
           razorpayPayoutId: payoutResult!.id, razorpayStatus: payoutResult!.status, razorpayUtr: payoutResult!.utr,
         },
-        createdAt: now,
-      });
+        updatedAt: now,
+      }, { merge: true });
 
       tx.update(requestRef, {
         status: "paid" as PayoutRequestStatus,
@@ -500,11 +565,12 @@ export const markPayoutPaid = functionsV1
 // IMPS/UPI is usually near-instant, but NEFT/RTGS or a queued-for-balance
 // payout can take longer to actually settle). Deliberately never reverses
 // tutorEarnings.balance or flips a request's own status back — the
-// balance was already debited the moment RazorpayX accepted the payout in
-// markPayoutPaid, same "accepted means final" rule Phase 4's Razorpay
-// Orders reconciliation already follows. A payout that later comes back
-// "reversed" or "failed" needs a human to look at it, not a silent
-// auto-refund — that's genuinely later-phase scope if ever needed.
+// balance was already debited (reserved) at requestPayout time, well
+// before RazorpayX ever got involved, same "accepted means final" rule
+// Phase 4's Razorpay Orders reconciliation already follows. A payout that
+// later comes back "reversed" or "failed" needs a human to look at it,
+// not a silent auto-refund — that's genuinely later-phase scope if ever
+// needed.
 const TERMINAL_RAZORPAY_STATUSES = new Set(["processed", "reversed", "failed", "cancelled", "rejected"]);
 
 export const reconcilePayoutStatuses = functionsV1

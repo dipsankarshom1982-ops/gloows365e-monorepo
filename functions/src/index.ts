@@ -52,6 +52,7 @@ export { getHomeFeed, getReelsFeed } from "./feed";
 
 // ── VCoins ─────────────────────────────────────────────────────────────────
 export { claimVCoinReward, getVCoinBalance } from "./vcoins";
+export { creditSignupBonus, creditWatchReward, claimSkillBattleReward } from "./vcoins";
 export { joinVidyastarContest, deleteContest } from "./vidyastarContest";
 export { submitVidyastarContestQuiz } from "./submitVidyastarContestQuiz";
 

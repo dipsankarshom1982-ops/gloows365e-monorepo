@@ -26,18 +26,17 @@ if (Platform.OS !== "web") {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
-import { auth, db, firebaseConfig } from "@/lib/firebase";
+import { auth, db, firebaseConfig, functions } from "@/lib/firebase";
 import { ensureReferralCode } from "@/lib/initUser";
 import { ensureStudentId } from "@/services/studentIdService";
 import { applyReferral } from "@/services/referralService";
-import { creditVCoins } from "@/services/vCoinsService";
-import { VCOIN_SOURCES } from "@/utils/formatVCoins";
 import { TITLES } from "@/lib/avatars";
 import { PRIVACY_POLICY_VERSION } from "@/app/privacy";
 import { Ionicons } from "@expo/vector-icons";
 import { getApps, initializeApp } from "firebase/app";
 import { getAuth, inMemoryPersistence, initializeAuth, signInWithPhoneNumber } from "firebase/auth";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
 import RecaptchaModal, { type RecaptchaVerifierHandle } from "@/components/auth/RecaptchaModal";
 
@@ -446,21 +445,14 @@ export default function StudentRegister() {
       // FIX (bug report — "200 v-coins not updated"): this used to just set
       // users/{uid}.coins = 200 directly — a field nothing in the app ever
       // reads (hooks/useVCoins.ts, the Wallet page, and the Drawer all read
-      // vCoinsBalance + vCoins, never `coins`). Routed through creditVCoins()
-      // instead — same atomic increment()-based pipeline every other reward
-      // uses — so it lands in vCoinsBalance and shows up in wallet history,
-      // not just the balance. referenceId is a fixed per-user key so this
-      // can only ever be credited once even if handleRegister somehow runs
-      // twice for the same uid.
+      // vCoinsBalance + vCoins, never `coins`). Routed through the
+      // creditSignupBonus Cloud Function instead — moved server-side
+      // (functions/src/vcoins.ts) since firestore.rules now blocks direct
+      // client writes to vCoinsBalance. Idempotent server-side (fixed
+      // referenceId "signup_bonus" per uid), so it can only ever credit
+      // once even if handleRegister somehow runs twice for the same uid.
       try {
-        await creditVCoins({
-          uid: user.uid,
-          source: VCOIN_SOURCES.SIGNUP_BONUS,
-          amount: 200,
-          title: "Welcome Bonus",
-          description: "200 VCoins for completing registration",
-          referenceId: "signup_bonus",
-        });
+        await httpsCallable(functions, "creditSignupBonus")();
       } catch { /* non-fatal — a coin-credit hiccup must never block registration */ }
 
       // Non-fatal — an ID-assignment hiccup must never block registration.
@@ -611,7 +603,9 @@ export default function StudentRegister() {
 
           {otpSent && !parentPhoneVerified && (
             <View style={S.otpSection}>
-              <Text style={S.otpHint}>Enter the 6-digit OTP sent to +91 {phone}</Text>
+              <Text style={S.otpHint}>
+                Enter the 6-digit OTP sent to +91 {phone} — the parent/guardian entering it is confirming they're completing this registration.
+              </Text>
               <View style={S.otpRow}>
                 <TextInput
                   style={[S.input, S.otpInput]}

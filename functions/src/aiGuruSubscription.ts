@@ -11,14 +11,14 @@ const db = admin.firestore();
 interface CreateOrderPayload {
   planId: string;
   cycle: "monthly" | "annual";
-  amountPaise: number;
+  // amountPaise is NOT accepted from the client anymore — see
+  // resolvePlanPrice below. Kept out of this type deliberately so nothing
+  // reintroduces the trust mistake by accident.
 }
 
 // ── Phase 2: Verify payment + write subscription ──────────────────────────────
 
 interface VerifyPaymentPayload {
-  planId: string;
-  cycle: "monthly" | "annual";
   razorpayPaymentId: string;
   razorpayOrderId: string;
   razorpaySignature: string;
@@ -27,7 +27,28 @@ interface VerifyPaymentPayload {
 type RequestPayload = CreateOrderPayload | VerifyPaymentPayload;
 
 function isVerifyPayload(data: RequestPayload): data is VerifyPaymentPayload {
-  return "razorpayPaymentId" in data && typeof data.razorpayPaymentId === "string";
+  return "razorpayPaymentId" in data && typeof (data as VerifyPaymentPayload).razorpayPaymentId === "string";
+}
+
+// Resolves the real price of a plan+cycle server-side from
+// subscriptionPlans/{planId} — the client never gets to state its own
+// price. Mirrors aiGuruCreditOrders' "resolve pack price from Firestore,
+// never trust the client" rule (see aiGuruCredits.ts's header comment).
+async function resolvePlanPrice(planId: string, cycle: "monthly" | "annual") {
+  const planSnap = await db.doc(`subscriptionPlans/${planId}`).get();
+  if (!planSnap.exists) {
+    throw new functionsV1.https.HttpsError("not-found", "Subscription plan not found");
+  }
+  const plan = planSnap.data()!;
+  if (plan.isActive === false) {
+    throw new functionsV1.https.HttpsError("failed-precondition", "This plan is no longer available");
+  }
+  const priceRupees = cycle === "annual" ? Number(plan.annualPrice) : Number(plan.monthlyPrice);
+  const amountPaise = Math.round(priceRupees * 100);
+  if (!amountPaise || amountPaise < 100) {
+    throw new functionsV1.https.HttpsError("failed-precondition", "Plan is misconfigured");
+  }
+  return amountPaise;
 }
 
 export const aiGuruCreateSubscription = functionsV1
@@ -46,8 +67,15 @@ export const aiGuruCreateSubscription = functionsV1
     const keySecret = process.env["RAZORPAY_KEY_SECRET"] ?? "";
 
     // ── Phase 2: Verify payment and write subscription ────────────────────────
+    // planId/cycle come from OUR OWN aiGuruSubscriptionOrders/{orderId} doc
+    // (written in Phase 1 below from a server-resolved price), never from
+    // this call's payload — same rule aiGuruCreditPaymentSuccess follows.
+    // Not currently called by any client (both apps verify via the HTTP
+    // aiGuruPaymentSuccess endpoint below instead), but a callable function
+    // is reachable by anyone with an ID token regardless of what the app UI
+    // does, so it gets the same trust model.
     if (isVerifyPayload(data)) {
-      const { planId, cycle, razorpayPaymentId, razorpayOrderId, razorpaySignature } = data;
+      const { razorpayPaymentId, razorpayOrderId, razorpaySignature } = data;
 
       const expectedSig = crypto
         .createHmac("sha256", keySecret)
@@ -58,36 +86,58 @@ export const aiGuruCreateSubscription = functionsV1
         throw new functionsV1.https.HttpsError("permission-denied", "Payment verification failed");
       }
 
-      const durationMs = cycle === "annual"
-        ? 365 * 24 * 3600 * 1000
-        : 30  * 24 * 3600 * 1000;
+      const orderRef = db.doc(`aiGuruSubscriptionOrders/${razorpayOrderId}`);
+      const result = await db.runTransaction(async (tx) => {
+        const orderSnap = await tx.get(orderRef);
+        if (!orderSnap.exists) {
+          throw new functionsV1.https.HttpsError("not-found", "Order not found");
+        }
+        const order = orderSnap.data()!;
+        if (order.uid !== uid) {
+          throw new functionsV1.https.HttpsError("permission-denied", "This order doesn't belong to you");
+        }
+        if (order.status === "paid") {
+          return { alreadyActivated: true as const, planId: order.planId, cycle: order.cycle };
+        }
 
-      await db.doc(`subscriptions/${uid}`).set({
-        planId,
-        cycle,
-        status: "active",
-        endDate: admin.firestore.Timestamp.fromMillis(Date.now() + durationMs),
-        razorpayPaymentId,
-        razorpayOrderId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        const durationMs = order.cycle === "annual"
+          ? 365 * 24 * 3600 * 1000
+          : 30  * 24 * 3600 * 1000;
+        const now = admin.firestore.FieldValue.serverTimestamp();
+
+        tx.set(db.doc(`subscriptions/${uid}`), {
+          planId:   order.planId,
+          cycle:    order.cycle,
+          status:   "active",
+          endDate:  admin.firestore.Timestamp.fromMillis(Date.now() + durationMs),
+          razorpayPaymentId,
+          razorpayOrderId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        tx.update(orderRef, { status: "paid", razorpayPaymentId, paidAt: now });
+
+        return { alreadyActivated: false as const, planId: order.planId, cycle: order.cycle };
       });
 
-      console.log(`✅ AI Guru subscription created: uid=${uid} plan=${planId} cycle=${cycle}`);
-      return { success: true, planId, cycle };
+      console.log(`✅ AI Guru subscription created: uid=${uid} plan=${result.planId} cycle=${result.cycle}`);
+      return { success: true, planId: result.planId, cycle: result.cycle };
     }
 
     // ── Phase 1: Create Razorpay order ────────────────────────────────────────
-    const { amountPaise } = data as CreateOrderPayload;
+    // Price is resolved server-side from subscriptionPlans/{planId} — the
+    // client only says WHICH plan/cycle it wants, never what it costs.
+    const { planId, cycle } = data as CreateOrderPayload;
 
+    if (!planId || (cycle !== "monthly" && cycle !== "annual")) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "planId and a valid cycle are required");
+    }
     if (!keyId || !keySecret) {
       console.error("Razorpay secrets missing — keyId:", !!keyId, "keySecret:", !!keySecret);
       throw new functionsV1.https.HttpsError("failed-precondition", "Razorpay not configured — secrets missing");
     }
 
-    if (!amountPaise || amountPaise < 100) {
-      throw new functionsV1.https.HttpsError("invalid-argument", `Invalid amount: ${amountPaise} paise`);
-    }
+    const amountPaise = await resolvePlanPrice(planId, cycle);
 
     try {
       const response = await axios.post(
@@ -104,7 +154,19 @@ export const aiGuruCreateSubscription = functionsV1
       );
 
       const razorpayOrderId: string = response.data.id;
-      console.log(`✅ AI Guru Razorpay order created: ${razorpayOrderId} for uid=${uid}`);
+
+      // Written from the resolved plan price, not from anything the client
+      // sent — this is what both verify paths trust from here on.
+      await db.doc(`aiGuruSubscriptionOrders/${razorpayOrderId}`).set({
+        uid,
+        planId,
+        cycle,
+        amountPaise,
+        status:    "created",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`✅ AI Guru Razorpay order created: ${razorpayOrderId} for uid=${uid} plan=${planId} cycle=${cycle} amountPaise=${amountPaise}`);
       return { razorpayOrderId };
     } catch (err: any) {
       const rzpError = err?.response?.data?.error;
@@ -269,13 +331,18 @@ export const aiGuruPaymentSuccess = onRequest(
 
     try {
       const {
-        uid, planId, cycle,
         razorpay_payment_id,
         razorpay_order_id,
         razorpay_signature,
       } = req.body;
 
-      if (!uid || !razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+      // Note: the checkout page still sends uid/planId/cycle in the body
+      // for backward compatibility, but they're deliberately ignored below
+      // — uid/planId/cycle come from OUR OWN aiGuruSubscriptionOrders/{id}
+      // doc (written server-side in aiGuruCreateSubscription's Phase 1
+      // from a resolved plan price), never from the client request. Same
+      // trust model aiGuruCreditPaymentSuccess already follows.
+      if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
         res.status(400).json({ error: "Missing required fields" });
         return;
       }
@@ -293,23 +360,48 @@ export const aiGuruPaymentSuccess = onRequest(
         return;
       }
 
-      // Activate subscription in Firestore
-      const durationMs = cycle === "annual"
-        ? 365 * 24 * 3600 * 1000
-        : 30  * 24 * 3600 * 1000;
+      const orderRef = db.doc(`aiGuruSubscriptionOrders/${razorpay_order_id}`);
 
-      await db.doc(`subscriptions/${uid}`).set({
-        planId,
-        cycle,
-        status:           "active",
-        endDate:          admin.firestore.Timestamp.fromMillis(Date.now() + durationMs),
-        razorpayPaymentId: razorpay_payment_id,
-        razorpayOrderId:   razorpay_order_id,
-        createdAt:        admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt:        admin.firestore.FieldValue.serverTimestamp(),
+      const result = await db.runTransaction(async (tx) => {
+        const orderSnap = await tx.get(orderRef);
+        if (!orderSnap.exists) {
+          return { notFound: true as const };
+        }
+        const order = orderSnap.data()!;
+        if (order.status === "paid") {
+          return { alreadyActivated: true as const };
+        }
+
+        const durationMs = order.cycle === "annual"
+          ? 365 * 24 * 3600 * 1000
+          : 30  * 24 * 3600 * 1000;
+        const now = admin.firestore.FieldValue.serverTimestamp();
+
+        tx.set(db.doc(`subscriptions/${order.uid}`), {
+          planId:            order.planId,
+          cycle:             order.cycle,
+          status:            "active",
+          endDate:           admin.firestore.Timestamp.fromMillis(Date.now() + durationMs),
+          razorpayPaymentId: razorpay_payment_id,
+          razorpayOrderId:   razorpay_order_id,
+          createdAt:         now,
+          updatedAt:         now,
+        });
+        tx.update(orderRef, { status: "paid", razorpayPaymentId: razorpay_payment_id, paidAt: now });
+
+        return { activated: true as const, uid: order.uid, planId: order.planId, cycle: order.cycle };
       });
 
-      console.log(`✅ AI Guru subscription activated via browser: uid=${uid} plan=${planId} cycle=${cycle}`);
+      if ("notFound" in result) {
+        res.status(404).json({ error: "Order not found" });
+        return;
+      }
+      if ("alreadyActivated" in result) {
+        res.status(200).json({ success: true, alreadyActivated: true });
+        return;
+      }
+
+      console.log(`✅ AI Guru subscription activated via browser: uid=${result.uid} plan=${result.planId} cycle=${result.cycle}`);
       res.status(200).json({ success: true });
     } catch (e: any) {
       console.error("aiGuruPaymentSuccess error:", e?.message);

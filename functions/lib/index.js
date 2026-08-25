@@ -10,8 +10,8 @@
  * Also added vite.config optimization (see vite.config.ts output).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncTutorMarketplaceProfile = exports.reviewTutorVerification = exports.submitTutorVerification = exports.registerTutorAccount = exports.resetStarboardPeriods = exports.onContestParticipantWrite = exports.getContestLesson = exports.removeAdmin = exports.getUserSubscriptionHistory = exports.createCoupon = exports.createComboPlan = exports.createAdmin = exports.approveContent = exports.recordAdEvent = exports.getAds = exports.claimAdReward = exports.aggregateAdAnalytics = exports.reconcileAiGuruCreditOrders = exports.aiGuruCreditPaymentSuccess = exports.aiGuruCreateCreditOrder = exports.aiGuruPaymentSuccess = exports.aiGuruCreateSubscription = exports.aiGuruCheckoutPage = exports.voiceTutorAnswer = exports.generateExam = exports.evaluateExam = exports.photoSolve = exports.restartEducationAdvisor = exports.askAiGuruQuestion = exports.getPersonalizedDashboard = exports.dailyStreakQuizReminder = exports.applyForAmbassadorProgram = exports.submitDailyStreakQuizAnswer = exports.getTodaysStreakQuizQuestion = exports.submitVidyastarContestQuiz = exports.deleteContest = exports.joinVidyastarContest = exports.getVCoinBalance = exports.claimVCoinReward = exports.getReelsFeed = exports.getHomeFeed = exports.getLeaderboard = exports.seekhoUpdateRevisionQueue = exports.seekhoOnChapterComplete = exports.seekhoGetDailyStudyPlan = exports.seekhoDailyRevisionReminder = exports.seekhoCreateSubscription = exports.vidyaguruChat = exports.discoverTrending = exports.discoverSearch = void 0;
-exports.followUp = exports.generateLesson = exports.onPostCreated = exports.updateSkillboard = exports.ensureStudentId = exports.adminEraseStudent = exports.eraseMyAccount = exports.exportMyData = exports.getReferralLeaderboard = exports.applyReferral = exports.markPayoutPaid = exports.reviewPayoutRequest = exports.cancelPayoutRequest = exports.requestPayout = exports.saveTutorPayoutDetails = exports.tickInstantHelp = exports.endInstantHelpSession = exports.cancelInstantHelpRequest = exports.respondToInstantHelpRequest = exports.requestInstantHelp = exports.setInstantHelpOnlineStatus = exports.reconcileTutorCreditOrders = exports.tutorCreditPaymentSuccess = exports.createTutorCreditOrder = exports.syncTutorServiceMarketplace = exports.deleteService = exports.updateService = exports.createService = exports.cancelBooking = exports.respondToBooking = exports.requestBooking = void 0;
+exports.registerTutorAccount = exports.resetStarboardPeriods = exports.onContestParticipantWrite = exports.getContestLesson = exports.removeAdmin = exports.getUserSubscriptionHistory = exports.createCoupon = exports.createComboPlan = exports.createAdmin = exports.approveContent = exports.recordAdEvent = exports.getAds = exports.claimAdReward = exports.aggregateAdAnalytics = exports.reconcileAiGuruCreditOrders = exports.aiGuruCreditPaymentSuccess = exports.aiGuruCreateCreditOrder = exports.aiGuruPaymentSuccess = exports.aiGuruCreateSubscription = exports.aiGuruCheckoutPage = exports.voiceTutorAnswer = exports.generateExam = exports.evaluateExam = exports.photoSolve = exports.restartEducationAdvisor = exports.askAiGuruQuestion = exports.getPersonalizedDashboard = exports.dailyStreakQuizReminder = exports.applyForAmbassadorProgram = exports.submitDailyStreakQuizAnswer = exports.getTodaysStreakQuizQuestion = exports.submitVidyastarContestQuiz = exports.deleteContest = exports.joinVidyastarContest = exports.claimSkillBattleReward = exports.creditWatchReward = exports.creditSignupBonus = exports.getVCoinBalance = exports.claimVCoinReward = exports.getReelsFeed = exports.getHomeFeed = exports.getLeaderboard = exports.seekhoUpdateRevisionQueue = exports.seekhoOnChapterComplete = exports.seekhoGetDailyStudyPlan = exports.seekhoDailyRevisionReminder = exports.seekhoCreateSubscription = exports.vidyaguruChat = exports.discoverTrending = exports.discoverSearch = void 0;
+exports.followUp = exports.generateLesson = exports.onPostCreated = exports.updateSkillboard = exports.ensureStudentId = exports.adminEraseStudent = exports.eraseMyAccount = exports.exportMyData = exports.getReferralLeaderboard = exports.applyReferral = exports.markConversationRead = exports.sendTutorMessage = exports.replyToTutorReview = exports.hideTutorReview = exports.submitTutorReview = exports.reconcilePayoutStatuses = exports.updatePayoutConfig = exports.markPayoutPaid = exports.reviewPayoutRequest = exports.cancelPayoutRequest = exports.requestPayout = exports.saveTutorPayoutDetails = exports.tickInstantHelp = exports.endInstantHelpSession = exports.cancelInstantHelpRequest = exports.respondToInstantHelpRequest = exports.requestInstantHelp = exports.setInstantHelpOnlineStatus = exports.reconcileTutorCreditOrders = exports.tutorCreditPaymentSuccess = exports.createTutorCreditOrder = exports.syncTutorServiceMarketplace = exports.deleteService = exports.updateService = exports.createService = exports.tickBookingReminders = exports.tickBookingCompletion = exports.cancelBooking = exports.respondToBooking = exports.requestBooking = exports.syncTutorMarketplaceProfile = exports.reviewTutorVerification = exports.submitTutorVerification = void 0;
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const functionsV1 = require("firebase-functions/v1");
@@ -48,6 +48,10 @@ Object.defineProperty(exports, "getReelsFeed", { enumerable: true, get: function
 var vcoins_1 = require("./vcoins");
 Object.defineProperty(exports, "claimVCoinReward", { enumerable: true, get: function () { return vcoins_1.claimVCoinReward; } });
 Object.defineProperty(exports, "getVCoinBalance", { enumerable: true, get: function () { return vcoins_1.getVCoinBalance; } });
+var vcoins_2 = require("./vcoins");
+Object.defineProperty(exports, "creditSignupBonus", { enumerable: true, get: function () { return vcoins_2.creditSignupBonus; } });
+Object.defineProperty(exports, "creditWatchReward", { enumerable: true, get: function () { return vcoins_2.creditWatchReward; } });
+Object.defineProperty(exports, "claimSkillBattleReward", { enumerable: true, get: function () { return vcoins_2.claimSkillBattleReward; } });
 var vidyastarContest_1 = require("./vidyastarContest");
 Object.defineProperty(exports, "joinVidyastarContest", { enumerable: true, get: function () { return vidyastarContest_1.joinVidyastarContest; } });
 Object.defineProperty(exports, "deleteContest", { enumerable: true, get: function () { return vidyastarContest_1.deleteContest; } });
@@ -124,6 +128,8 @@ var tutorBooking_1 = require("./tutorBooking");
 Object.defineProperty(exports, "requestBooking", { enumerable: true, get: function () { return tutorBooking_1.requestBooking; } });
 Object.defineProperty(exports, "respondToBooking", { enumerable: true, get: function () { return tutorBooking_1.respondToBooking; } });
 Object.defineProperty(exports, "cancelBooking", { enumerable: true, get: function () { return tutorBooking_1.cancelBooking; } });
+Object.defineProperty(exports, "tickBookingCompletion", { enumerable: true, get: function () { return tutorBooking_1.tickBookingCompletion; } });
+Object.defineProperty(exports, "tickBookingReminders", { enumerable: true, get: function () { return tutorBooking_1.tickBookingReminders; } });
 // ── ShikshaHub — Phase 3 tutor services (multi-service, online/offline,
 // one-time/short-term/long-term, instant-help config-only) ─────────────────────
 var tutorServices_1 = require("./tutorServices");
@@ -145,13 +151,25 @@ Object.defineProperty(exports, "respondToInstantHelpRequest", { enumerable: true
 Object.defineProperty(exports, "cancelInstantHelpRequest", { enumerable: true, get: function () { return instantHelp_1.cancelInstantHelpRequest; } });
 Object.defineProperty(exports, "endInstantHelpSession", { enumerable: true, get: function () { return instantHelp_1.endInstantHelpSession; } });
 Object.defineProperty(exports, "tickInstantHelp", { enumerable: true, get: function () { return instantHelp_1.tickInstantHelp; } });
-// ── ShikshaHub — Phase 5 tutor earnings payout (manual/admin-processed) ────────
+// ── ShikshaHub — tutor earnings payout (Phase 5 manual flow, automated via
+//    RazorpayX in the automated payouts phase — see markPayoutPaid) ────────
 var tutorPayouts_1 = require("./tutorPayouts");
 Object.defineProperty(exports, "saveTutorPayoutDetails", { enumerable: true, get: function () { return tutorPayouts_1.saveTutorPayoutDetails; } });
 Object.defineProperty(exports, "requestPayout", { enumerable: true, get: function () { return tutorPayouts_1.requestPayout; } });
 Object.defineProperty(exports, "cancelPayoutRequest", { enumerable: true, get: function () { return tutorPayouts_1.cancelPayoutRequest; } });
 Object.defineProperty(exports, "reviewPayoutRequest", { enumerable: true, get: function () { return tutorPayouts_1.reviewPayoutRequest; } });
 Object.defineProperty(exports, "markPayoutPaid", { enumerable: true, get: function () { return tutorPayouts_1.markPayoutPaid; } });
+Object.defineProperty(exports, "updatePayoutConfig", { enumerable: true, get: function () { return tutorPayouts_1.updatePayoutConfig; } });
+Object.defineProperty(exports, "reconcilePayoutStatuses", { enumerable: true, get: function () { return tutorPayouts_1.reconcilePayoutStatuses; } });
+// ── ShikshaHub — Phase 6 tutor ratings & reviews (Instant Help sessions) ───────
+var tutorReviews_1 = require("./tutorReviews");
+Object.defineProperty(exports, "submitTutorReview", { enumerable: true, get: function () { return tutorReviews_1.submitTutorReview; } });
+Object.defineProperty(exports, "hideTutorReview", { enumerable: true, get: function () { return tutorReviews_1.hideTutorReview; } });
+Object.defineProperty(exports, "replyToTutorReview", { enumerable: true, get: function () { return tutorReviews_1.replyToTutorReview; } });
+// ── ShikshaHub — tutor-student messaging phase ─────────────────────────────────
+var tutorMessaging_1 = require("./tutorMessaging");
+Object.defineProperty(exports, "sendTutorMessage", { enumerable: true, get: function () { return tutorMessaging_1.sendTutorMessage; } });
+Object.defineProperty(exports, "markConversationRead", { enumerable: true, get: function () { return tutorMessaging_1.markConversationRead; } });
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 var referral_1 = require("./referral");
 Object.defineProperty(exports, "applyReferral", { enumerable: true, get: function () { return referral_1.applyReferral; } });

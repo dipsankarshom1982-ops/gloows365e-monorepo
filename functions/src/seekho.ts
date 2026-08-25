@@ -165,20 +165,47 @@ export const seekhoUpdateRevisionQueue = functionsV1
 // Two-phase callable:
 //   Phase 1 — no razorpayPaymentId → creates Razorpay order, returns razorpayOrderId
 //   Phase 2 — has razorpayPaymentId → verifies HMAC + writes subscription to Firestore
+//
+// Price/plan trust model: mirrors aiGuruSubscription.ts's
+// aiGuruSubscriptionOrders fix. Phase 1 resolves the real price
+// server-side (SEEKHO_PLAN_PRICES below, not the client's amountPaise) and
+// writes it to seekho_subscription_orders/{orderId}; Phase 2 reads
+// plan/selectedClass/billingCycle back from THAT doc, never from its own
+// request payload. Previously Phase 1 charged whatever amountPaise the
+// client sent with no check against plan/cycle, and Phase 2 independently
+// trusted whatever plan/selectedClass the client asserted in a completely
+// separate call — so a genuine low-value payment's valid signature could
+// be replayed here with plan: "pro" to grant full class 6-12 access
+// regardless of what was actually paid.
+const SEEKHO_PLAN_PRICES: Record<"plus" | "pro", { monthly: number; annual: number }> = {
+  // Rupees, matching apps/mobile/lib/seekho/constants.ts's PLAN_CONFIG —
+  // no Firestore-backed plan config exists for Seekho yet (unlike AI
+  // Guru's subscriptionPlans collection), so this is the trusted source
+  // until/unless that gets unified. Keep in sync with PLAN_CONFIG if
+  // prices ever change there.
+  plus: { monthly: 149, annual: 999 },
+  pro:  { monthly: 299, annual: 1999 },
+};
+
+function resolveSeekhoPlanPrice(plan: "plus" | "pro", billingCycle: "monthly" | "annual"): number {
+  const prices = SEEKHO_PLAN_PRICES[plan];
+  if (!prices) {
+    throw new functionsV1.https.HttpsError("invalid-argument", "Unknown plan");
+  }
+  const priceRupees = billingCycle === "annual" ? prices.annual : prices.monthly;
+  return Math.round(priceRupees * 100);
+}
 
 type SeekhoOrderRequest = {
   plan: "plus" | "pro";
   selectedClass?: number;
   billingCycle?: "monthly" | "annual";
-  amountPaise: number;
 };
 
 type SeekhoVerifyRequest = {
   razorpayPaymentId: string;
   razorpayOrderId: string;
   razorpaySignature: string;
-  plan: "plus" | "pro";
-  selectedClass?: number;
 };
 
 export const seekhoCreateSubscription = functionsV1
@@ -199,7 +226,7 @@ export const seekhoCreateSubscription = functionsV1
 
     // ── Phase 2: Verify payment ───────────────────────────────────────────────
     if ("razorpayPaymentId" in data) {
-      const { razorpayPaymentId, razorpayOrderId, razorpaySignature, plan, selectedClass } = data;
+      const { razorpayPaymentId, razorpayOrderId, razorpaySignature } = data;
 
       const expectedSig = crypto
         .createHmac("sha256", keySecret)
@@ -210,35 +237,62 @@ export const seekhoCreateSubscription = functionsV1
         throw new functionsV1.https.HttpsError("permission-denied", "Payment verification failed");
       }
 
-      const classAccess: number[] =
-        plan === "pro"
-          ? [6, 7, 8, 9, 10, 11, 12]
-          : selectedClass ? [selectedClass] : [];
+      const orderRef = db.doc(`seekho_subscription_orders/${razorpayOrderId}`);
+      const result = await db.runTransaction(async (tx) => {
+        const orderSnap = await tx.get(orderRef);
+        if (!orderSnap.exists) {
+          throw new functionsV1.https.HttpsError("not-found", "Order not found");
+        }
+        const order = orderSnap.data()!;
+        if (order.userId !== userId) {
+          throw new functionsV1.https.HttpsError("permission-denied", "This order doesn't belong to you");
+        }
 
-      const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 30 * 24 * 3600 * 1000);
+        const classAccess: number[] =
+          order.plan === "pro"
+            ? [6, 7, 8, 9, 10, 11, 12]
+            : order.selectedClass ? [order.selectedClass] : [];
 
-      await db.doc(`seekho_subscriptions/${userId}`).set({
-        userId, plan, classAccess, expiresAt,
-        razorpayPaymentId,
-        razorpayOrderId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        if (order.status === "paid") {
+          return { alreadyActivated: true as const, plan: order.plan, classAccess };
+        }
+
+        const now = admin.firestore.FieldValue.serverTimestamp();
+        const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 30 * 24 * 3600 * 1000);
+
+        tx.set(db.doc(`seekho_subscriptions/${userId}`), {
+          userId, plan: order.plan, classAccess, expiresAt,
+          razorpayPaymentId,
+          razorpayOrderId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        tx.update(orderRef, { status: "paid", razorpayPaymentId, paidAt: now });
+
+        return { alreadyActivated: false as const, plan: order.plan, classAccess };
       });
 
       getRedis().del(RK.seekhoSub(userId)).catch(() => {});
-      console.log(`✅ Seekho subscription verified: user=${userId} plan=${plan}`);
-      return { success: true, plan, classAccess };
+      console.log(`✅ Seekho subscription verified: user=${userId} plan=${result.plan}`);
+      return { success: true, plan: result.plan, classAccess: result.classAccess };
     }
 
     // ── Phase 1: Create Razorpay order ───────────────────────────────────────
-    const { amountPaise, plan, selectedClass, billingCycle = "monthly" } = data;
+    // Price is resolved server-side from SEEKHO_PLAN_PRICES — the client
+    // only says WHICH plan/cycle it wants, never what it costs.
+    const { plan, selectedClass, billingCycle = "monthly" } = data;
 
+    if (!plan || (plan !== "plus" && plan !== "pro")) {
+      throw new functionsV1.https.HttpsError("invalid-argument", 'plan must be "plus" or "pro"');
+    }
     if (!keyId || !keySecret) {
       throw new functionsV1.https.HttpsError(
         "failed-precondition",
         "Razorpay keys not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET secrets."
       );
     }
+
+    const amountPaise = resolveSeekhoPlanPrice(plan, billingCycle);
 
     try {
       const response = await axios.post(
@@ -256,7 +310,17 @@ export const seekhoCreateSubscription = functionsV1
       );
 
       const razorpayOrderId: string = response.data.id;
-      console.log(`✅ Seekho Razorpay order created: ${razorpayOrderId} plan=${plan}`);
+
+      // Written from the resolved plan price, not from anything the
+      // client sent — this is what Phase 2 trusts from here on.
+      await db.doc(`seekho_subscription_orders/${razorpayOrderId}`).set({
+        userId, plan, selectedClass: selectedClass ?? null, billingCycle,
+        amountPaise,
+        status:    "created",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`✅ Seekho Razorpay order created: ${razorpayOrderId} plan=${plan} cycle=${billingCycle} amountPaise=${amountPaise}`);
       return { razorpayOrderId };
     } catch (err: any) {
       console.error("Razorpay order creation failed:", err?.response?.data ?? err?.message);

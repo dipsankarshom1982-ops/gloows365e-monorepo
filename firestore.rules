@@ -49,6 +49,16 @@ service cloud.firestore {
       allow update: if request.auth.uid == userId
         && !request.resource.data.diff(resource.data).changedKeys().hasAny([
           'vCoins', 'vCoinsLifetimeEarned', 'vCoinsLifetimeSpent',
+          // vCoinsBalance — the OTHER VCoins pool (reel/video/story watch,
+          // signup bonus, SkillBattle claims — see functions/src/vcoins.ts's
+          // "vCoinsBalance crediting (security migration)" section). Used to
+          // be missing from this list entirely: every other VCoins-adjacent
+          // field here was locked down but this one — the field that field
+          // actually holds most of a user's balance — wasn't, so any signed-in
+          // user could set their own vCoinsBalance to any number with a plain
+          // Firestore write, bypassing every reward/limit check that used to
+          // live only in client JS. Now server-only, same as the others.
+          'vCoinsBalance',
           'vCoinsYear_2024','vCoinsYear_2025','vCoinsYear_2026','vCoinsYear_2027','vCoinsYear_2028',
           'vCoinsHistory_2024','vCoinsHistory_2025','vCoinsHistory_2026','vCoinsHistory_2027','vCoinsHistory_2028'
         ]);
@@ -61,8 +71,14 @@ service cloud.firestore {
         allow read:                   if request.auth.uid == userId;
         allow create, update, delete: if false;
       }
+      // Server-only, same reasoning as vCoinsBalance above — these are the
+      // idempotency locks functions/src/vcoins.ts's creditVCoinsBalance()
+      // checks before crediting. Leaving them client-writable would let a
+      // user delete their own "already claimed" lock after a legitimate
+      // reward and re-trigger the same Cloud Function to claim it again.
       match /vCoinActivityLocks/{lockId} {
-        allow read, write: if request.auth.uid == userId;
+        allow read:                   if request.auth.uid == userId;
+        allow create, update, delete: if false;
       }
     }
 
@@ -445,6 +461,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Server-only — same role as aiGuruCreditOrders above, for the flat-fee
+    // subscription flow instead of credit packs. Price is resolved from
+    // subscriptionPlans/{planId} at order-create time and read back from
+    // this doc at verify time, never from client input (see
+    // aiGuruSubscription.ts).
+    match /aiGuruSubscriptionOrders/{orderId} {
+      allow read, write: if false;
+    }
+
     // 📚 SEEKHO MODULE
     match /seekho_courses/{courseId} {
       allow read: if request.auth != null;
@@ -465,6 +490,12 @@ service cloud.firestore {
     match /seekho_subscriptions/{userId} {
       allow read: if request.auth.uid == userId || request.auth.token.admin == true;
       allow write: if false;
+    }
+    // Server-only — same role as aiGuruSubscriptionOrders. Price/plan is
+    // resolved server-side at order-create time and read back from this
+    // doc at verify time, never from client input (see seekho.ts).
+    match /seekho_subscription_orders/{orderId} {
+      allow read, write: if false;
     }
     match /seekho_revision_queue/{docId} {
       allow read: if request.auth != null && resource.data.userId == request.auth.uid;

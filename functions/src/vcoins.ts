@@ -223,6 +223,284 @@ export const resetAnnualVCoins = functionsV1
     console.log(`✅ Annual VCoin reset complete. Total users processed: ${totalProcessed}`);
   });
 
+// ─── vCoinsBalance crediting (security migration) ─────────────────────────────
+// Moved here from apps/mobile/services/vCoinsService.ts's creditVCoins() /
+// rewardForWatchCompletion() / claimSkillBattleRewards(), which ran
+// entirely client-side via the Firestore client SDK. firestore.rules'
+// users/{userId} update rule blocks direct client writes to vCoins,
+// vCoinsLifetimeEarned/Spent, vCoinsYear_*, and vCoinsHistory_* — but never
+// included vCoinsBalance, the field this pipeline actually increments and
+// the one summed (with vCoins above) into the balance the app displays.
+// That gap meant any authenticated user could set their own vCoinsBalance
+// to an arbitrary number with a direct Firestore write, bypassing every
+// daily-limit/duplicate check in vCoinsService.ts entirely — no app UI or
+// Cloud Function involved. Moving the writes here and adding vCoinsBalance
+// to firestore.rules' deny-list closes that off completely for the three
+// sources below (signup bonus, reel/video/story watch, SkillBattle claim).
+//
+// Deliberately a SEPARATE pool from vCoins/claimVCoinReward above rather
+// than merged into it — unifying the two historically-disconnected VCoins
+// pools was out of scope for this migration, which only needed to move the
+// WRITE PATH server-side, not redesign the balance model.
+//
+// SkillBattle rank verification is explicitly NOT part of this migration —
+// claimSkillBattleReward below still trusts the client's claimed rank and
+// prize amounts (ported as-is from claimSkillBattleRewards), same as
+// before. It closes the "forge any balance via a raw Firestore write" hole
+// but does not verify a claim against real battle standings; that needs
+// the actual scoring data model explored first and is tracked separately.
+
+interface VCoinRule {
+  rewardAmount: number;
+  dailyLimit:   number;
+  isActive:     boolean;
+}
+
+// Mirrors apps/mobile/services/vCoinsService.ts's DEFAULT_DAILY_LIMITS for
+// just the sources migrated here — used when no vCoinRules/{source} doc
+// exists yet (or it's inactive). Keep in sync if admin ever edits these via
+// VCoinRules.tsx and the fallback needs to change too.
+const DEFAULT_DAILY_LIMITS: Record<string, number> = {
+  SIGNUP_BONUS:                      200,
+  REEL_WATCH_REWARD:                 30,
+  VIDEO_WATCH_REWARD:                50,
+  STORY_WATCH_REWARD:                20,
+  SKILLBATTLE_WINNER_REWARD:         100,
+  SKILLBATTLE_RUNNER_UP_REWARD:      100,
+  SKILLBATTLE_PARTICIPATION_REWARD:  50,
+};
+
+async function getVCoinRule(source: string): Promise<VCoinRule | null> {
+  try {
+    const snap = await db.doc(`vCoinRules/${source}`).get();
+    if (!snap.exists) return null;
+    const rule = snap.data() as VCoinRule;
+    return rule.isActive === false ? null : rule;
+  } catch {
+    return null;
+  }
+}
+
+// Core transactional credit — every source below funnels through this so
+// the duplicate-per-referenceId lock and per-source daily cap are enforced
+// identically regardless of caller, same as the old creditVCoins() did.
+async function creditVCoinsBalance(params: {
+  uid:         string;
+  amount:      number;
+  source:      string;
+  title:       string;
+  description: string;
+  referenceId: string;
+  metadata?:   Record<string, unknown>;
+}): Promise<{ credited: boolean; amount: number; balanceAfter: number }> {
+  const { uid, amount, source, title, description, referenceId, metadata = {} } = params;
+  if (amount <= 0) return { credited: false, amount: 0, balanceAfter: 0 };
+
+  const rule       = await getVCoinRule(source);
+  const dailyLimit = rule?.dailyLimit ?? DEFAULT_DAILY_LIMITS[source] ?? 9999;
+
+  const userRef       = db.doc(`users/${uid}`);
+  const txRef          = userRef.collection("vCoinTransactions").doc();
+  const lockRef        = userRef.collection("vCoinActivityLocks").doc(`${source}_${referenceId}`);
+  const dailyKey       = `${source}_day_${todayIST()}`;
+  const dailyLockRef   = userRef.collection("vCoinActivityLocks").doc(dailyKey);
+
+  const now       = admin.firestore.FieldValue.serverTimestamp();
+  const yearField = `vCoinsYear_${currentYearIST()}`;
+
+  return db.runTransaction(async (tx) => {
+    // ── Reads first — Firestore transactions require every read before any write ──
+    const [lockSnap, userSnap, dailySnap] = await Promise.all([
+      tx.get(lockRef),
+      tx.get(userRef),
+      tx.get(dailyLockRef),
+    ]);
+
+    const currentBalance = userSnap.exists ? (userSnap.data()?.vCoinsBalance ?? 0) : 0;
+
+    if (lockSnap.exists) {
+      return { credited: false, amount: 0, balanceAfter: currentBalance };
+    }
+
+    const earnedToday  = dailySnap.exists ? (dailySnap.data()?.earnedToday ?? 0) : 0;
+    const actualAmount = Math.max(0, Math.min(amount, dailyLimit - earnedToday));
+    if (actualAmount <= 0) {
+      return { credited: false, amount: 0, balanceAfter: currentBalance };
+    }
+
+    // ── Writes ──
+    tx.set(txRef, {
+      type: "CREDIT", amount: actualAmount, source, title, description,
+      status: "SUCCESS", referenceId, metadata, createdAt: now, updatedAt: now,
+    });
+    tx.set(userRef, {
+      vCoinsBalance:        admin.firestore.FieldValue.increment(actualAmount),
+      vCoinsLifetimeEarned: admin.firestore.FieldValue.increment(actualAmount),
+      [yearField]:          admin.firestore.FieldValue.increment(actualAmount),
+      vCoinsUpdatedAt:      now,
+    }, { merge: true });
+    tx.set(lockRef, { source, referenceId, amount: actualAmount, lastRewardedAt: now, createdAt: now });
+    tx.set(dailyLockRef, {
+      source, earnedToday: admin.firestore.FieldValue.increment(actualAmount), lastRewardedAt: now,
+    }, { merge: true });
+
+    return { credited: true, amount: actualAmount, balanceAfter: currentBalance + actualAmount };
+  });
+}
+
+// ─── creditSignupBonus ──────────────────────────────────────────────────────
+// referenceId is a fixed per-uid key ("signup_bonus"), so this can only
+// ever credit once per user even if the client retries — same guarantee
+// the old inline creditVCoins() call in register.tsx relied on.
+
+export const creditSignupBonus = functionsV1
+  .runWith({ timeoutSeconds: 15, memory: "128MB" })
+  .https.onCall(async (_data, context) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+
+    const rule   = await getVCoinRule("SIGNUP_BONUS");
+    const amount = rule?.rewardAmount ?? 200;
+
+    const result = await creditVCoinsBalance({
+      uid, amount, source: "SIGNUP_BONUS",
+      title:       "Welcome Bonus",
+      description: `${amount} VCoins for completing registration`,
+      referenceId: "signup_bonus",
+    });
+
+    console.log(`✅ VCoins signup bonus: uid=${uid} credited=${result.credited} amount=${result.amount}`);
+    return result;
+  });
+
+// ─── creditWatchReward ────────────────────────────────────────────────────
+// contentId doubles as the idempotency key — one reward per piece of
+// content ever, same as the old rewardForWatchCompletion(). watchPercentage
+// stays self-reported by the client (no server-side playback verification
+// exists) — this migration closes the "bypass the daily cap with a raw
+// Firestore write" hole, it does not add watch-time anti-cheat.
+
+const WATCH_REWARD_CONFIG: Record<"reel" | "video" | "story", { source: string; minPct: number; amount: number; title: string; description: string }> = {
+  reel:  { source: "REEL_WATCH_REWARD",  minPct: 80,  amount: 1, title: "Watched Reel",                description: "Earned for watching a skill reel" },
+  video: { source: "VIDEO_WATCH_REWARD", minPct: 80,  amount: 3, title: "Watched Educational Video",   description: "Earned for completing an educational video" },
+  story: { source: "STORY_WATCH_REWARD", minPct: 100, amount: 1, title: "Watched Story",                description: "Earned for watching a full story" },
+};
+
+export const creditWatchReward = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "128MB" })
+  .https.onCall(async (
+    data: { contentId?: string; contentType?: "reel" | "video" | "story"; watchPercentage?: number },
+    context
+  ) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const { contentId, contentType, watchPercentage } = data ?? {};
+
+    if (!contentId || typeof contentId !== "string") {
+      throw new functionsV1.https.HttpsError("invalid-argument", "contentId is required");
+    }
+    const config = contentType ? WATCH_REWARD_CONFIG[contentType] : undefined;
+    if (!config) {
+      throw new functionsV1.https.HttpsError("invalid-argument", 'contentType must be "reel", "video", or "story"');
+    }
+    if (typeof watchPercentage !== "number" || watchPercentage < config.minPct) {
+      throw new functionsV1.https.HttpsError("failed-precondition", `Must watch at least ${config.minPct}% to earn a reward`);
+    }
+
+    const rule   = await getVCoinRule(config.source);
+    const amount = rule?.rewardAmount ?? config.amount;
+
+    const result = await creditVCoinsBalance({
+      uid, amount, source: config.source,
+      title:       config.title,
+      description: config.description,
+      referenceId: contentId,
+      metadata:    { contentId, contentType, watchPercentage },
+    });
+
+    return result;
+  });
+
+// ─── claimSkillBattleReward ────────────────────────────────────────────────
+// SECURITY NOTE: ranks/vcoins are still trusted from the client here,
+// ported as-is from claimSkillBattleRewards — see this section's header
+// comment. referenceId = `${battleId}_${scope}` caps each scope to one
+// claim per battle, same as before.
+
+// Mirrors apps/mobile/utils/formatVCoins.ts's VCOIN_DIST_PCT — keep in sync
+// if that table ever changes; unifying the two is in scope for the
+// SkillBattle rank-verification follow-up, not this migration.
+const VCOIN_DIST_PCT = [50, 30, 20, 12, 10, 8, 6, 5, 4, 3];
+
+function getSkillBattleCoinForRank(baseCoins: number, rank: number): number {
+  if (rank < 1 || rank > 10 || baseCoins <= 0) return 0;
+  return Math.round((baseCoins * (VCOIN_DIST_PCT[rank - 1] ?? 0)) / 100);
+}
+
+function skillBattleSource(rank: number): string {
+  if (rank === 1) return "SKILLBATTLE_WINNER_REWARD";
+  if (rank === 2) return "SKILLBATTLE_RUNNER_UP_REWARD";
+  return "SKILLBATTLE_PARTICIPATION_REWARD";
+}
+
+const SKILLBATTLE_SCOPE_LABELS: Record<string, string> = {
+  india: "All India", state: "State", district: "District", local: "Local",
+};
+
+export const claimSkillBattleReward = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "128MB" })
+  .https.onCall(async (
+    data: {
+      battleId?:    string;
+      battleMonth?: string;
+      ranks?:  { india: number; state: number; district: number; local: number };
+      vcoins?: { vcoin_india: number; vcoin_state: number; vcoin_district: number; vcoin_local: number };
+    },
+    context
+  ) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const { battleId, battleMonth, ranks, vcoins } = data ?? {};
+
+    if (!battleId || !battleMonth || !ranks || !vcoins) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "battleId, battleMonth, ranks, and vcoins are required");
+    }
+
+    const scopes = [
+      { key: "india",    rank: ranks.india,    base: vcoins.vcoin_india    },
+      { key: "state",    rank: ranks.state,    base: vcoins.vcoin_state    },
+      { key: "district", rank: ranks.district, base: vcoins.vcoin_district },
+      { key: "local",    rank: ranks.local,    base: vcoins.vcoin_local    },
+    ] as const;
+
+    let totalCredited = 0;
+    for (const { key, rank, base } of scopes) {
+      const coins = getSkillBattleCoinForRank(base, rank);
+      if (coins <= 0) continue;
+
+      const source     = skillBattleSource(rank);
+      const scopeLabel = SKILLBATTLE_SCOPE_LABELS[key] ?? key;
+
+      const result = await creditVCoinsBalance({
+        uid, amount: coins, source,
+        title:       `SkillBattle ${scopeLabel} · Rank #${rank}`,
+        description: `${battleMonth} SkillBattle — ${scopeLabel} rank #${rank}`,
+        referenceId: `${battleId}_${key}`,
+        metadata:    { battleId, battleMonth, scope: key, rank, baseCoins: base },
+      });
+      if (result.credited) totalCredited += result.amount;
+    }
+
+    console.log(`✅ SkillBattle claim: uid=${uid} battle=${battleId} totalCredited=${totalCredited}`);
+    return { totalCredited };
+  });
+
 // ─── manualResetAnnualVCoins ──────────────────────────────────────────────────
 // Admin-callable version of the above (for testing or emergency reset)
 
