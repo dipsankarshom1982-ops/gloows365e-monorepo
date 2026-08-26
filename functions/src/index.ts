@@ -107,6 +107,7 @@ export { onContestParticipantWrite } from "./vidyastarBoard";
 export { resetStarboardPeriods } from "./starboardReset";
 export { processStarboardPayout } from "./starboardPayouts";
 export { processRefund, resolveRefundReconciliation, reconcileRefundStatuses } from "./refunds";
+export { searchPaymentOrders } from "./refundSearch";
 
 // ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
 export { registerTutorAccount, submitTutorVerification, reviewTutorVerification } from "./tutorAccounts";

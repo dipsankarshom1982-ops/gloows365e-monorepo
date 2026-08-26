@@ -58,12 +58,23 @@ interface FakeDocRef {
 interface FakeCollectionRef {
   doc(id?: string): FakeDocRef;
   where(field: string, op: "==", value: unknown): FakeQueryRef;
+  orderBy(field: string, direction?: "asc" | "desc"): FakeQueryRef;
 }
 
 interface FakeQueryRef {
   where(field: string, op: "==", value: unknown): FakeQueryRef;
+  orderBy(field: string, direction?: "asc" | "desc"): FakeQueryRef;
   limit(n: number): FakeQueryRef;
   get(): Promise<{ empty: boolean; size: number; docs: Array<{ id: string; data: () => DocData; ref: FakeDocRef }> }>;
+}
+
+// Extracts a comparable primitive from a stored field value — handles
+// FakeTimestamp (via toMillis) alongside plain numbers/strings, matching
+// what orderBy() on a real Firestore timestamp field needs to sort by.
+function sortableValue(v: unknown): number | string {
+  if (v && typeof (v as FakeTimestamp).toMillis === "function") return (v as FakeTimestamp).toMillis();
+  if (typeof v === "number" || typeof v === "string") return v;
+  return 0;
 }
 
 export class FakeFirestore {
@@ -133,17 +144,28 @@ export class FakeFirestore {
       where(field, op, value) {
         return self.queryRef(path, [(d) => d[field] === value]);
       },
+      orderBy(field, direction) {
+        return self.queryRef(path, [], undefined, { field, direction: direction ?? "asc" });
+      },
     };
   }
 
-  private queryRef(path: string, filters: Array<(d: DocData) => boolean>, limitN?: number): FakeQueryRef {
+  private queryRef(
+    path: string,
+    filters: Array<(d: DocData) => boolean>,
+    limitN?: number,
+    order?: { field: string; direction: "asc" | "desc" }
+  ): FakeQueryRef {
     const self = this;
     return {
       where(field, op, value) {
-        return self.queryRef(path, [...filters, (d) => d[field] === value], limitN);
+        return self.queryRef(path, [...filters, (d) => d[field] === value], limitN, order);
+      },
+      orderBy(field, direction) {
+        return self.queryRef(path, filters, limitN, { field, direction: direction ?? "asc" });
       },
       limit(n) {
-        return self.queryRef(path, filters, n);
+        return self.queryRef(path, filters, n, order);
       },
       async get() {
         const prefix = `${path}/`;
@@ -154,6 +176,15 @@ export class FakeFirestore {
             const id = p.slice(prefix.length);
             return { id, data: () => ({ ...data }), ref: self.docRef(p) };
           });
+        if (order) {
+          const { field, direction } = order;
+          docs.sort((a, b) => {
+            const av = sortableValue(a.data()[field]);
+            const bv = sortableValue(b.data()[field]);
+            const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+            return direction === "desc" ? -cmp : cmp;
+          });
+        }
         if (limitN !== undefined) docs = docs.slice(0, limitN);
         return { empty: docs.length === 0, size: docs.length, docs };
       },

@@ -52,9 +52,9 @@ import * as functionsV1 from "firebase-functions/v1";
 
 const db = admin.firestore();
 
-type Flow = "aiGuruSubscription" | "seekhoSubscription" | "aiGuruCredits" | "tutorCredits";
+export type Flow = "aiGuruSubscription" | "seekhoSubscription" | "aiGuruCredits" | "tutorCredits";
 
-interface FlowConfig {
+export interface FlowConfig {
   orderCollection: string;
   userField: "uid" | "userId";
   kind: "subscription" | "creditPool";
@@ -62,7 +62,10 @@ interface FlowConfig {
   hasStatusField: boolean; // subscription-kind only — see header comment on seekho_subscriptions
 }
 
-const FLOW_CONFIG: Record<Flow, FlowConfig> = {
+// Exported so refundSearch.ts's searchPaymentOrders can map the same
+// flow → collection without duplicating (and risking drifting from) this
+// table — purely a visibility change, nothing here or below is modified.
+export const FLOW_CONFIG: Record<Flow, FlowConfig> = {
   aiGuruSubscription: {
     orderCollection: "aiGuruSubscriptionOrders", userField: "uid", kind: "subscription",
     entitlementCollection: "subscriptions", hasStatusField: true,
