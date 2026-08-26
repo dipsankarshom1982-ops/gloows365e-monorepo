@@ -105,6 +105,8 @@ export { onContestParticipantWrite } from "./vidyastarBoard";
 
 // ── Starboard period reset (daily/weekly/monthly/yearly rollover) ─────────────
 export { resetStarboardPeriods } from "./starboardReset";
+export { processStarboardPayout } from "./starboardPayouts";
+export { processRefund, resolveRefundReconciliation, reconcileRefundStatuses } from "./refunds";
 
 // ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
 export { registerTutorAccount, submitTutorVerification, reviewTutorVerification } from "./tutorAccounts";

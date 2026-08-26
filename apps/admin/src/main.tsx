@@ -62,6 +62,7 @@ const VCoinLeaderboard     = lazy(() => import("./pages/VCoinLeaderboard"));
 
 const Students             = lazy(() => import("./pages/Students"));
 const Subscriptions        = lazy(() => import("./pages/Subscriptions"));
+const RefundManagement     = lazy(() => import("./pages/RefundManagement"));
 const AiUsage              = lazy(() => import("./pages/AiUsage"));
 const RestartLeads         = lazy(() => import("./pages/RestartLeads"));
 const Waitlist             = lazy(() => import("./pages/Waitlist"));   // ← NEW
@@ -186,6 +187,7 @@ function ProtectedRoutes() {
 
           <Route path="/students"        element={<Students />} />
           <Route path="/subscriptions"   element={<Subscriptions />} />
+          <Route path="/refunds"         element={<RefundManagement />} />
           <Route path="/ai-usage"        element={<AiUsage />} />
           <Route path="/restart-leads"   element={<RestartLeads />} />
           <Route path="/waitlist"        element={<Waitlist />} />  {/* ← NEW */}

@@ -45,9 +45,53 @@ service cloud.firestore {
     // 👤 USERS — all profile types (student, restartEducation, parent)
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow create: if request.auth.uid == userId;
+      // SECURITY FIX (Task 8 rules-suite follow-up, 2026-08-26): this used
+      // to have NO field restriction at all — any signed-in user could
+      // create their own users/{uid} doc (their first-ever write, before
+      // any app or server flow gets there) with literally any fields,
+      // including vCoinsBalance/vCoins*/admin. The update rule below was
+      // already locked down, but Firestore classifies a write to a
+      // not-yet-existing doc as `create`, not `update`, so that protection
+      // never applied to a user's very first write — a signed-in attacker
+      // could call the client SDK directly (no app UI needed) and forge
+      // their own balance/role on day one.
+      //
+      // Allowlist is the exact union of fields written by every confirmed
+      // client-side users/{uid} creation call site in the repo (mobile +
+      // web signup, Google-signin bootstrap, register, restart-education
+      // onboarding/redirect) — re-verified against the current code, not
+      // assumed. role/roles/profileType get an exact-value check on top
+      // since every real call site writes one specific value each; nothing
+      // client-side ever needs to self-assign admin/superAdmin/moderator
+      // or any other role, and no privileged/system field (vCoinsBalance,
+      // vCoins*, verified, earnings, payout*, admin) is in the allowlist at
+      // all, so hasOnly() rejects it outright regardless of value.
+      allow create: if request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'role', 'roles', 'profileType', 'email', 'name', 'photoURL',
+          'signupPlatform', 'consent', 'onboardingComplete', 'referralCode',
+          'title', 'profilePic', 'preferredLanguage', 'dob', 'age',
+          'lastClassPassed', 'currentOccupation', 'educationGapReason',
+          'createdAt', 'updatedAt'
+        ])
+        && (!('role' in request.resource.data) || request.resource.data.role == 'student')
+        && (!('roles' in request.resource.data) || request.resource.data.roles == ['student'])
+        && (!('profileType' in request.resource.data)
+          || request.resource.data.profileType in ['student', 'restartEducation']);
       allow update: if request.auth.uid == userId
-        && !request.resource.data.diff(resource.data).changedKeys().hasAny([
+        // SECURITY FIX (Task 8 rules-suite finding, 2026-08-26): this used
+        // to check changedKeys(), which only flags a field that exists in
+        // BOTH the before and after doc with a different value. A field
+        // that doesn't exist on the doc YET — e.g. a brand-new user whose
+        // Cloud-Function-only vCoinsBalance/vCoinsYear_* fields haven't
+        // been initialized — lands in addedKeys(), not changedKeys(), so
+        // the deny-list below silently didn't apply to a first-time write
+        // of any of these fields. affectedKeys() is the union of
+        // added+changed+removed and is what a "never touch these fields"
+        // deny-list actually needs — same function tutors/{uid}'s allowlist
+        // above already uses correctly. Caught by
+        // rules-tests/firestore.rules.test.ts's VCoins forgery suite.
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'vCoins', 'vCoinsLifetimeEarned', 'vCoinsLifetimeSpent',
           // vCoinsBalance — the OTHER VCoins pool (reel/video/story watch,
           // signup bonus, SkillBattle claims — see functions/src/vcoins.ts's
@@ -470,6 +514,17 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 💸 REFUNDS — admin-controlled refund/reconciliation system (launch
+    // audit Task 7). Every write happens via functions/src/refunds.ts's
+    // Cloud Functions (Admin SDK) — processRefund verifies the original
+    // order, calls Razorpay, and reconciles the entitlement, all
+    // server-side. Admins can read directly for the Refund Management UI;
+    // nothing else touches this collection.
+    match /refunds/{refundId} {
+      allow read:  if request.auth != null && request.auth.token.admin == true;
+      allow write: if false;
+    }
+
     // 📚 SEEKHO MODULE
     match /seekho_courses/{courseId} {
       allow read: if request.auth != null;
@@ -706,10 +761,48 @@ service cloud.firestore {
       // against request.resource.data on a delete, where it doesn't
       // exist. availability isn't validated beyond "the owner wrote
       // it" — same trust level qualification/subjects/bio already have.
+      //
+      // SECURITY FIX (launch audit, tutor self-verification hole) — the
+      // sessionFee check above was the ONLY validation on this doc, which
+      // left every other field — most importantly verified, ratingAverage/
+      // ratingCount, and isOnlineForInstantHelp — fully client-writable by
+      // the doc's own owner. `verified` is the entire output of the admin
+      // review workflow (reviewTutorVerification in tutorAccounts.ts) and
+      // is what requestBooking/requestInstantHelp actually gate on, so a
+      // tutor could set verified:true on themselves with one setDoc and
+      // immediately take real bookings with zero vetting. ratingAverage/
+      // ratingCount are maintained transactionally by tutorReviews.ts, and
+      // isOnlineForInstantHelp is set only by instantHelp.ts's
+      // setInstantHelpOnlineStatus — neither should ever move via a direct
+      // client write either.
+      //
+      // TUTOR_SELF_EDITABLE_FIELDS below is the allowlist of what a
+      // tutor's own profile screens actually write — verified, uid, email,
+      // createdAt, rating*, and isOnlineForInstantHelp are deliberately
+      // absent, so no value the client sends for them is ever accepted, on
+      // create or update. Cross-checked against every tutors/{uid} client
+      // write in the repo: apps/tutor's and apps/tutor-mobile's profile
+      // screens (qualification/subjects/teachingExperienceYears/
+      // preferredLanguage/bio/availability/sessionFee/updatedAt) and both
+      // platforms' push-registration hooks (webPushToken/pushToken).
+      // name/profilePic/tutorRole/phone are included too — SAFE_FIELDS in
+      // tutorMarketplace.ts already treats name/profilePic/tutorRole as
+      // legitimately owner-editable public profile fields, and phone
+      // mirrors what registerTutorAccount seeds at signup.
       allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          "name", "bio", "subjects", "qualification", "teachingExperienceYears",
+          "preferredLanguage", "profilePic", "tutorRole", "sessionFee",
+          "availability", "phone", "webPushToken", "pushToken", "updatedAt"
+        ])
         && (!("sessionFee" in request.resource.data)
           || (request.resource.data.sessionFee is int && request.resource.data.sessionFee > 0));
       allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "name", "bio", "subjects", "qualification", "teachingExperienceYears",
+          "preferredLanguage", "profilePic", "tutorRole", "sessionFee",
+          "availability", "phone", "webPushToken", "pushToken", "updatedAt"
+        ])
         && (!("sessionFee" in request.resource.data)
           || (request.resource.data.sessionFee is int && request.resource.data.sessionFee > 0));
       allow delete: if request.auth != null && request.auth.uid == uid;

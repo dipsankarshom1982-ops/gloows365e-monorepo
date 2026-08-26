@@ -66,6 +66,7 @@ const NAV_GROUPS = [
   { section: "USERS", items: [
     { path: "/students",       label: "👥 Students",          permKey: "students" },
     { path: "/subscriptions",  label: "💰 Subscriptions",     permKey: "subscriptions" },
+    { path: "/refunds",        label: "💳 Refunds",           permKey: "refunds" },
     { path: "/ai-usage",       label: "🤖 AI Usage",          permKey: "ai-usage" },
     { path: "/restart-leads",  label: "🎓 Restart Ed. Leads", permKey: "students" },
     { path: "/waitlist",       label: "📋 Waitlist",          permKey: "students" }, // ← NEW

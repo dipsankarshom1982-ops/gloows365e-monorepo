@@ -33,6 +33,7 @@ export const ALL_PERMISSIONS: PermissionModule[] = [
   { key: "feedback",            label: "💬 Feedback",            section: "Feedback"      },
   { key: "students",            label: "👥 Students",            section: "Users"         },
   { key: "subscriptions",       label: "💰 Subscriptions",       section: "Users"         },
+  { key: "refunds",             label: "💳 Refunds",             section: "Users"         },
   { key: "ai-usage",            label: "🤖 AI Usage",            section: "Users"         },
   { key: "data-rights",         label: "🔐 Data Rights",         section: "Compliance"    },
   { key: "grievances",          label: "📮 Grievances",          section: "Compliance"    },
@@ -56,6 +57,14 @@ export function hasPermission(
   key: string
 ): boolean {
   if (isSuperAdmin) return true;
-  if (key === "admins") return false;
+  // Real-money-reversal action — same superAdmin-only treatment as
+  // "admins" (role/claim management). This is UI nav visibility only, not
+  // a real security boundary — see Admins.tsx's Task 6 comment on the
+  // wider gap this doesn't close (a moderator with "refunds" excluded
+  // from their permissions array can still call processRefund directly if
+  // they somehow had the admin claim — the Cloud Function itself is
+  // gated on the admin claim, matching every other real-money admin
+  // action in this codebase, not on this permission key).
+  if (key === "admins" || key === "refunds") return false;
   return permissions.includes(key) || permissions.includes("all");
 }
