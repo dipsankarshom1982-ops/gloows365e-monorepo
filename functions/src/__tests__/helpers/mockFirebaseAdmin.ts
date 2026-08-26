@@ -24,6 +24,7 @@ firestore.FieldValue = {
 firestore.Timestamp = {
   now: () => FakeTimestamp.now(),
   fromMillis: (ms: number) => FakeTimestamp.fromMillis(ms),
+  fromDate: (d: Date) => FakeTimestamp.fromDate(d),
 };
 
 // Minimal in-memory Auth-user directory for tests exercising

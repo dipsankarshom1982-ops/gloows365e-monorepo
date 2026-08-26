@@ -42,6 +42,9 @@ export class FakeTimestamp {
   static fromMillis(ms: number) {
     return new FakeTimestamp(ms);
   }
+  static fromDate(d: Date) {
+    return new FakeTimestamp(d.getTime());
+  }
 }
 
 type DocData = Record<string, unknown>;
@@ -65,6 +68,11 @@ interface FakeQueryRef {
   where(field: string, op: "==", value: unknown): FakeQueryRef;
   orderBy(field: string, direction?: "asc" | "desc"): FakeQueryRef;
   limit(n: number): FakeQueryRef;
+  // Bounds apply against the field from the most recent orderBy() call —
+  // same semantics as real Firestore. Accepts a raw value or a FakeTimestamp.
+  startAfter(value: unknown): FakeQueryRef;
+  startAt(value: unknown): FakeQueryRef;
+  endAt(value: unknown): FakeQueryRef;
   get(): Promise<{ empty: boolean; size: number; docs: Array<{ id: string; data: () => DocData; ref: FakeDocRef }> }>;
 }
 
@@ -154,18 +162,28 @@ export class FakeFirestore {
     path: string,
     filters: Array<(d: DocData) => boolean>,
     limitN?: number,
-    order?: { field: string; direction: "asc" | "desc" }
+    order?: { field: string; direction: "asc" | "desc" },
+    bounds?: { startAfter?: unknown; startAt?: unknown; endAt?: unknown }
   ): FakeQueryRef {
     const self = this;
     return {
       where(field, op, value) {
-        return self.queryRef(path, [...filters, (d) => d[field] === value], limitN, order);
+        return self.queryRef(path, [...filters, (d) => d[field] === value], limitN, order, bounds);
       },
       orderBy(field, direction) {
-        return self.queryRef(path, filters, limitN, { field, direction: direction ?? "asc" });
+        return self.queryRef(path, filters, limitN, { field, direction: direction ?? "asc" }, bounds);
       },
       limit(n) {
-        return self.queryRef(path, filters, n, order);
+        return self.queryRef(path, filters, n, order, bounds);
+      },
+      startAfter(value) {
+        return self.queryRef(path, filters, limitN, order, { ...bounds, startAfter: value });
+      },
+      startAt(value) {
+        return self.queryRef(path, filters, limitN, order, { ...bounds, startAt: value });
+      },
+      endAt(value) {
+        return self.queryRef(path, filters, limitN, order, { ...bounds, endAt: value });
       },
       async get() {
         const prefix = `${path}/`;
@@ -184,6 +202,27 @@ export class FakeFirestore {
             const cmp = av < bv ? -1 : av > bv ? 1 : 0;
             return direction === "desc" ? -cmp : cmp;
           });
+          if (bounds?.startAfter !== undefined) {
+            const boundV = sortableValue(bounds.startAfter);
+            docs = docs.filter((d) => {
+              const v = sortableValue(d.data()[field]);
+              return direction === "desc" ? v < boundV : v > boundV;
+            });
+          }
+          if (bounds?.startAt !== undefined) {
+            const boundV = sortableValue(bounds.startAt);
+            docs = docs.filter((d) => {
+              const v = sortableValue(d.data()[field]);
+              return direction === "desc" ? v <= boundV : v >= boundV;
+            });
+          }
+          if (bounds?.endAt !== undefined) {
+            const boundV = sortableValue(bounds.endAt);
+            docs = docs.filter((d) => {
+              const v = sortableValue(d.data()[field]);
+              return direction === "desc" ? v >= boundV : v <= boundV;
+            });
+          }
         }
         if (limitN !== undefined) docs = docs.slice(0, limitN);
         return { empty: docs.length === 0, size: docs.length, docs };

@@ -63,6 +63,7 @@ const VCoinLeaderboard     = lazy(() => import("./pages/VCoinLeaderboard"));
 const Students             = lazy(() => import("./pages/Students"));
 const Subscriptions        = lazy(() => import("./pages/Subscriptions"));
 const RefundManagement     = lazy(() => import("./pages/RefundManagement"));
+const PaymentManagement    = lazy(() => import("./pages/PaymentManagement"));
 const AiUsage              = lazy(() => import("./pages/AiUsage"));
 const RestartLeads         = lazy(() => import("./pages/RestartLeads"));
 const Waitlist             = lazy(() => import("./pages/Waitlist"));   // ← NEW
@@ -82,6 +83,29 @@ function PageLoader() {
       </div>
     </div>
   );
+}
+
+// Real route-level protection, not just a hidden nav item — Payment
+// Management's own Phase 8 requirement (defense in depth: UI nav, route,
+// permission logic, Firestore rules, and backend/Cloud Function
+// authorization all independently block a non-superAdmin). The backend
+// (searchPaymentOrders/getPaymentDetail) is the actual, unbypassable
+// boundary — this is the client-side layer so a plain admin hitting the
+// URL directly doesn't even see the shell render before failing calls.
+function SuperAdminOnly({ children }: { children: React.ReactNode }) {
+  const { isSuperAdmin } = useAuth();
+  if (!isSuperAdmin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-8">
+        <div className="text-center max-w-sm">
+          <div className="text-5xl mb-4">🔒</div>
+          <h1 className="text-xl font-bold text-white mb-2">Super Admin Only</h1>
+          <p className="text-slate-400 text-sm">This section requires super admin access.</p>
+        </div>
+      </div>
+    );
+  }
+  return <>{children}</>;
 }
 
 function ProtectedRoutes() {
@@ -188,6 +212,7 @@ function ProtectedRoutes() {
           <Route path="/students"        element={<Students />} />
           <Route path="/subscriptions"   element={<Subscriptions />} />
           <Route path="/refunds"         element={<RefundManagement />} />
+          <Route path="/payments"        element={<SuperAdminOnly><PaymentManagement /></SuperAdminOnly>} />
           <Route path="/ai-usage"        element={<AiUsage />} />
           <Route path="/restart-leads"   element={<RestartLeads />} />
           <Route path="/waitlist"        element={<Waitlist />} />  {/* ← NEW */}
