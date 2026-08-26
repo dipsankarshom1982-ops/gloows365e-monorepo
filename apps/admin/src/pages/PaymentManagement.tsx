@@ -16,7 +16,7 @@
 // (students/{uid}.studentId, "GLS000123" — functions/src/studentId.ts),
 // not a new identifier.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../lib/firebase";
 
@@ -150,22 +150,39 @@ export default function PaymentManagement() {
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
 
-  const runSearch = async (append = false) => {
+  // Accepts an explicit filters override so the flow-switch effect below
+  // can request a genuinely fresh, filter-free browse without racing
+  // React's async state updates (setStudentId("") etc. wouldn't have
+  // landed yet if this read straight from state in the same tick).
+  // Omitted fields fall back to current state, matching the Search button's
+  // normal behavior.
+  const runSearch = async (append = false, overrides?: { studentId?: string; email?: string; name?: string; uid?: string; razorpayOrderId?: string; razorpayPaymentId?: string; status?: "" | OrderStatus; startDate?: string; endDate?: string }) => {
     setSearchError("");
     if (append) setLoadingMore(true); else { setLoading(true); setRows([]); setCursor(null); }
     setHasSearched(true);
+    const f = {
+      studentId: overrides?.studentId ?? studentId,
+      email: overrides?.email ?? email,
+      name: overrides?.name ?? name,
+      uid: overrides?.uid ?? uid,
+      razorpayOrderId: overrides?.razorpayOrderId ?? razorpayOrderId,
+      razorpayPaymentId: overrides?.razorpayPaymentId ?? razorpayPaymentId,
+      status: overrides?.status ?? status,
+      startDate: overrides?.startDate ?? startDate,
+      endDate: overrides?.endDate ?? endDate,
+    };
     try {
       const { data } = await searchPaymentOrdersFn({
         flow,
-        studentId: studentId.trim() || undefined,
-        email: email.trim() || undefined,
-        name: name.trim() || undefined,
-        uid: uid.trim() || undefined,
-        razorpayOrderId: razorpayOrderId.trim() || undefined,
-        razorpayPaymentId: razorpayPaymentId.trim() || undefined,
-        status: status || undefined,
-        startDate: startDate || undefined,
-        endDate: endDate || undefined,
+        studentId: f.studentId.trim() || undefined,
+        email: f.email.trim() || undefined,
+        name: f.name.trim() || undefined,
+        uid: f.uid.trim() || undefined,
+        razorpayOrderId: f.razorpayOrderId.trim() || undefined,
+        razorpayPaymentId: f.razorpayPaymentId.trim() || undefined,
+        status: f.status || undefined,
+        startDate: f.startDate || undefined,
+        endDate: f.endDate || undefined,
         cursor: append ? cursor ?? undefined : undefined,
       });
       setRows((prev) => append ? [...prev, ...data.rows] : data.rows);
@@ -176,6 +193,20 @@ export default function PaymentManagement() {
       setLoading(false); setLoadingMore(false);
     }
   };
+
+  // Default view: show this flow's most recent payments on load and on
+  // every flow-tab switch, without requiring a search first. Filters carried
+  // over from a different flow wouldn't mean the same thing here, so they're
+  // cleared on switch too — a fresh "everything for this flow" browse.
+  useEffect(() => {
+    setStudentId(""); setEmail(""); setName(""); setUid("");
+    setRazorpayOrderId(""); setRazorpayPaymentId(""); setStatus(""); setStartDate(""); setEndDate("");
+    runSearch(false, {
+      studentId: "", email: "", name: "", uid: "",
+      razorpayOrderId: "", razorpayPaymentId: "", status: "", startDate: "", endDate: "",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flow]);
 
   const openDetail = async (row: SearchResultRow) => {
     setSelected(row);
