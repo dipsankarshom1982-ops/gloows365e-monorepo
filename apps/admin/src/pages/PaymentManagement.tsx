@@ -74,7 +74,8 @@ const searchPaymentOrdersFn = httpsCallable<
   {
     flow: Flow; razorpayOrderId?: string; razorpayPaymentId?: string; uid?: string;
     studentId?: string; email?: string; name?: string; status?: OrderStatus;
-    startDate?: string; endDate?: string; cursor?: string; pageSize?: number;
+    startDate?: string; endDate?: string; minAmountPaise?: number; maxAmountPaise?: number;
+    cursor?: string; pageSize?: number;
   },
   { rows: SearchResultRow[]; nextCursor: string | null }
 >(functions, "searchPaymentOrders");
@@ -132,6 +133,12 @@ export default function PaymentManagement() {
   const [status, setStatus] = useState<"" | OrderStatus>("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  // Entered/displayed in rupees (matching how amounts are shown everywhere
+  // else in this page via rupees()) — converted to paise only at the API
+  // call boundary, since that's the unit every order document actually
+  // stores.
+  const [minAmount, setMinAmount] = useState("");
+  const [maxAmount, setMaxAmount] = useState("");
 
   const [rows, setRows] = useState<SearchResultRow[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -156,7 +163,7 @@ export default function PaymentManagement() {
   // landed yet if this read straight from state in the same tick).
   // Omitted fields fall back to current state, matching the Search button's
   // normal behavior.
-  const runSearch = async (append = false, overrides?: { studentId?: string; email?: string; name?: string; uid?: string; razorpayOrderId?: string; razorpayPaymentId?: string; status?: "" | OrderStatus; startDate?: string; endDate?: string }) => {
+  const runSearch = async (append = false, overrides?: { studentId?: string; email?: string; name?: string; uid?: string; razorpayOrderId?: string; razorpayPaymentId?: string; status?: "" | OrderStatus; startDate?: string; endDate?: string; minAmount?: string; maxAmount?: string }) => {
     setSearchError("");
     if (append) setLoadingMore(true); else { setLoading(true); setRows([]); setCursor(null); }
     setHasSearched(true);
@@ -170,7 +177,17 @@ export default function PaymentManagement() {
       status: overrides?.status ?? status,
       startDate: overrides?.startDate ?? startDate,
       endDate: overrides?.endDate ?? endDate,
+      minAmount: overrides?.minAmount ?? minAmount,
+      maxAmount: overrides?.maxAmount ?? maxAmount,
     };
+    // Rupees (what's typed) -> paise (what the backend/order docs use).
+    const minAmountPaise = f.minAmount.trim() ? Math.round(Number(f.minAmount) * 100) : undefined;
+    const maxAmountPaise = f.maxAmount.trim() ? Math.round(Number(f.maxAmount) * 100) : undefined;
+    if ((minAmountPaise !== undefined && isNaN(minAmountPaise)) || (maxAmountPaise !== undefined && isNaN(maxAmountPaise))) {
+      setSearchError("Amount filters must be numbers.");
+      setLoading(false); setLoadingMore(false);
+      return;
+    }
     try {
       const { data } = await searchPaymentOrdersFn({
         flow,
@@ -183,6 +200,8 @@ export default function PaymentManagement() {
         status: f.status || undefined,
         startDate: f.startDate || undefined,
         endDate: f.endDate || undefined,
+        minAmountPaise,
+        maxAmountPaise,
         cursor: append ? cursor ?? undefined : undefined,
       });
       setRows((prev) => append ? [...prev, ...data.rows] : data.rows);
@@ -201,9 +220,11 @@ export default function PaymentManagement() {
   useEffect(() => {
     setStudentId(""); setEmail(""); setName(""); setUid("");
     setRazorpayOrderId(""); setRazorpayPaymentId(""); setStatus(""); setStartDate(""); setEndDate("");
+    setMinAmount(""); setMaxAmount("");
     runSearch(false, {
       studentId: "", email: "", name: "", uid: "",
       razorpayOrderId: "", razorpayPaymentId: "", status: "", startDate: "", endDate: "",
+      minAmount: "", maxAmount: "",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flow]);
@@ -345,6 +366,16 @@ export default function PaymentManagement() {
           <div>
             <label className="block text-slate-400 text-xs font-semibold mb-1">To date</label>
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+              className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500" />
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs font-semibold mb-1">Min Amount (₹)</label>
+            <input type="number" min="0" step="1" value={minAmount} onChange={(e) => setMinAmount(e.target.value)} placeholder="0"
+              className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500" />
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs font-semibold mb-1">Max Amount (₹)</label>
+            <input type="number" min="0" step="1" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} placeholder="No limit"
               className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500" />
           </div>
         </div>

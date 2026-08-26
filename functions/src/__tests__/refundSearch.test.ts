@@ -176,6 +176,29 @@ describe("searchPaymentOrders — general browse: filters and pagination", () =>
     expect(result2.rows[0].id).toBe("order_jan");
   });
 
+  test("amount-range filter (min/max, both inclusive) narrows a browse", async () => {
+    seedOrder("order_cheap", { uid: "student_1", status: "paid", amountPaise: 500, createdAt: ts("2026-01-01") });
+    seedOrder("order_mid", { uid: "student_1", status: "paid", amountPaise: 1000, createdAt: ts("2026-01-02") });
+    seedOrder("order_expensive", { uid: "student_1", status: "paid", amountPaise: 5000, createdAt: ts("2026-01-03") });
+    const { searchPaymentOrders } = require("../refundSearch");
+
+    const result = await searchPaymentOrders.run(
+      { flow: "aiGuruSubscription", minAmountPaise: 800, maxAmountPaise: 2000 }, SUPERADMIN_CONTEXT
+    );
+    expect(result.rows.map((r: any) => r.id)).toEqual(["order_mid"]);
+
+    // Boundary values are inclusive on both ends.
+    const boundary = await searchPaymentOrders.run(
+      { flow: "aiGuruSubscription", minAmountPaise: 500, maxAmountPaise: 1000 }, SUPERADMIN_CONTEXT
+    );
+    expect(boundary.rows.map((r: any) => r.id).sort()).toEqual(["order_cheap", "order_mid"]);
+
+    const onlyMin = await searchPaymentOrders.run(
+      { flow: "aiGuruSubscription", minAmountPaise: 1000 }, SUPERADMIN_CONTEXT
+    );
+    expect(onlyMin.rows.map((r: any) => r.id).sort()).toEqual(["order_expensive", "order_mid"]);
+  });
+
   test("browse orders newest-first", async () => {
     seedOrder("order_old", { uid: "student_1", status: "paid", amountPaise: 1000, createdAt: ts("2026-01-01") });
     seedOrder("order_new", { uid: "student_1", status: "paid", amountPaise: 1000, createdAt: ts("2026-06-01") });

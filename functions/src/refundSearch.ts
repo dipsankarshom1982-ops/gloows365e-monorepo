@@ -35,8 +35,9 @@
 //     the flow's user field (auto-indexed by Firestore, no composite index
 //     needed) + orderBy createdAt desc, cursor-paginated.
 //   - Nothing identifying given -> general recent-orders browse: orderBy
-//     createdAt desc, cursor-paginated, status/date-range/name filtered
-//     in-memory rather than as additional Firestore where() clauses. Fine
+//     createdAt desc, cursor-paginated, status/date-range/amount-range/
+//     name filtered in-memory rather than as additional Firestore where()
+//     clauses. Fine
 //     at this app's current order volumes; if that ever stops being true,
 //     the fix is adding real composite indexes and pushing filters into
 //     the Firestore query itself, not changing this function's shape.
@@ -122,6 +123,8 @@ interface SearchRequest {
   status?: "created" | "paid" | "refunded";
   startDate?: string; // ISO date, inclusive, compared against createdAt
   endDate?: string;   // ISO date, inclusive, compared against createdAt
+  minAmountPaise?: number; // inclusive
+  maxAmountPaise?: number; // inclusive
   cursor?: string;    // ISO createdAt of the last row from a previous page
   pageSize?: number;  // default 25, capped at 100
 }
@@ -282,6 +285,8 @@ export const searchPaymentOrders = functionsV1
         const end = new Date(endDate).getTime();
         rows = rows.filter((r) => r.createdAt && new Date(r.createdAt).getTime() <= end);
       }
+      if (data?.minAmountPaise !== undefined) rows = rows.filter((r) => r.amountPaise >= data.minAmountPaise!);
+      if (data?.maxAmountPaise !== undefined) rows = rows.filter((r) => r.amountPaise <= data.maxAmountPaise!);
 
       await attachStudentDisplay(rows);
 
