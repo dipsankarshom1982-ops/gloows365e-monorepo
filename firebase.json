@@ -13,6 +13,13 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "emulators": {
+    "firestore": { "port": 8080 },
+    "functions": { "port": 5001 },
+    "auth":      { "port": 9099 },
+    "ui":        { "enabled": true, "port": 4000 },
+    "singleProjectMode": true
+  },
   "hosting": [
     {
       "target": "website",
