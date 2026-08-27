@@ -348,3 +348,142 @@ describe("role access — admin-gated collections reject non-admins", () => {
     await assertFails(db.doc("users/student_abc").get());
   });
 });
+
+// ─── students/{uid} — field allowlist (full audit, 2026-08-27) ─────────────
+
+describe("students/{uid} — create/update field allowlist", () => {
+  const uid = "student_xyz";
+
+  test("legitimate mobile/web registration document can be created", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(
+      db.doc(`students/${uid}`).set({
+        name: "Asha", title: "Ms.", phone: "9876500000", school: "St. Xavier's",
+        board: "CBSE", section: "A", class: "10", preferredLanguage: "English",
+        profilePic: "", parentPhone: "9876500000", parentPhoneVerified: true,
+        parentalConsent: { granted: true }, dob: "2010-01-01", age: 15,
+        location: { state: "WB" }, interests: ["Math"],
+        stats: { xp: 0, level: 1, streak: 0 },
+        learningProfile: { goal: "Improve learning", dailyTarget: 30 },
+        onboardingComplete: true,
+      })
+    );
+  });
+
+  test("legitimate minimal signup.tsx bootstrap document can be created", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(
+      db.doc(`students/${uid}`).set({ email: "a@b.com", role: "student", onboardingComplete: false })
+    );
+  });
+
+  test("legitimate push-token-only write can be created", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc(`students/${uid}`).set({ pushToken: "tok123" }, { merge: true }));
+  });
+
+  test("legitimate LearnFun mission-reward fields can be created", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(
+      db.doc(`students/${uid}`).set({
+        LearnFunXP: 10, LearnFunStreak: 1, LearnFunLastMissionDate: "2026-08-27",
+        LearnFunCompletedMissions: ["m1"], LearnFunBadges: ["b1"],
+      }, { merge: true })
+    );
+  });
+
+  test("creating studentId on a brand-new doc is denied", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`students/${uid}`).set({ name: "Asha", studentId: "GLS000001" }));
+  });
+
+  test("creating learnScore on a brand-new doc is denied", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`students/${uid}`).set({ name: "Asha", learnScore: 999999 }));
+  });
+
+  test("self-assigning a non-'student' role on create is denied", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`students/${uid}`).set({ role: "admin" }));
+  });
+
+  test("a field entirely outside the allowlist is denied even with an otherwise-legitimate payload", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`students/${uid}`).set({ name: "Asha", notAField: true }));
+  });
+
+  test("a user cannot set their own studentId on an EXISTING doc either (the actual forgery this fix closes)", async () => {
+    await seed(async (db) => { await db.doc(`students/${uid}`).set({ name: "Asha", studentId: "GLS000042" }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    // The real attack: overwrite an already-assigned studentId to collide
+    // with a DIFFERENT real student's ID, so admin's Payment Management
+    // studentId search (functions/src/refundSearch.ts) resolves to this
+    // attacker's uid instead of (or ambiguously alongside) the real owner.
+    await assertFails(db.doc(`students/${uid}`).update({ studentId: "GLS999999" }));
+  });
+
+  test("a user cannot inflate their own learnScore on an EXISTING doc either", async () => {
+    await seed(async (db) => { await db.doc(`students/${uid}`).set({ name: "Asha", learnScore: 0 }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`students/${uid}`).update({ learnScore: 999999 }));
+  });
+
+  test("a user CAN still update an unrelated legitimate field on an existing doc", async () => {
+    await seed(async (db) => { await db.doc(`students/${uid}`).set({ name: "Asha", studentId: "GLS000042" }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc(`students/${uid}`).update({ preferredLanguage: "Hindi", updatedAt: "2026-08-27" }));
+  });
+
+  test("server-side Admin SDK creation (studentId/learnScore included) is unaffected by this rule", async () => {
+    await seed(async (db) => {
+      await db.doc(`students/${uid}`).set({ name: "Asha", studentId: "GLS000042", learnScore: 500 });
+    });
+    // No assertion beyond "seed didn't throw" — withSecurityRulesDisabled
+    // bypasses rules entirely, same as the Admin SDK in production.
+  });
+});
+
+// ─── posts/{postId} — non-owner update allowlist (full audit, 2026-08-27) ──
+// The changedKeys()→affectedKeys() fix. A field that has never existed on a
+// post before lands in addedKeys(), which changedKeys() can't see at all —
+// so the OLD rule silently let a non-owner add any brand-new field to
+// someone else's post, as long as it wasn't already present. views/likes/
+// comments/watchTime/shares are always seeded at creation (see
+// apps/mobile/app/Createreelscreen.tsx), so a real post never hits this
+// path in practice — this suite creates a seed doc WITHOUT them specifically
+// to exercise the gap the old rule had.
+
+describe("posts/{postId} — non-owner update allowlist (changedKeys→affectedKeys fix)", () => {
+  const ownerUid = "post_owner";
+  const strangerUid = "post_stranger";
+  const postId = "post_1";
+
+  test("a stranger CAN still increment the allowlisted counters", async () => {
+    await seed(async (db) => {
+      await db.doc(`posts/${postId}`).set({ userId: ownerUid, views: 0, likes: 0, comments: 0, watchTime: 0, shares: 0 });
+    });
+    const db = testEnv.authenticatedContext(strangerUid).firestore();
+    await assertSucceeds(db.doc(`posts/${postId}`).update({ views: 1, likes: 1 }));
+  });
+
+  test("a stranger CANNOT smuggle in a brand-new field the post never had before", async () => {
+    // Deliberately omit views/likes/comments/watchTime/shares from the seed
+    // so the malicious field is the ONLY thing in the diff — this is
+    // exactly what the old changedKeys()-based rule missed.
+    await seed(async (db) => { await db.doc(`posts/${postId}`).set({ userId: ownerUid }); });
+    const db = testEnv.authenticatedContext(strangerUid).firestore();
+    await assertFails(db.doc(`posts/${postId}`).update({ pinned: true }));
+  });
+
+  test("a stranger cannot smuggle a new field in ALONGSIDE a legitimate counter update", async () => {
+    await seed(async (db) => { await db.doc(`posts/${postId}`).set({ userId: ownerUid, views: 0 }); });
+    const db = testEnv.authenticatedContext(strangerUid).firestore();
+    await assertFails(db.doc(`posts/${postId}`).update({ views: 1, flaggedForReview: true }));
+  });
+
+  test("the owner can still update their own post freely, new fields included", async () => {
+    await seed(async (db) => { await db.doc(`posts/${postId}`).set({ userId: ownerUid }); });
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertSucceeds(db.doc(`posts/${postId}`).update({ caption: "Updated caption" }));
+  });
+});

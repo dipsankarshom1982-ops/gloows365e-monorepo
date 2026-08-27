@@ -5,7 +5,52 @@ service cloud.firestore {
     // 🔒 STUDENTS PROFILE
     match /students/{userId} {
       allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
-      allow create, update, delete: if request.auth.uid == userId;
+      // SECURITY FIX (full audit, 2026-08-27): this used to have NO field
+      // restriction at all on create or update — any signed-in user could
+      // set literally any field on their own students/{uid} doc via a
+      // direct client SDK write. Two fields that actually matters:
+      // studentId (functions/src/studentId.ts's GLS###### human-readable
+      // ID — its whole point is to be a stable, unique lookup key support
+      // reads back to a student over the phone, and admin's Payment
+      // Management studentId search, functions/src/refundSearch.ts, does a
+      // `where("studentId","==",...)` lookup that trusts it's unique) and
+      // learnScore (server-only, credited by functions/src/seekho.ts's
+      // completeChapter via the Admin SDK). Neither was ever meant to be
+      // client-writable — same class of gap already fixed on users/{uid}
+      // above, just left unswept on this sibling collection.
+      //
+      // Allowlist is the exact union of every field written by a real
+      // students/{uid} create call site in the repo (mobile + web
+      // registration, both platforms' minimal signup.tsx/page.tsx bootstrap
+      // doc, profile-settings resave-after-missing-doc, language-only and
+      // push-token-only writes, mobile's LearnFun mission rewards) —
+      // re-verified against current code. studentId/learnScore are
+      // deliberately absent, so hasOnly() rejects them outright on create
+      // regardless of value.
+      allow create: if request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'name', 'title', 'phone', 'school', 'board', 'section', 'class',
+          'preferredLanguage', 'profilePic', 'parentPhone', 'parentPhoneVerified',
+          'parentalConsent', 'dob', 'age', 'location', 'interests', 'stats',
+          'learningProfile', 'onboardingComplete', 'createdAt', 'updatedAt',
+          'email', 'role', 'pushToken',
+          'LearnFunXP', 'LearnFunStreak', 'LearnFunLastMissionDate',
+          'LearnFunCompletedMissions', 'LearnFunBadges'
+        ])
+        && (!('role' in request.resource.data) || request.resource.data.role == 'student');
+      // Deny-list, not an allowlist — every legitimate field profile edits/
+      // language changes/push-token registration/LearnFun rewards write
+      // needs room to keep working without this rule needing a re-edit
+      // every time a new profile field ships; only the two server-only
+      // fields are ever blocked. affectedKeys(), not changedKeys() — a
+      // field being touched for the FIRST time on an existing doc lands in
+      // addedKeys(), invisible to changedKeys(), which is exactly the bug
+      // users/{uid}'s update rule above was fixed for; affectedKeys() is
+      // the union of added+changed+removed and is what a "never touch
+      // these fields" deny-list actually needs.
+      allow update: if request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['studentId', 'learnScore']);
+      allow delete: if request.auth.uid == userId;
     }
 
     // 🔥 POSTS
@@ -20,7 +65,15 @@ service cloud.firestore {
             request.resource.data.userId == resource.data.userId
             && (
               request.auth.uid == resource.data.userId
-              || request.resource.data.diff(resource.data).changedKeys().hasOnly([
+              // affectedKeys(), not changedKeys() — see users/{uid}'s update
+              // rule for why: a first-time-added field is invisible to
+              // changedKeys(), so a non-owner could otherwise smuggle in any
+              // brand-new field name on someone else's post as long as the
+              // post never had that field before. views/likes/comments/
+              // watchTime/shares are always seeded at post creation (see
+              // apps/mobile/app/Createreelscreen.tsx) so this tightens
+              // nothing for the legitimate counter-increment path.
+              || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                 'views', 'likes', 'comments', 'watchTime', 'shares'
               ])
             )
@@ -216,7 +269,11 @@ service cloud.firestore {
       allow update: if request.auth.token.admin == true
         || (
           request.auth != null
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['joinedCount', 'updatedAt'])
+          // affectedKeys(), not changedKeys() — same first-time-added-field
+          // gap as posts/{postId} above. joinedCount is always seeded to 0
+          // at contest creation (apps/admin/src/pages/CreateContest.tsx) so
+          // this doesn't change the legitimate join-increment path.
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['joinedCount', 'updatedAt'])
           && request.resource.data.joinedCount == resource.data.joinedCount + 1
           && request.resource.data.joinedCount <= resource.data.totalSpots
         );
@@ -306,7 +363,14 @@ service cloud.firestore {
       allow update: if request.auth.token.admin == true
         || (
           request.auth != null
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          // affectedKeys(), not changedKeys() — same first-time-added-field
+          // gap as posts/{postId} above. `participants` in particular is
+          // NOT seeded at battle creation (apps/admin/src/pages/
+          // SkillBattles.tsx never writes it) — it's only ever set the
+          // first time someone joins, which changedKeys() couldn't see at
+          // all, silently exempting it (and anything else newly-added)
+          // from this allowlist entirely.
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'participants', 'participantCount', 'joinedCount'
           ])
         );
@@ -733,7 +797,14 @@ service cloud.firestore {
           resource.data.uid == request.auth.uid
           && resource.data.status == "unclaimed"
           && request.resource.data.status == "claimed"
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly(["claimInfo", "status"])
+          // affectedKeys(), not changedKeys() — same first-time-added-field
+          // gap as posts/{postId} above. claimInfo itself is ALWAYS a
+          // first-time add here (admin creates the doc without it), so the
+          // old changedKeys() check never actually saw claimInfo in the
+          // diff at all — meaning a student could add arbitrary extra new
+          // fields alongside their real claimInfo submission and this
+          // hasOnly() would silently let every one of them through.
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["claimInfo", "status"])
         )
       );
       allow delete: if false;
