@@ -116,7 +116,7 @@ function ContestCard({
           </View>
 
           <Text style={S.starIcon}>{emoji}</Text>
-          <Text style={S.cardTitle} numberOfLines={2}>{item.title}</Text>
+          <Text style={S.cardTitle} numberOfLines={3}>{item.title}</Text>
 
           {item.prizePool ? (
             <View style={S.prizeRow}>
@@ -169,13 +169,12 @@ export default function VidyaStarPreviewSection() {
 
   const contests = allContests
     .map((d) => d as ContestItem)
-    .filter((item) => {
-      // Hide ended contests the student never participated in
-      if (getContestStatus(item) === "ended") {
-        return !!joined[item.id] || !!completed[item.id];
-      }
-      return true;
-    })
+    // Home preview shows only live/upcoming — "ended" (even one the student
+    // participated in) is never shown here anymore. The full history,
+    // including past contests with results, still lives on the VidyaStar
+    // hub ("View All" above) — this card rail is meant to prompt action on
+    // what's happening now/next, not double as an archive.
+    .filter((item) => getContestStatus(item) !== "ended")
     .sort((a, b) => {
       if ((b.isFeatured ? 1 : 0) !== (a.isFeatured ? 1 : 0))
         return (b.isFeatured ? 1 : 0) - (a.isFeatured ? 1 : 0);
@@ -199,7 +198,7 @@ export default function VidyaStarPreviewSection() {
 
       {loading ? (
         <View style={{ flexDirection: "row", paddingLeft: 16 }}>
-          {[0, 1, 2].map((i) => <Pulse key={i} w={180} h={230} r={16} />)}
+          {[0, 1, 2].map((i) => <Pulse key={i} w={200} h={270} r={16} />)}
         </View>
       ) : error ? (
         <View style={S.empty}>
@@ -234,7 +233,7 @@ const S = StyleSheet.create({
   sectionSub:   { fontSize: 12, fontWeight: "500" },
   viewAll:      { fontSize: 13, fontWeight: "700", color: "#7c3aed", marginTop: 4 },
 
-  card:     { marginRight: 12, width: 180, height: 230, borderRadius: 16, overflow: "hidden", elevation: 6, shadowColor: "#7c3aed", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
+  card:     { marginRight: 12, width: 200, height: 270, borderRadius: 16, overflow: "hidden", elevation: 6, shadowColor: "#7c3aed", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
   cardGrad: { flex: 1, padding: 14, justifyContent: "space-between" },
   cardTop:  { flex: 1 },
   cardBottom: {},
