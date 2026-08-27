@@ -12,6 +12,7 @@ firebase-debug.log
 
 # Next.js
 out/
+apps/web/tsconfig.tsbuildinfo
 
 # Logs
 *.log
