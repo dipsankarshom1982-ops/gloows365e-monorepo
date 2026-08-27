@@ -80,6 +80,9 @@ export default function SkillGuruPage() {
   const [thinking,  setThinking]  = useState(false);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [showPaywall, setShowPaywall] = useState(false);
+  // Set only on a CREDITS_EXHAUSTED response — undefined keeps the
+  // paywall's plain pre-credits copy/CTA.
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
   const taRef     = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -87,14 +90,6 @@ export default function SkillGuruPage() {
   // stale closure value.
   const messagesRef = useRef<Message[]>([]);
   const sessionIdRef = useRef<string>(newSessionId());
-
-  // Client-side free-quota gate: the first student message in a session
-  // is free, every message after that shows the upgrade paywall instead
-  // of calling the backend. Enforces "first one free, then upgrade"
-  // locally, since the actual backend isn't part of this codebase and
-  // can't be relied on to enforce the same policy.
-  const FREE_SKILLGURU_MESSAGES = 1;
-  const studentMessagesSentRef = useRef(0);
 
   const category = activeCategory ? getSkillCategory(activeCategory) : null;
   const accent      = category?.color ?? NEUTRAL;
@@ -104,13 +99,14 @@ export default function SkillGuruPage() {
     const q = (text || input).trim();
     if (!q || thinking) return;
 
-    // Client-side gate: once the free quota is used, show the upgrade
-    // paywall immediately instead of calling the backend.
-    if (studentMessagesSentRef.current >= FREE_SKILLGURU_MESSAGES) {
-      setShowPaywall(true);
-      return;
-    }
-    studentMessagesSentRef.current += 1;
+    // FIX: this used to hard-block after 1 message per session via a
+    // client-side, never-resetting studentMessagesSentRef counter —
+    // stricter than the server's real daily limit (1/day, functions/src/
+    // usageCheck.ts's checkVidyaGuruLimit — this page and ai-guru/
+    // vidyaguru share the same /vidyaguruChat backend function) and meant
+    // nobody could ever reach the credits fallback past their first
+    // message of a session. Removed; the server is the source of truth.
+    // Mirrors apps/mobile/app/ai-guru/skillguru.tsx's identical fix.
 
     const effectiveCategoryKey = categoryOverride ?? activeCategory;
     if (categoryOverride && categoryOverride !== activeCategory) setActiveCategory(categoryOverride);
@@ -174,12 +170,26 @@ export default function SkillGuruPage() {
         { id: guruMsg.id, role: "guru", text: guruMsg.text, createdAt: guruMsg.createdAt },
       ]).catch(() => {});
     } catch (e: any) {
-      const errText = e?.message ?? t("networkErrorRetry", "Network error. Please try again.");
-      const errMsg: Message = { id: `g_${Date.now()}`, role: "assistant", text: errText, createdAt: Date.now() };
-      messagesRef.current = [...messagesRef.current, errMsg];
-      setMessages([...messagesRef.current]);
-      // Not persisted — an error message isn't part of the coaching
-      // record worth keeping.
+      // FIX: this used to render every failure (including a genuine
+      // CREDITS_EXHAUSTED/FREE_LIMIT_REACHED block) as a plain assistant
+      // chat bubble, so the paywall modal below was dead UI — showPaywall
+      // was only ever set by the now-removed client pre-gate. Route
+      // through the paywall for those two codes specifically, same as
+      // mobile's app/ai-guru/skillguru.tsx.
+      if (e?.code === "CREDITS_EXHAUSTED") {
+        setCreditInfo({ balance: e.creditBalance ?? 0, required: e.creditsRequired ?? 1 });
+        setShowPaywall(true);
+      } else if (e?.code === "FREE_LIMIT_REACHED") {
+        setCreditInfo(undefined);
+        setShowPaywall(true);
+      } else {
+        const errText = e?.message ?? t("networkErrorRetry", "Network error. Please try again.");
+        const errMsg: Message = { id: `g_${Date.now()}`, role: "assistant", text: errText, createdAt: Date.now() };
+        messagesRef.current = [...messagesRef.current, errMsg];
+        setMessages([...messagesRef.current]);
+        // Not persisted — an error message isn't part of the coaching
+        // record worth keeping.
+      }
     }
 
     setThinking(false);
@@ -191,7 +201,6 @@ export default function SkillGuruPage() {
     setMessages([]);
     setFollowUps([]);
     setActiveCategory(null);
-    studentMessagesSentRef.current = 0;
     sessionIdRef.current = newSessionId(); // new session, doesn't touch the saved prior one
   }
 
@@ -341,20 +350,29 @@ export default function SkillGuruPage() {
         </div>
       </div>
 
-      {/* Paywall overlay — shown once the free quota (see
-          FREE_SKILLGURU_MESSAGES above) is used. */}
+      {/* Paywall overlay — shown on a CREDITS_EXHAUSTED/FREE_LIMIT_REACHED
+          response from the shared /vidyaguruChat backend. */}
       {showPaywall && (
         <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", zIndex: 50, padding: 24 }} onClick={() => setShowPaywall(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 380, borderRadius: 24, padding: 28, background: isDarkMode ? "#161b33" : colors.background, border: `1px solid ${borderCol}`, display: "flex", flexDirection: "column", alignItems: "center", gap: 16, textAlign: "center" }}>
             <div style={{ width: 64, height: 64, borderRadius: "50%", background: `linear-gradient(135deg,${accentDark},${accent})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30 }}>{category?.emoji ?? "🎯"}</div>
             <div style={{ color: textColor, fontSize: 19, fontWeight: 900 }}>{t("paywallTitleSkillGuru", "Continue with SkillGuru?")}</div>
-            <div style={{ color: mutedColor, fontSize: 14, lineHeight: 1.55 }}>{t("paywallBody", "You've used your free question for today. Upgrade to Premium for unlimited conversations!")}</div>
+            <div style={{ color: mutedColor, fontSize: 14, lineHeight: 1.55 }}>
+              {creditInfo
+                ? `You've used your free question for today. You have ${creditInfo.balance} credit${creditInfo.balance===1?"":"s"} — buy more or upgrade to Premium for unlimited conversations.`
+                : t("paywallBody", "You've used your free question for today. Upgrade to Premium for unlimited conversations!")}
+            </div>
             <Link
-              href="/ai-guru/subscription"
-              style={{ width: "100%", padding: "14px 0", borderRadius: 16, background: `linear-gradient(135deg,${accent},${accentDark})`, color: "#fff", fontSize: 15, fontWeight: 800, textAlign: "center", textDecoration: "none", display: "block" }}
+              href={creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription"}
+              style={{ width: "100%", padding: "14px 0", borderRadius: 16, background: creditInfo ? "linear-gradient(135deg,#4f46e5,#7c3aed)" : `linear-gradient(135deg,${accent},${accentDark})`, color: "#fff", fontSize: 15, fontWeight: 800, textAlign: "center", textDecoration: "none", display: "block" }}
             >
-              ✨ {t("upgradeToPremium", "Upgrade to Premium")}
+              {creditInfo ? "⚡ Buy Credits" : `✨ ${t("upgradeToPremium", "Upgrade to Premium")}`}
             </Link>
+            {creditInfo && (
+              <Link href="/ai-guru/subscription" style={{ color: mutedColor, fontSize: 12, textDecoration: "none" }}>
+                Or upgrade to Premium for unlimited access
+              </Link>
+            )}
             <button className="sg-btn" onClick={() => setShowPaywall(false)} style={{ background: "none", border: "none", color: mutedColor, fontSize: 13, fontWeight: 600, padding: "4px 0" }}>
               {t("maybeLater", "Maybe Later")}
             </button>

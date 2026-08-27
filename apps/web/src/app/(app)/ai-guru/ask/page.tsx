@@ -33,7 +33,7 @@
 // curated sample shown on the landing state, before there's anything to
 // relate to) has been removed — mirrors mobile's app/ai-guru/ask.tsx.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { getAuth } from "firebase/auth";
 import { getFirestore, collection, addDoc, serverTimestamp } from "firebase/firestore";
@@ -41,8 +41,8 @@ import { useStudentProfile } from "@gloows/shared-logic";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import { getRelatedSearches } from "@/lib/aiGuru/relatedSearches";
+import { subscribeToCreditBalance } from "@/services/aiGuruCreditsService";
 
-const FREE_DAILY_ASK = 1;
 const CF_URL = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_URL ?? "";
 
 type ModeKey = "explain"|"notes"|"exam"|"doubt"|"summarize"|"tip"|"language";
@@ -73,7 +73,12 @@ async function askQuestion(payload:{question:string;classLevel:string;board:stri
     body:JSON.stringify(payload),
   });
   const data = await resp.json();
-  if (!resp.ok){const e:any=new Error(data.error??"failed");e.code=data.code??"UNKNOWN";throw e;}
+  if (!resp.ok){
+    const e:any=new Error(data.error??"failed");e.code=data.code??"UNKNOWN";
+    if (data.creditBalance   !== undefined) e.creditBalance   = data.creditBalance;
+    if (data.creditsRequired !== undefined) e.creditsRequired = data.creditsRequired;
+    throw e;
+  }
   return data as {answer:string};
 }
 
@@ -124,7 +129,9 @@ export default function AskAiGuruPage() {
   const [askedQ,     setAskedQ]     = useState("");
   const [askedMode,  setAskedMode]  = useState<ModeKey>("doubt");
   const [errMsg,     setErrMsg]     = useState("");
-  const [remaining,  setRemaining]  = useState(FREE_DAILY_ASK);
+  // Set only on a CREDITS_EXHAUSTED response — undefined keeps the
+  // "limit" screen's plain pre-credits render.
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
   const [saving,     setSaving]     = useState(false);
   const [savedId,    setSavedId]    = useState<string|null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -140,24 +147,41 @@ export default function AskAiGuruPage() {
     [askedQ]
   );
 
+  // Credit balance — replaces the old "X/1" badge below, which was built
+  // entirely around the removed FREE_DAILY_ASK=1 client constant and
+  // never reflected the server's real count.
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  useEffect(() => {
+    const uid = getAuth().currentUser?.uid;
+    if (!uid) return;
+    return subscribeToCreditBalance(uid, setCreditBalance);
+  }, []);
+
   async function runSearch(text?: string, mode?: ModeKey) {
     const q = (text ?? query).trim();
     const m = mode ?? activeMode;
     if (!q || result === "loading") return;
-    // Client-side gate: once the free quota is used, don't even call the
-    // backend — go straight to the upgrade screen. This makes "first
-    // question free, then upgrade" work correctly regardless of whether
-    // the backend (not part of this codebase) enforces its own limit.
-    if (remaining <= 0) { setAskedQ(q); setResult("limit"); return; }
+    // FIX: this used to hard-block after 1 question via a client-side
+    // FREE_DAILY_ASK=1 constant that didn't match the server's real free
+    // limit (5/day, functions/src/usageCheck.ts) — nobody could ever
+    // reach the credits fallback. Removed; the server is the source of
+    // truth. Mirrors apps/mobile/app/ai-guru/ask.tsx's identical fix.
     if (mode) setActiveMode(mode);
     setQuery(q);
     setAskedQ(q); setAskedMode(m); setResult("loading"); setAnswer(""); setErrMsg(""); setSavedId(null);
     try {
       const d = await askQuestion({ question: q, classLevel: studentClass, board, mode: m });
-      setAnswer(d.answer); setResult("found"); setRemaining(r => Math.max(0, r - 1));
+      setAnswer(d.answer); setResult("found");
     } catch (e: any) {
-      if (e?.code === "LIMIT_REACHED") { setResult("limit"); setRemaining(0); }
-      else { setErrMsg(e?.message ?? t("somethingWentWrong","Something went wrong")); setResult("error"); }
+      if (e?.code === "CREDITS_EXHAUSTED") {
+        setCreditInfo({ balance: e.creditBalance ?? 0, required: e.creditsRequired ?? 1 });
+        setResult("limit");
+      } else if (e?.code === "LIMIT_REACHED") {
+        setCreditInfo(undefined);
+        setResult("limit");
+      } else {
+        setErrMsg(e?.message ?? t("somethingWentWrong","Something went wrong")); setResult("error");
+      }
     }
   }
 
@@ -201,10 +225,12 @@ export default function AskAiGuruPage() {
         {hasSearched && (
           <span style={{ flex: 1, color: textPrimary, fontSize: 16, fontWeight: 800 }}>{t("askAiGuruTitle","Ask AI Guru")}</span>
         )}
-        <div style={{ marginLeft: hasSearched ? 0 : "auto", display: "flex", alignItems: "center", gap: 5, background: isDarkMode ? "rgba(255,255,255,0.06)" : colors.card, border: `1px solid ${remaining>0?borderSoft:"rgba(239,68,68,0.4)"}`, borderRadius: 20, padding: "5px 10px" }}>
-          <div style={{ width: 7, height: 7, borderRadius: "50%", background: remaining>0?"#10b981":"#ef4444" }} />
-          <span style={{ color: remaining>0?"#10b981":"#ef4444", fontSize: 11, fontWeight: 800 }}>{remaining}/{FREE_DAILY_ASK}</span>
-        </div>
+        {!!creditBalance && (
+          <Link href="/ai-guru/credits" style={{ marginLeft: hasSearched ? 0 : "auto", display: "flex", alignItems: "center", gap: 5, background: "linear-gradient(90deg,#4f46e5,#7c3aed)", borderRadius: 20, padding: "5px 10px", textDecoration: "none" }}>
+            <span style={{ fontSize: 11 }}>⚡</span>
+            <span style={{ color: "#fff", fontSize: 11, fontWeight: 800 }}>{creditBalance}</span>
+          </Link>
+        )}
         <Link href="/ai-guru/notebook" style={{ display: "flex", alignItems: "center", gap: 5, background: isDarkMode ? "rgba(255,255,255,0.06)" : colors.card, border: `1px solid ${borderSoft}`, borderRadius: 20, padding: "5px 10px", textDecoration: "none" }}>
           <span style={{ fontSize: 14 }}>📓</span>
           {hasSearched && <span style={{ color: colors.accent, fontSize: 11, fontWeight: 700 }}>{t("notebook","Notebook")}</span>}
@@ -351,8 +377,19 @@ export default function AskAiGuruPage() {
               <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"56px 0",gap:16}}>
                 <span style={{fontSize:52}}>⏰</span>
                 <div style={{color:textPrimary,fontSize:19,fontWeight:800,textAlign:"center"}}>{t("dailyLimitTitle","Daily limit reached")}</div>
-                <div style={{color:textMuted,fontSize:13,textAlign:"center",maxWidth:280,lineHeight:1.6}}>{t("dailyLimitMessage",FREE_DAILY_ASK===1?"You've used your free question for today. Come back tomorrow or upgrade to Premium.":`You've used all ${FREE_DAILY_ASK} free questions for today. Come back tomorrow or upgrade to Premium.`,{count:FREE_DAILY_ASK})}</div>
-                <Link href="/ai-guru/subscription" style={{width:"100%",maxWidth:320,padding:"15px 0",borderRadius:16,background:"linear-gradient(90deg,#312e81,#4f46e5)",color:"#fff",fontSize:15,fontWeight:800,textAlign:"center",textDecoration:"none",display:"block"}}>✨ {t("upgradeToPremium","Upgrade to Premium")}</Link>
+                <div style={{color:textMuted,fontSize:13,textAlign:"center",maxWidth:280,lineHeight:1.6}}>
+                  {creditInfo
+                    ? `You've used today's free questions. You have ${creditInfo.balance} credit${creditInfo.balance===1?"":"s"} — buy more or upgrade to Premium.`
+                    : t("dailyLimitMessage","You've used your free questions for today. Come back tomorrow or upgrade to Premium.")}
+                </div>
+                <Link href={creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription"} style={{width:"100%",maxWidth:320,padding:"15px 0",borderRadius:16,background:"linear-gradient(90deg,#312e81,#4f46e5)",color:"#fff",fontSize:15,fontWeight:800,textAlign:"center",textDecoration:"none",display:"block"}}>
+                  {creditInfo ? "⚡ Buy Credits" : `✨ ${t("upgradeToPremium","Upgrade to Premium")}`}
+                </Link>
+                {creditInfo && (
+                  <Link href="/ai-guru/subscription" style={{color:"#a5b4fc",fontSize:12,textDecoration:"none"}}>
+                    Or upgrade to Premium for unlimited access
+                  </Link>
+                )}
                 {/* NOTE: no longer links to SkillGuru as an alternative —
                     that cross-link was a symptom of the redundancy this
                     rebuild removes. The two tools now have distinct

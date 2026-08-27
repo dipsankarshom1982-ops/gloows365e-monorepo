@@ -25,7 +25,10 @@ interface RazorpayOptions {
 
 declare global {
   interface Window {
-    Razorpay: new (options: RazorpayOptions) => { open(): void };
+    Razorpay: new (options: RazorpayOptions) => {
+      open(): void;
+      on(event: "payment.failed", handler: (response: { error: { description?: string } }) => void): void;
+    };
   }
 }
 
@@ -49,15 +52,20 @@ export function RazorpayCheckout({ orderId, amount, description, onSuccess, onEr
     return () => { document.body.removeChild(script); };
   }, []);
 
-  const { studentProfile } = useStudentProfile();
+  const { studentProfile, user } = useStudentProfile();
 
   const openCheckout = () => {
     if (!window.Razorpay) {
       onError?.("Payment gateway not loaded. Please try again.");
       return;
     }
+    const keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+    if (!keyId) {
+      onError?.("Payment isn't configured yet. Please contact support.");
+      return;
+    }
     const rzp = new window.Razorpay({
-      key:         process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
+      key:         keyId,
       amount,
       currency:    "INR",
       name:        "Gloows365E",
@@ -65,7 +73,7 @@ export function RazorpayCheckout({ orderId, amount, description, onSuccess, onEr
       order_id:    orderId,
       prefill: {
         name:    studentProfile?.name,
-        email:   studentProfile?.email,
+        email:   user?.email ?? undefined,
         contact: studentProfile?.phone,
       },
       theme: { color: "#6366f1" },
@@ -76,6 +84,9 @@ export function RazorpayCheckout({ orderId, amount, description, onSuccess, onEr
           response.razorpay_signature
         );
       },
+    });
+    rzp.on("payment.failed", (response) => {
+      onError?.(response.error?.description ?? "Payment failed. Please try again.");
     });
     rzp.open();
   };
