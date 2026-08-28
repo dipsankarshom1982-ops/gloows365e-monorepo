@@ -39,7 +39,7 @@ import { BlurView } from "expo-blur";
 import * as FileSystem from "expo-file-system/legacy";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -71,7 +71,6 @@ import {
   type SkillCategoryKey,
 } from "@/lib/aiGuru/skillGuruDomains";
 import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
-import { getRelatedSearches } from "@/lib/aiGuru/relatedSearches";
 
 // Neutral identity before any skill category is picked — once one is
 // active, its own color (from SKILL_CATEGORIES) takes over.
@@ -101,15 +100,14 @@ export default function SkillGuruScreen() {
   // Keep active category in a ref too, since the mic-driven sendMessage
   // call happens inside an async handler that shouldn't read stale state.
   const activeCategoryRef = useRef<SkillCategoryKey | null>(null);
-  // Client-side free-quota gate: the first student message in a session
-  // is free, every message after that shows the upgrade paywall instead
-  // of calling the backend. This enforces "first one free, then
-  // upgrade" locally — the backend's own FREE_LIMIT_REACHED error (see
-  // the catch block below) is a second, server-side layer on top of
-  // this, not a replacement for it, since that backend isn't part of
-  // this codebase and may not enforce the same policy.
-  const FREE_SKILLGURU_MESSAGES = 1;
-  const studentMessagesSentRef = useRef(0);
+  // FIX: this used to hard-block after 1 message per session via a
+  // client-side, never-resetting studentMessagesSentRef counter — stricter
+  // than the server's real daily limit (1/day, functions/src/usageCheck.ts's
+  // checkVidyaGuruLimit — this screen and ai-guru/vidyaguru.tsx share the
+  // same /vidyaguruChat backend function) and meant nobody could ever
+  // reach the credits fallback past their first message of a session.
+  // Removed; the server is the source of truth.
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
@@ -139,14 +137,6 @@ export default function SkillGuruScreen() {
   const sendMessage = useCallback(
     async (text: string, audioBase64?: string, audioMimeType?: string, categoryOverride?: SkillCategoryKey) => {
       if (!text.trim() && !audioBase64) return;
-
-      // Client-side gate: once the free quota is used, show the upgrade
-      // paywall immediately instead of calling the backend.
-      if (studentMessagesSentRef.current >= FREE_SKILLGURU_MESSAGES) {
-        setShowPaywall(true);
-        return;
-      }
-      studentMessagesSentRef.current += 1;
 
       if (categoryOverride && categoryOverride !== activeCategoryRef.current) {
         activeCategoryRef.current = categoryOverride;
@@ -227,7 +217,11 @@ export default function SkillGuruScreen() {
         }
       } catch (err: any) {
         setGuruState("idle");
-        if (err?.code === "FREE_LIMIT_REACHED") {
+        if (err?.code === "CREDITS_EXHAUSTED") {
+          setCreditInfo({ balance: err.creditBalance ?? 0, required: err.creditsRequired ?? 1 });
+          setShowPaywall(true);
+        } else if (err?.code === "FREE_LIMIT_REACHED") {
+          setCreditInfo(undefined);
           setShowPaywall(true);
         } else {
           Alert.alert("Oops!", err?.message ?? "Failed to get a response. Please try again.");
@@ -235,19 +229,6 @@ export default function SkillGuruScreen() {
       }
     },
     [studentName, classLevel, languageName, t]
-  );
-
-  // Related follow-up questions — shown under SkillGuru's latest reply,
-  // same mechanism (and topic bank) as Ask AI Guru's "related searches"
-  // rail so both sub-features behave identically. Computed from the last
-  // question the student actually asked, only once the guru has finished
-  // replying to it (not while "thinking"/"speaking"/"listening").
-  const lastStudentQuestion = [...messages].reverse().find((m) => m.role === "student")?.text;
-  const lastMessage = messages[messages.length - 1];
-  const showRelated = guruState === "idle" && lastMessage?.role === "guru" && !!lastStudentQuestion;
-  const relatedQuestions = useMemo(
-    () => (showRelated && lastStudentQuestion ? getRelatedSearches(lastStudentQuestion, 6).items : []),
-    [showRelated, lastStudentQuestion]
   );
 
   const handleMicPress = async () => {
@@ -397,28 +378,6 @@ export default function SkillGuruScreen() {
           renderItem={({ item }) => (
             <ChatBubble message={item} onReplayAudio={handleReplayAudio} isDarkMode={isDarkMode} color={accent} />
           )}
-          ListFooterComponent={
-            relatedQuestions.length > 0 ? (
-              <View style={S.relatedWrap}>
-                <Text style={[S.relatedLabel, { color: colors.textSecondary }]}>
-                  {t("relatedSearches", "RELATED SEARCHES")}
-                </Text>
-                <View style={S.relatedGrid}>
-                  {relatedQuestions.map((q, i) => (
-                    <TouchableOpacity
-                      key={`${q.text}_${i}`}
-                      style={[S.relatedChip, { backgroundColor: surfaceBg, borderColor: borderCol }]}
-                      onPress={() => sendMessage(q.text)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={S.relatedEmoji}>{q.emoji}</Text>
-                      <Text style={[S.relatedText, { color: colors.text }]} numberOfLines={2}>{q.text}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            ) : null
-          }
           contentContainerStyle={S.messageList}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           showsVerticalScrollIndicator={false}
@@ -521,19 +480,30 @@ export default function SkillGuruScreen() {
           >
             <GuruAvatar state="idle" size={80} color={accent} />
             <Text style={[S.paywallTitle, { color: colors.text }]}>{t("paywallTitleSkillGuru", "Continue with SkillGuru?")}</Text>
-            <Text style={[S.paywallBody, { color: colors.textSecondary }]}>{t("paywallBody", "You've used your free question for today. Upgrade to Premium for unlimited conversations!")}</Text>
+            <Text style={[S.paywallBody, { color: colors.textSecondary }]}>
+              {creditInfo
+                ? `You've used your free question for today. You have ${creditInfo.balance} credit${creditInfo.balance === 1 ? "" : "s"} — buy more or upgrade to Premium for unlimited conversations.`
+                : t("paywallBody", "You've used your free question for today. Upgrade to Premium for unlimited conversations!")}
+            </Text>
             <TouchableOpacity
               style={S.paywallPrimary}
               onPress={() => {
                 setShowPaywall(false);
-                router.push("/ai-guru/subscription" as any);
+                router.push((creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription") as any);
               }}
             >
               <LinearGradient colors={[accent, accentDark]} style={S.paywallGradient}>
-                <Ionicons name="sparkles" size={16} color="#fff" />
-                <Text style={S.paywallPrimaryText}>{t("upgradeToPremium", "Upgrade to Premium")}</Text>
+                <Ionicons name={creditInfo ? "flash" : "sparkles"} size={16} color="#fff" />
+                <Text style={S.paywallPrimaryText}>{creditInfo ? "Buy Credits" : t("upgradeToPremium", "Upgrade to Premium")}</Text>
               </LinearGradient>
             </TouchableOpacity>
+            {creditInfo && (
+              <TouchableOpacity onPress={() => { setShowPaywall(false); router.push("/ai-guru/subscription" as any); }}>
+                <Text style={[S.paywallBody, { color: "#a5b4fc", fontSize: 12 }]}>
+                  Or upgrade to Premium for unlimited access
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={S.paywallClose} onPress={() => setShowPaywall(false)}>
               <Text style={[S.paywallCloseText, { color: colors.textSecondary }]}>{t("maybeLater", "Maybe Later")}</Text>
             </TouchableOpacity>
@@ -559,13 +529,6 @@ const S = StyleSheet.create({
   stateLabel:         { fontSize: 12, fontWeight: "600" },
 
   messageList:        { paddingHorizontal: 8, paddingBottom: 16, paddingTop: 4 },
-
-  relatedWrap:        { paddingHorizontal: 16, paddingTop: 8, gap: 8 },
-  relatedLabel:       { fontSize: 10, fontWeight: "700", letterSpacing: 0.5, marginBottom: 2 },
-  relatedGrid:        { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  relatedChip:        { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 20, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8, maxWidth: "100%" },
-  relatedEmoji:       { fontSize: 13 },
-  relatedText:        { fontSize: 12, maxWidth: 230 },
 
   inputBar:           { borderTopWidth: 1, paddingHorizontal: 12, paddingTop: 8 },
   langRow:            { flexDirection: "row", marginBottom: 8 },
