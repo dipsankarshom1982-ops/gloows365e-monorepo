@@ -159,6 +159,101 @@ export async function fetchTutorServices(tutorUid: string): Promise<TutorService
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as TutorService));
 }
 
+// ShikshaHub redesign — Instant Tutor hero flow. Every published instant_help
+// service across every tutor (not scoped to one tutorUid, unlike
+// fetchTutorServices above) so the Instant Tutor flow can find a match by
+// subject without the caller already knowing which tutor to ask. Single
+// equality filter, no orderBy — no composite index needed, and
+// firestore.rules' `allow read: if request.auth != null` on
+// tutorServicesMarketplace already permits this shape of query.
+export async function fetchAllInstantHelpServices(): Promise<TutorService[]> {
+  const snap = await getDocs(
+    query(collection(db, SERVICES_COLLECTION), where("serviceType", "==", "instant_help"))
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as TutorService));
+}
+
+/** Subjects with at least one currently-online tutor offering Instant Help —
+ *  drives the Instant Tutor flow's subject picker. Purely derived from real
+ *  data (no fixed subject list), same reasoning as deriveSubjectChips above. */
+export function deriveInstantHelpSubjects(tutors: MarketplaceTutor[], services: TutorService[]): string[] {
+  const onlineUids = new Set(tutors.filter((t) => t.isOnlineForInstantHelp).map((t) => t.uid));
+  const set = new Set<string>();
+  for (const s of services) {
+    if (s.serviceType === "instant_help" && onlineUids.has(s.tutorUid) && s.subject?.trim()) {
+      set.add(s.subject.trim());
+    }
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+export interface InstantHelpCandidate {
+  tutor: MarketplaceTutor;
+  service: TutorService;
+}
+
+/** Ranks currently-online, subject-matching Instant Help tutors — by rating,
+ *  then experience, then name — for the Instant Tutor flow's "best match"
+ *  step. No fan-out/broadcast matching engine exists server-side (see
+ *  functions/src/instantHelp.ts's header comment: direct-request model
+ *  only), so this ranking is client-side and the actual request still goes
+ *  to exactly one tutor via requestInstantHelpCall. */
+export function rankInstantHelpMatches(
+  tutors: MarketplaceTutor[],
+  services: TutorService[],
+  subject: string
+): InstantHelpCandidate[] {
+  const onlineByUid = new Map(tutors.filter((t) => t.isOnlineForInstantHelp).map((t) => [t.uid, t]));
+  const needle = subject.trim().toLowerCase();
+  const candidates: InstantHelpCandidate[] = [];
+  for (const s of services) {
+    if (s.serviceType !== "instant_help") continue;
+    if ((s.subject ?? "").trim().toLowerCase() !== needle) continue;
+    const tutor = onlineByUid.get(s.tutorUid);
+    if (!tutor) continue;
+    candidates.push({ tutor, service: s });
+  }
+  candidates.sort((a, b) => {
+    const ar = a.tutor.ratingAverage ?? -1, br = b.tutor.ratingAverage ?? -1;
+    if (ar !== br) return br - ar;
+    const ae = a.tutor.teachingExperienceYears ?? -1, be = b.tutor.teachingExperienceYears ?? -1;
+    if (ae !== be) return be - ae;
+    return a.tutor.name.localeCompare(b.tutor.name);
+  });
+  return candidates;
+}
+
+/** "Next available: Today, 7:00 PM" style label derived from a tutor's real
+ *  weekly availability — null when there's nothing enabled in the next 7
+ *  days (today's already-passed window doesn't count). Never fabricates a
+ *  slot the tutor hasn't actually declared. */
+export function nextAvailableLabel(availability: TutorWeeklyAvailability | null): string | null {
+  if (!availability) return null;
+  const now = new Date();
+  for (let offset = 0; offset < 7; offset++) {
+    const d = new Date(now);
+    d.setDate(now.getDate() + offset);
+    const key = WEEKDAY_KEYS[d.getDay()];
+    const day = availability[key];
+    if (!day?.enabled || !day.start || !day.end) continue;
+
+    if (offset === 0) {
+      const [endH, endM] = day.end.split(":").map(Number);
+      const dayEnd = new Date(d);
+      dayEnd.setHours(endH, endM || 0, 0, 0);
+      if (now > dayEnd) continue; // today's window already passed
+    }
+
+    const [startH, startM] = day.start.split(":").map(Number);
+    const period = startH >= 12 ? "PM" : "AM";
+    const hour12 = ((startH + 11) % 12) + 1;
+    const timeLabel = `${hour12}:${String(startM || 0).padStart(2, "0")} ${period}`;
+    const dayLabel = offset === 0 ? "Today" : offset === 1 ? "Tomorrow" : d.toLocaleDateString(undefined, { weekday: "long" });
+    return `${dayLabel}, ${timeLabel}`;
+  }
+  return null;
+}
+
 export interface RequestBookingInput {
   tutorUid: string;
   serviceId?: string;

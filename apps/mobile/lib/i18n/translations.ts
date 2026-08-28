@@ -414,7 +414,135 @@ export type TranslationSet = {
   stepLabel?: string;
   moreReferralsToUnlock?: string;
   nextReward?: string;
+  // ── ShikshaHub redesign backfill ─────────────────────────────────────────
+  // These keys were already called via t(key) ?? "fallback" throughout the
+  // ShikshaHub feature (booking, Instant Help, messaging, reviews) but were
+  // never actually registered as resources — i18next has no key to fall
+  // further back to in that case, so it returned the raw key string
+  // instead of ever reaching the "??" fallback. Caught by actually running
+  // the redesigned ShikshaHub screen and seeing literal key names on
+  // screen. English only for now, same as many other recent additions in
+  // this file — fallbackLng: "en" covers every other language until a
+  // native speaker reviews translated values.
+  cancelRequest?: string;
+  creditsPerMinuteSuffix?: string;
+  endSession?: string;
+  instantHelpAskNow?: string;
+  instantHelpBuyCredits?: string;
+  instantHelpBuyCreditsLink?: string;
+  instantHelpConnectFailed?: string;
+  instantHelpCreditsBalance?: string;
+  instantHelpCreditsExplain?: string;
+  instantHelpCreditsTitle?: string;
+  instantHelpNoPacks?: string;
+  instantHelpSessionActive?: string;
+  instantHelpTutorOffline?: string;
+  instantHelpTutorOnline?: string;
+  instantHelpWaiting?: string;
+  recentActivity?: string;
+  reviewPromptTitle?: string;
+  reviewSkip?: string;
+  reviewSubmit?: string;
+  reviewSubmitting?: string;
+  reviewTextPlaceholder?: string;
+  reviewsTitle?: string;
+  serviceLabel?: string;
+  shikshaHubAnyExperience?: string;
+  shikshaHubAnyPrice?: string;
+  shikshaHubAnyRating?: string;
+  shikshaHubApplyFilters?: string;
+  shikshaHubAvailableNow?: string;
+  shikshaHubBookSession?: string;
+  shikshaHubBookingNotReady?: string;
+  shikshaHubBookingSent?: string;
+  shikshaHubBookingWaiting?: string;
+  shikshaHubBrowseInstead?: string;
+  shikshaHubBrowseOthers?: string;
+  shikshaHubCancelBooking?: string;
+  shikshaHubCancelling?: string;
+  shikshaHubChangeSubject?: string;
+  shikshaHubClearAll?: string;
+  shikshaHubClearFilters?: string;
+  shikshaHubConnectNow?: string;
+  shikshaHubConnecting?: string;
+  shikshaHubContactTutor?: string;
+  shikshaHubDateLabel?: string;
+  shikshaHubDescribeNeed?: string;
+  shikshaHubDescribeOptional?: string;
+  shikshaHubDescribePlaceholder?: string;
+  shikshaHubExp1Plus?: string;
+  shikshaHubExp3Plus?: string;
+  shikshaHubExp5Plus?: string;
+  shikshaHubFeeLabel?: string;
+  shikshaHubFilters?: string;
+  shikshaHubFindInstantTutor?: string;
+  shikshaHubFindMyTutor?: string;
+  shikshaHubFindRegular?: string;
+  shikshaHubFindRegularSubtitle?: string;
+  shikshaHubHeaderSubtitle?: string;
+  shikshaHubHeroSubtitle?: string;
+  shikshaHubHourSuffix?: string;
+  shikshaHubInstantSession?: string;
+  shikshaHubInstantTutor?: string;
+  shikshaHubInstantTutorLabel?: string;
+  shikshaHubInterested?: string;
+  shikshaHubLeaveReview?: string;
+  shikshaHubLoadError?: string;
+  shikshaHubMatching?: string;
+  shikshaHubMessagePlaceholder?: string;
+  shikshaHubMessageSend?: string;
+  shikshaHubMessageStartHint?: string;
+  shikshaHubMessagesTitle?: string;
+  shikshaHubMoreFilters?: string;
+  shikshaHubMyBookingsTitle?: string;
+  shikshaHubNeedHelpNow?: string;
+  shikshaHubNextAvailable?: string;
+  shikshaHubNoFilterResults?: string;
+  shikshaHubNoMatch?: string;
+  shikshaHubNoMessages?: string;
+  shikshaHubNoMyBookings?: string;
+  shikshaHubNoOneOnline?: string;
+  shikshaHubNoSlots?: string;
+  shikshaHubOnlineNow?: string;
+  shikshaHubPickLevel?: string;
+  shikshaHubPickSubject?: string;
+  shikshaHubPrice1000Plus?: string;
+  shikshaHubPrice500to1000?: string;
+  shikshaHubPriceLabel?: string;
+  shikshaHubPriceUnder500?: string;
+  shikshaHubRatingLabel?: string;
+  shikshaHubRecommendedTutors?: string;
+  shikshaHubRegular?: string;
+  shikshaHubRequestBooking?: string;
+  shikshaHubRequesting?: string;
+  shikshaHubReviewSkip?: string;
+  shikshaHubReviewSubmit?: string;
+  shikshaHubReviewSubmitting?: string;
+  shikshaHubReviewTextPlaceholder?: string;
+  shikshaHubReviews?: string;
+  shikshaHubScheduleSession?: string;
+  shikshaHubSearchPlaceholder?: string;
+  shikshaHubSessionTypeLabel?: string;
+  shikshaHubSkip?: string;
+  shikshaHubSortBy?: string;
+  shikshaHubSortByRating?: string;
+  shikshaHubSortExperienced?: string;
+  shikshaHubSortLabel?: string;
+  shikshaHubSortPriceHigh?: string;
+  shikshaHubSortPriceLow?: string;
+  shikshaHubSortRecommended?: string;
+  shikshaHubSortTopRated?: string;
+  shikshaHubSubjectLabel?: string;
+  shikshaHubTimeLabel?: string;
+  shikshaHubTrial?: string;
+  shikshaHubTrySomeoneElse?: string;
+  shikshaHubTutorsAvailableNow?: string;
+  shikshaHubTutorsFound?: string;
+  shikshaHubViewProfile?: string;
+  shikshaHubYearsExp?: string;
+  tutorReplyLabel?: string;
 };
+
 
 type Translations = Record<string, TranslationSet>;
 
@@ -606,6 +734,8 @@ const translations: Translations = {
     shareEarn: "Share & Earn", pendingLabel: "Pending", joinedLabel: "Joined",
     stepLabel: "Step", moreReferralsToUnlock: "more referrals to unlock",
     nextReward: "Next reward",
+    // ── ShikshaHub redesign backfill — see TranslationSet's matching comment ──
+    cancelRequest: "Cancel Request", creditsPerMinuteSuffix: "credits/min", endSession: "End Session", instantHelpAskNow: "Ask Now", instantHelpBuyCredits: "Buy Credits", instantHelpBuyCreditsLink: "Buy credits →", instantHelpConnectFailed: "Could not connect right now. Please try another tutor.", instantHelpCreditsBalance: "Tutor credits", instantHelpCreditsExplain: "Credits fund Instant Help — billed per minute while a session is active.", instantHelpCreditsTitle: "Instant Help Credits", instantHelpNoPacks: "Credit packs aren't available right now. Check back soon!", instantHelpSessionActive: "Instant Help session active", instantHelpTutorOffline: "Offline — can't request right now", instantHelpTutorOnline: "Online now", instantHelpWaiting: "Waiting for tutor to respond…", recentActivity: "Recent Activity", reviewPromptTitle: "How was your session with", reviewSkip: "Skip", reviewSubmit: "Submit Review", reviewSubmitting: "Submitting…", reviewTextPlaceholder: "Optional: share more about your experience", reviewsTitle: "Reviews", serviceLabel: "Service", shikshaHubAnyExperience: "Any Experience", shikshaHubAnyPrice: "Any Price", shikshaHubAnyRating: "Any Rating", shikshaHubApplyFilters: "Apply Filters", shikshaHubAvailableNow: "Available Now", shikshaHubBookSession: "Book Session", shikshaHubBookingNotReady: "This tutor hasn't set up bookable subjects/pricing yet.", shikshaHubBookingSent: "Booking request sent", shikshaHubBookingWaiting: "Waiting for tutor confirmation", shikshaHubBrowseInstead: "Browse regular tutors instead", shikshaHubBrowseOthers: "Browse Other Tutors", shikshaHubCancelBooking: "Cancel booking", shikshaHubCancelling: "Cancelling…", shikshaHubChangeSubject: "Change Subject", shikshaHubClearAll: "Clear All", shikshaHubClearFilters: "Clear Filters", shikshaHubConnectNow: "Connect Now", shikshaHubConnecting: "Connecting…", shikshaHubContactTutor: "Contact Tutor", shikshaHubDateLabel: "Date", shikshaHubDescribeNeed: "What do you need help with?", shikshaHubDescribeOptional: "Optional — describe your question or topic", shikshaHubDescribePlaceholder: "e.g. I need help understanding trigonometry", shikshaHubExp1Plus: "1+ Years", shikshaHubExp3Plus: "3+ Years", shikshaHubExp5Plus: "5+ Years", shikshaHubFeeLabel: "Fee", shikshaHubFilters: "Filters", shikshaHubFindInstantTutor: "Find an Instant Tutor", shikshaHubFindMyTutor: "Find My Tutor", shikshaHubFindRegular: "Find Your Regular Tutor", shikshaHubFindRegularSubtitle: "Browse verified tutors for long-term learning and regular sessions", shikshaHubHeaderSubtitle: "Find the right tutor or get help instantly", shikshaHubHeroSubtitle: "Connect with a verified tutor available to help you.", shikshaHubHourSuffix: "hr", shikshaHubInstantSession: "⚡ Instant Session", shikshaHubInstantTutor: "Instant Tutor", shikshaHubInstantTutorLabel: "INSTANT TUTOR", shikshaHubInterested: "Interested in learning with", shikshaHubLeaveReview: "⭐ Leave a review", shikshaHubLoadError: "Couldn't load tutors. Check your connection and try again.", shikshaHubMatching: "Finding the best available tutor for you…", shikshaHubMessagePlaceholder: "Write a message…", shikshaHubMessageSend: "Send", shikshaHubMessageStartHint: "Send a message to start the conversation.", shikshaHubMessagesTitle: "Messages", shikshaHubMoreFilters: "More", shikshaHubMyBookingsTitle: "My Bookings", shikshaHubNeedHelpNow: "Need help right now?", shikshaHubNextAvailable: "Next available", shikshaHubNoFilterResults: "No tutors match your search or filters.", shikshaHubNoMatch: "No matching tutor is available right now", shikshaHubNoMessages: "No conversations yet — message a tutor from their profile.", shikshaHubNoMyBookings: "You haven't booked a tutor yet.", shikshaHubNoOneOnline: "No tutors are online for Instant Help right now.", shikshaHubNoSlots: "No slots available on this date — try another day.", shikshaHubOnlineNow: "Online Now", shikshaHubPickLevel: "Which class or level?", shikshaHubPickSubject: "What subject do you need help with?", shikshaHubPrice1000Plus: "₹1,000+", shikshaHubPrice500to1000: "₹500–₹1,000", shikshaHubPriceLabel: "Price", shikshaHubPriceUnder500: "Under ₹500", shikshaHubRatingLabel: "Rating", shikshaHubRecommendedTutors: "Recommended Tutors", shikshaHubRegular: "Regular", shikshaHubRequestBooking: "Request Booking", shikshaHubRequesting: "Sending request…", shikshaHubReviewSkip: "Skip", shikshaHubReviewSubmit: "Submit Review", shikshaHubReviewSubmitting: "Submitting…", shikshaHubReviewTextPlaceholder: "Optional: share more about your experience", shikshaHubReviews: "Reviews", shikshaHubScheduleSession: "Schedule a Session", shikshaHubSearchPlaceholder: "Search tutors, subjects or classes", shikshaHubSessionTypeLabel: "Session", shikshaHubSkip: "Skip", shikshaHubSortBy: "Sort By", shikshaHubSortByRating: "Top Rated", shikshaHubSortExperienced: "Most Experienced", shikshaHubSortLabel: "Sort", shikshaHubSortPriceHigh: "Highest Price", shikshaHubSortPriceLow: "Lowest Price", shikshaHubSortRecommended: "Recommended", shikshaHubSortTopRated: "Top Rated", shikshaHubSubjectLabel: "Subject", shikshaHubTimeLabel: "Time", shikshaHubTrial: "Trial", shikshaHubTrySomeoneElse: "Try someone else", shikshaHubTutorsAvailableNow: "Tutors Available Now", shikshaHubTutorsFound: "Tutors Found", shikshaHubViewProfile: "View Profile", shikshaHubYearsExp: "years experience", tutorReplyLabel: "Reply from tutor",
   },
 
   // ─────────────────────────── Hindi ────────────────────────────────
