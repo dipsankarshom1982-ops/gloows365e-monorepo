@@ -95,18 +95,36 @@ interface PrizeClaim {
   status: PrizeStatus;
   claimInfo?: ClaimInfo;
   deliveryInfo?: DeliveryInfo;
+  // "YYYY-MM-DD" — admin-set once they've reviewed the claim, shown below
+  // regardless of whether it's shipped yet. See admin's PrizeDeliveries.tsx.
+  expectedDeliveryDate?: string;
 }
 
 const STATUS_CFG: Record<PrizeStatus, { label: string; color: string; bg: string }> = {
   auto_credited: { label: "Credited to V-Coins", color: "#10b981", bg: "rgba(16,185,129,0.12)" },
   unclaimed:     { label: "Claim Now",            color: "#f59e0b", bg: "rgba(245,158,11,0.12)" },
-  claimed:       { label: "Pending Delivery",      color: "#6366f1", bg: "rgba(99,102,241,0.12)" },
+  claimed:       { label: "Claimed",               color: "#6366f1", bg: "rgba(99,102,241,0.12)" },
   shipped:       { label: "Shipped",               color: "#0ea5e9", bg: "rgba(14,165,233,0.12)" },
   delivered:     { label: "Delivered",             color: "#10b981", bg: "rgba(16,185,129,0.12)" },
 };
 
 function formatDate(ts?: { toDate?: () => Date }): string {
   return ts?.toDate ? ts.toDate().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+}
+
+function formatExpectedDate(iso: string): string {
+  const d = new Date(iso + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+// "🎁 Surprise Gift" for the V-Coins reward, "Rank #N · Monthly" for a
+// Starboard placement — a bare "Rank #0" would be meaningless for a gift
+// that was never about a leaderboard position.
+function prizeMetaLine(p: PrizeClaim): string {
+  return p.periodType === "surprise_gift"
+    ? `🎁 Surprise Gift · ${formatDate(p.wonAt)}`
+    : `Rank #${p.rank} · ${p.periodType.charAt(0).toUpperCase() + p.periodType.slice(1)} · ${formatDate(p.wonAt)}`;
 }
 
 export default function MyPrizesPage() {
@@ -241,7 +259,7 @@ export default function MyPrizesPage() {
                       {p.prizeType === "vcoin" ? `🪙 ${p.prizeValue} V-Coins` : p.prizeValue}
                     </div>
                     <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-                      Rank #{p.rank} · {p.periodType.charAt(0).toUpperCase() + p.periodType.slice(1)} · {formatDate(p.wonAt)}
+                      {prizeMetaLine(p)}
                     </div>
                   </div>
                 </div>
@@ -263,6 +281,11 @@ export default function MyPrizesPage() {
                   <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
                     <div>📍 Delivering to: {p.claimInfo.name}, {p.claimInfo.address}</div>
                     <div>📱 {p.claimInfo.whatsapp} · ✉️ {p.claimInfo.email}</div>
+                    {p.status !== "delivered" && p.expectedDeliveryDate && (
+                      <div style={{ color: "#f59e0b", fontWeight: 700, marginTop: 2 }}>
+                        📅 Expected to reach you by {formatExpectedDate(p.expectedDeliveryDate)}
+                      </div>
+                    )}
                   </div>
                 )}
 

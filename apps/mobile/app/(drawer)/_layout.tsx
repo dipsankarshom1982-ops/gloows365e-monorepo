@@ -35,6 +35,7 @@ import {
   doc,
   getCountFromServer,
   onSnapshot,
+  orderBy,
   query,
   where,
 } from "firebase/firestore";
@@ -96,7 +97,8 @@ export default function DrawerLayout() {
 
   const currentYear = new Date().getFullYear();
 
-  // Listen to user doc for vCoins balance + gift
+  // Listen to user doc for vCoins balance (gift is its own effect below —
+  // it moved off users/{uid}.surpriseGift onto prizeClaims).
   // FIX (bug report — "all updated v-coins must be shown in drawer and
   // v-coins page properly"): there are two separate, disconnected balance
   // fields on users/{uid} — vCoinsBalance (written by services/
@@ -115,19 +117,37 @@ export default function DrawerLayout() {
       if (!snap.exists()) return;
       const d = snap.data();
       setVCoins((d.vCoinsBalance ?? 0) + (d.vCoins ?? 0));
-
-      const gift = d.surpriseGift;
-      if (gift && gift.available && gift.year === currentYear) {
-        setGiftAvailable(true);
-        setGiftClaimed(!!gift.claimed);
-      } else {
-        setGiftAvailable(false);
-        setGiftClaimed(false);
-      }
     });
 
     return () => unsub();
   }, []);
+
+  // Surprise Gift banner — prizeClaims/{id} docs (periodType
+  // "surprise_gift"), same collection/workflow as VidyaStar Starboard
+  // prizes (apps/mobile/app/my-prizes.tsx, apps/admin's PrizeDeliveries.tsx
+  // and VCoinLeaderboard.tsx). Reuses the exact same query shape
+  // my-prizes.tsx already uses (uid ==, orderBy wonAt desc) so it needs no
+  // index beyond the one that query already relies on — filtering down to
+  // this year's gift happens client-side instead of adding a second
+  // equality clause that'd need its own composite index.
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const q = query(collection(db, "prizeClaims"), where("uid", "==", user.uid), orderBy("wonAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const gift = snap.docs
+        .map((d) => d.data())
+        .find((g) => g.periodType === "surprise_gift" && g.periodKey === `surprise_gift_${currentYear}`);
+      setGiftAvailable(!!gift);
+      setGiftClaimed(!!gift && gift.status !== "unclaimed");
+    }, () => {
+      setGiftAvailable(false);
+      setGiftClaimed(false);
+    });
+
+    return () => unsub();
+  }, [currentYear]);
 
   // Compute annual VCoins rank
   useEffect(() => {
@@ -290,18 +310,21 @@ export default function DrawerLayout() {
                       style={styles.rankViewBtn}
                       onPress={() => router.push("/vcoins/wallet")}
                     >
-                      <Text style={styles.rankViewText}>{t("viewLabel") ?? "View"}</Text>
+                      <Text style={styles.rankViewText}>{t("walletLabel") ?? "Wallet"}</Text>
                     </TouchableOpacity>
                   </View>
 
-                  {/* Surprise Gift Banner */}
+                  {/* Surprise Gift Banner — visually separated from the
+                      V-Coins Rank banner above (extra marginTop on
+                      giftBanner) and its own "Wallet" vs. gift-emoji+title
+                      framing, so the two aren't mistaken for one control. */}
                   {giftAvailable && (
                     <TouchableOpacity
                       style={[
                         styles.giftBanner,
                         giftClaimed && styles.giftBannerClaimed,
                       ]}
-                      onPress={() => router.push("/vcoins/claim-gift")}
+                      onPress={() => router.push("/my-prizes")}
                       activeOpacity={0.85}
                     >
                       <Text style={styles.giftEmoji}>🎁</Text>
@@ -552,7 +575,11 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 10,
     backgroundColor: "#d97706", borderRadius: 12,
     paddingVertical: 10, paddingHorizontal: 14, width: "100%",
-    marginTop: 6,
+    // Extra breathing room from the V-Coins Rank banner right above (whose
+    // own "Wallet" button was easy to tap by mistake thinking it was this
+    // gift banner) — was 6, clearly too tight given the two are the same
+    // width and nearly touching.
+    marginTop: 16,
   },
   giftBannerClaimed: { backgroundColor: "#4B5563" },
   giftEmoji: { fontSize: 22 },

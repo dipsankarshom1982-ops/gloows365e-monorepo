@@ -807,7 +807,12 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["claimInfo", "status"])
         )
       );
-      allow delete: if false;
+      // Admin-only "revoke" — only while still unclaimed, so a student who
+      // already submitted delivery details can't have their in-flight
+      // claim vanish out from under them (matches assignSurpriseGift's own
+      // reasoning in apps/admin/src/pages/VCoinLeaderboard.tsx).
+      allow delete: if request.auth != null && request.auth.token.admin == true
+        && resource.data.status == "unclaimed";
     }
 
     // 🎓 GLOOWS TUTOR — Phase 1a. Role granted via Firebase custom claim

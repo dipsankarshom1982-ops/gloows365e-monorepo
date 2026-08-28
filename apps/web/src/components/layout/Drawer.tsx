@@ -20,7 +20,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { getAuth, signOut } from "firebase/auth";
 import {
   getFirestore, doc, onSnapshot,
-  collection, query, where, getCountFromServer,
+  collection, query, where, orderBy, getCountFromServer,
 } from "firebase/firestore";
 import { useStudentProfile, useFeatureFlags } from "@gloows/shared-logic";
 import { useAppTranslation } from "@/context/LanguageContext";
@@ -315,16 +315,36 @@ export default function Drawer({ open, onClose }: Props) {
       const data = snap.data();
       setVCoins((data.vCoinsBalance ?? 0) + (data.vCoins ?? 0));
       setVCoinsLoaded(true);
-      const gift = data.surpriseGift;
-      if (gift?.available && gift.year === currentYear) {
-        setGiftAvailable(true);
-        setGiftClaimed(!!gift.claimed);
-      } else {
-        setGiftAvailable(false);
-        setGiftClaimed(false);
-      }
     });
-  }, [user, currentYear, vCoinsReloadTick]);
+  }, [user, vCoinsReloadTick]);
+
+  // Surprise Gift banner — prizeClaims/{id} docs (periodType
+  // "surprise_gift"), same collection/workflow as VidyaStar Starboard
+  // prizes (this app's my-prizes/page.tsx and admin's PrizeDeliveries.tsx/
+  // VCoinLeaderboard.tsx) — exact mirror of the same migration in mobile's
+  // app/(drawer)/_layout.tsx. This used to read users/{uid}.surpriseGift, a
+  // bespoke field with no fulfillment tracking (no shipped/delivered
+  // status, no expected-delivery-date, and — the actual bug report — this
+  // banner's button navigated to /wallet regardless of gift state, since
+  // nothing here ever routed to a real claim screen). Reuses the exact
+  // query shape my-prizes/page.tsx already uses (uid ==, orderBy wonAt
+  // desc) so it needs no new composite index; this year's gift is picked
+  // out client-side.
+  useEffect(() => {
+    if (!user) return;
+    const db = getFirestore();
+    const q = query(collection(db, "prizeClaims"), where("uid", "==", user.uid), orderBy("wonAt", "desc"));
+    return onSnapshot(q, (snap) => {
+      const gift = snap.docs
+        .map((d) => d.data())
+        .find((g) => g.periodType === "surprise_gift" && g.periodKey === `surprise_gift_${currentYear}`);
+      setGiftAvailable(!!gift);
+      setGiftClaimed(!!gift && gift.status !== "unclaimed");
+    }, () => {
+      setGiftAvailable(false);
+      setGiftClaimed(false);
+    });
+  }, [user, currentYear]);
 
   // FIX (bug report — "close app, reopen — v-coins don't load", same class
   // of issue as reels/stories/useVCoins): this onSnapshot listener stays
@@ -476,13 +496,17 @@ export default function Drawer({ open, onClose }: Props) {
                 {/* Surprise gift */}
                 {giftAvailable && (
                   <button
-                    onClick={() => navTo("/wallet")}
+                    onClick={() => navTo("/my-prizes")}
                     style={{
                       display: "flex", alignItems: "center", gap: 10,
                       width: "100%", textAlign: "left",
                       background: giftClaimed ? "#4B5563" : "#d97706",
                       border: "none", borderRadius: 12,
-                      padding: "10px 14px", cursor: "pointer", marginTop: 6,
+                      padding: "10px 14px", cursor: "pointer",
+                      // Extra breathing room from the rank banner right
+                      // above (whose own "View" button was easy to tap by
+                      // mistake) — matches the mobile drawer's same fix.
+                      marginTop: 16,
                     }}
                   >
                     <span style={{ fontSize: 22 }}>🎁</span>
