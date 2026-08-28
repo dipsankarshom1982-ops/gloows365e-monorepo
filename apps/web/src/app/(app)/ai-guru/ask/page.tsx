@@ -25,13 +25,11 @@
 // (still aiNotebook/{uid}/entries) — those were working correctly before;
 // only the UI built around them changed.
 //
-// "Related searches" row: now genuinely related to whatever was just
-// asked, not a fixed list. The backend has no relatedQuestions field for
-// this endpoint, so this is computed on the client from the question
-// text itself — see lib/aiGuru/relatedSearches.ts for the topic bank and
-// scoring logic. The pre-search "TRY SEARCHING FOR" rail (a generic
-// curated sample shown on the landing state, before there's anything to
-// relate to) has been removed — mirrors mobile's app/ai-guru/ask.tsx.
+// Related searches removed per request — the getRelatedSearches module
+// (lib/aiGuru/relatedSearches.ts) is untouched since SkillGuru still
+// uses it. The pre-search "TRY SEARCHING FOR" rail (a generic curated
+// sample shown on the landing state) was already removed earlier —
+// mirrors mobile's app/ai-guru/ask.tsx.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -40,7 +38,6 @@ import { getFirestore, collection, addDoc, serverTimestamp } from "firebase/fire
 import { useStudentProfile } from "@gloows/shared-logic";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
-import { getRelatedSearches } from "@/lib/aiGuru/relatedSearches";
 import { subscribeToCreditBalance } from "@/services/aiGuruCreditsService";
 
 const CF_URL = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_URL ?? "";
@@ -110,7 +107,6 @@ export default function AskAiGuruPage() {
   const iconMuted       = colors.textSecondary;
   const textPrimary     = colors.text;
   const textMuted       = colors.textSecondary;
-  const textDim         = isDarkMode ? "#475569" : colors.textSecondary;
 
   const CHIPS:ModeChip[] = useMemo(()=>[
     {key:"doubt",    label:t("modeDoubt","Quick Answer"),          emoji:"🔍",color:"#6366f1",hint:t("modeDoubtHint","Search anything…"),      sample:"Why does ice float on water?"},
@@ -138,14 +134,6 @@ export default function AskAiGuruPage() {
   const chip = CHIPS.find(c=>c.key===activeMode)!;
   const aChip = CHIPS.find(c=>c.key===askedMode)!;
   const hasSearched = result !== "idle";
-
-  // Related searches for whatever was just asked — recomputed every time
-  // askedQ changes, i.e. every completed search. See
-  // lib/aiGuru/relatedSearches.ts for how relevance is scored.
-  const relatedSearches = useMemo(
-    () => (askedQ ? getRelatedSearches(askedQ, 6).items : []),
-    [askedQ]
-  );
 
   // Credit balance — replaces the old "X/1" badge below, which was built
   // entirely around the removed FREE_DAILY_ASK=1 client constant and
@@ -350,22 +338,6 @@ export default function AskAiGuruPage() {
                   <div style={{display:"flex",gap:8}}>
                     <Link href="/ai-guru/setup" style={{flex:1,padding:"10px 0",borderRadius:12,border:"1px solid #6366f1",background:"rgba(99,102,241,0.1)",color:"#818cf8",fontSize:12,fontWeight:700,textAlign:"center",textDecoration:"none"}}>{t("generateFullLessonAction","✨ Generate Full Lesson")}</Link>
                     <Link href="/ai-guru/exam-simulator" style={{flex:1,padding:"10px 0",borderRadius:12,border:"1px solid #dc2626",background:"rgba(220,38,38,0.1)",color:"#f87171",fontSize:12,fontWeight:700,textAlign:"center",textDecoration:"none"}}>🎯 {t("practiceExam","Practice Exam")}</Link>
-                  </div>
-                </div>
-
-                {/* Related searches — now computed from the question that
-                    was just asked (see lib/aiGuru/relatedSearches.ts),
-                    not a fixed list. Already excludes whatever was just
-                    asked. */}
-                <div style={{ marginTop: 6 }}>
-                  <div style={{ color: textDim, fontSize: 11, fontWeight: 700, marginBottom: 10, letterSpacing: 0.5 }}>{t("relatedSearches","RELATED SEARCHES")}</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {relatedSearches.map((s,i)=>(
-                      <button key={i} className="ask-scr-btn" onClick={()=>runSearch(s.text)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 20, border: `1px solid ${borderSofter}`, background: chipUnselectedBg }}>
-                        <span style={{ fontSize: 13 }}>{s.emoji}</span>
-                        <span style={{ color: isDarkMode ? "#cbd5e1" : colors.text, fontSize: 12 }}>{s.text}</span>
-                      </button>
-                    ))}
                   </div>
                 </div>
 

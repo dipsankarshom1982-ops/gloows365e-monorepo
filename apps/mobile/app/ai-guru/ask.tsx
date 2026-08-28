@@ -23,11 +23,9 @@
 // aiNotebookService's saveToNotebook() — those were working correctly
 // before; only the UI built around them changed.
 //
-// "Related searches": now genuinely related to whatever was just asked,
-// not a fixed list. The backend has no relatedQuestions field for this
-// endpoint, so this is computed on the client from the question text
-// itself — see lib/aiGuru/relatedSearches.ts for the topic bank and
-// scoring logic (mirrors web's identical module).
+// Related searches removed per request — the getRelatedSearches module
+// (lib/aiGuru/relatedSearches.ts) is untouched since SkillGuru
+// (app/ai-guru/skillguru.tsx) still uses it.
 
 import { useMemo, useRef, useState } from "react";
 import {
@@ -50,12 +48,11 @@ import { ActivityIndicator } from "react-native";
 import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { useAppTranslation } from "@/context/LanguageContext";
+import { auth } from "@/lib/firebase";
 import { askAiGuruQuestion } from "@/services/askAiGuruApi";
 import { saveToNotebook } from "@/services/aiNotebookService";
-import { getRelatedSearches } from "@/lib/aiGuru/relatedSearches";
 import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
-
-const FREE_DAILY_ASK = 1;
+import CreditBalanceBadge from "@/components/aiGuru/CreditBalanceBadge";
 
 type ModeKey = "doubt" | "explain" | "notes" | "exam" | "summarize" | "tip" | "language";
 
@@ -118,7 +115,9 @@ export default function AskAiGuruScreen() {
   const [askedQ,     setAskedQ]     = useState("");
   const [askedMode,  setAskedMode]  = useState<ModeKey>("doubt");
   const [errMsg,     setErrMsg]     = useState("");
-  const [remaining,  setRemaining]  = useState(FREE_DAILY_ASK);
+  // Set only on a CREDITS_EXHAUSTED response — undefined keeps the "limit"
+  // screen's plain pre-credits render (Upgrade only, no Buy Credits option).
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
   const [saving,     setSaving]     = useState(false);
   const [savedId,    setSavedId]    = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
@@ -127,23 +126,16 @@ export default function AskAiGuruScreen() {
   const aChip = MODE_CHIPS.find((c) => c.key === askedMode)!;
   const hasSearched = result !== "idle";
 
-  // Related searches for whatever was just asked — recomputed every time
-  // askedQ changes, i.e. every completed search. See
-  // lib/aiGuru/relatedSearches.ts for how relevance is scored.
-  const relatedSearches = useMemo(
-    () => (askedQ ? getRelatedSearches(askedQ, 6).items : []),
-    [askedQ]
-  );
-
   async function runSearch(text?: string, mode?: ModeKey) {
     const q = (text ?? query).trim();
     const m = mode ?? activeMode;
     if (!q || result === "loading") return;
-    // Client-side gate: once the free quota is used, don't even call the
-    // backend — go straight to the upgrade screen. This makes "first
-    // question free, then upgrade" work correctly regardless of whether
-    // the backend (not part of this codebase) enforces its own limit.
-    if (remaining <= 0) { setAskedQ(q); setResult("limit"); return; }
+    // FIX: this used to hard-block after 1 question via a client-side
+    // FREE_DAILY_ASK=1 constant that didn't match the server's real free
+    // limit (5/day, functions/src/usageCheck.ts's checkAskGuruLimit) —
+    // meaning nobody could ever reach the credits fallback past their
+    // first question. Removed; the server is the only source of truth
+    // for both the free limit and the credits fallback beyond it.
     if (mode) setActiveMode(mode);
     setQuery(q);
     setAskedQ(q); setAskedMode(m); setResult("loading"); setAnswer(""); setErrMsg(""); setSavedId(null);
@@ -151,11 +143,13 @@ export default function AskAiGuruScreen() {
       const data = await askAiGuruQuestion({ question: q, classLevel: studentClass, board, mode: m });
       setAnswer(data.answer);
       setResult("found");
-      setRemaining((r) => Math.max(0, r - 1));
     } catch (err: any) {
-      if (err?.code === "LIMIT_REACHED") {
+      if (err?.code === "CREDITS_EXHAUSTED") {
+        setCreditInfo({ balance: err.creditBalance ?? 0, required: err.creditsRequired ?? 1 });
         setResult("limit");
-        setRemaining(0);
+      } else if (err?.code === "LIMIT_REACHED") {
+        setCreditInfo(undefined);
+        setResult("limit");
       } else {
         setErrMsg(err?.message ?? "Something went wrong");
         setResult("error");
@@ -218,12 +212,13 @@ export default function AskAiGuruScreen() {
         showLanguageBadge
         rightElement={
           <View style={S.headerRight}>
-            <View style={[S.quotaBadge, { backgroundColor: surface, borderColor: remaining > 0 ? border : "rgba(239,68,68,0.4)" }]}>
-              <View style={[S.quotaDot, { backgroundColor: remaining > 0 ? "#10b981" : "#ef4444" }]} />
-              <Text style={[S.quotaText, { color: remaining > 0 ? "#10b981" : "#ef4444" }]}>
-                {remaining}/{FREE_DAILY_ASK}
-              </Text>
-            </View>
+            {/* FIX: replaced the old "X/1" quota badge — it was built
+                entirely around the removed FREE_DAILY_ASK=1 client
+                constant and never reflected the server's real count. A
+                credit balance is genuinely known and worth showing;
+                remaining free questions today isn't, without the server
+                returning that on every response. */}
+            <CreditBalanceBadge uid={auth.currentUser?.uid ?? null} />
             <TouchableOpacity
               onPress={() => router.push("/ai-guru/notebook" as any)}
               style={[S.notebookBtn, { backgroundColor: surface, borderColor: border }]}
@@ -434,22 +429,6 @@ export default function AskAiGuruScreen() {
                   </View>
                 </View>
 
-                {/* Related searches — now computed from the question that
-                    was just asked (see lib/aiGuru/relatedSearches.ts),
-                    not a fixed list. Already excludes whatever was just
-                    asked. */}
-                <View style={S.suggestedWrap}>
-                  <Text style={[S.suggestedLabel, { color: dim }]}>{t("relatedSearches", "RELATED SEARCHES")}</Text>
-                  <View style={S.suggestedGrid}>
-                    {relatedSearches.map((s, i) => (
-                      <TouchableOpacity key={i} onPress={() => runSearch(s.text)} style={[S.suggestedChip, { borderColor: border, backgroundColor: isDarkMode ? "#0f172a" : colors.background }]}>
-                        <Text style={S.suggestedEmoji}>{s.emoji}</Text>
-                        <Text style={[S.suggestedText, { color: muted }]} numberOfLines={1}>{s.text}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-
                 <TouchableOpacity onPress={newSearch} style={S.resetRow}>
                   <Ionicons name="refresh-outline" size={15} color="#6366f1" />
                   <Text style={S.resetText}>{t("newSearch", "New search")}</Text>
@@ -463,13 +442,27 @@ export default function AskAiGuruScreen() {
                 <Text style={S.limitEmoji}>⏰</Text>
                 <Text style={[S.limitTitle, { color: text }]}>{t("dailyLimitTitle", "Daily limit reached")}</Text>
                 <Text style={[S.limitBody, { color: muted }]}>
-                  {t("dailyLimitMessage", { defaultValue: "You've reached today's free question limit. Come back tomorrow or upgrade to Premium.", count: FREE_DAILY_ASK })}
+                  {creditInfo
+                    ? `You've used today's free questions. You have ${creditInfo.balance} credit${creditInfo.balance === 1 ? "" : "s"} — buy more or upgrade to Premium for unlimited access.`
+                    : t("dailyLimitMessage", { defaultValue: "You've reached today's free question limit. Come back tomorrow or upgrade to Premium.", count: 5 })}
                 </Text>
-                <TouchableOpacity style={S.limitPrimaryWrap} onPress={() => router.push("/ai-guru/subscription" as any)}>
+                <TouchableOpacity
+                  style={S.limitPrimaryWrap}
+                  onPress={() => router.push((creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription") as any)}
+                >
                   <LinearGradient colors={["#312e81", "#4f46e5"]} style={S.limitPrimaryBtn}>
-                    <Text style={S.limitPrimaryText}>✨ {t("upgradeToPremium", "Upgrade to Premium")}</Text>
+                    <Text style={S.limitPrimaryText}>
+                      {creditInfo ? "⚡ Buy Credits" : `✨ ${t("upgradeToPremium", "Upgrade to Premium")}`}
+                    </Text>
                   </LinearGradient>
                 </TouchableOpacity>
+                {creditInfo && (
+                  <TouchableOpacity onPress={() => router.push("/ai-guru/subscription" as any)}>
+                    <Text style={[S.limitBody, { color: "#a5b4fc", fontSize: 12 }]}>
+                      Or upgrade to Premium for unlimited access
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 {/* NOTE: no longer links to SkillGuru as an alternative —
                     that cross-link was a symptom of the redundancy this
                     rebuild removes. The two tools now have distinct
@@ -531,13 +524,6 @@ const S = StyleSheet.create({
   langExChip:       { borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, maxWidth: "48%" },
   langExLang:       { fontSize: 10, fontWeight: "800", marginBottom: 2 },
   langExText:       { fontSize: 11 },
-
-  suggestedWrap:  { width: "100%", maxWidth: 480, marginTop: 20 },
-  suggestedLabel: { fontSize: 10, fontWeight: "700", marginBottom: 10, textAlign: "center", letterSpacing: 0.5 },
-  suggestedGrid:  { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" },
-  suggestedChip:  { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 20, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8, maxWidth: "100%" },
-  suggestedEmoji: { fontSize: 13 },
-  suggestedText:  { fontSize: 12, maxWidth: 230 },
 
   // Compact (results state) search bar
   compactSearchWrap: { paddingHorizontal: 16, paddingBottom: 8 },
