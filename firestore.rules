@@ -865,11 +865,41 @@ service cloud.firestore {
       // tutorMarketplace.ts already treats name/profilePic/tutorRole as
       // legitimately owner-editable public profile fields, and phone
       // mirrors what registerTutorAccount seeds at signup.
+      // Onboarding (Step 2-5, functions/src/tutorAccounts.ts's
+      // submitTutorOnboarding header has the full design) adds plain
+      // profile-data fields to this same allowlist below — phoneNumber,
+      // pinCode, city, state, gender, tutorType, studentLevels,
+      // streams, curriculumBoards, teachingMode, offlineServiceAreas,
+      // experience, highestQualification, degreeName, institutionName,
+      // completionYear, specialization, qualificationDocuments,
+      // experienceDocuments, additionalCertificates, onboardingStep,
+      // profileCompletionPercentage. These are exactly as
+      // trust-sensitive as name/subjects/bio already are above (the tutor
+      // just describes themselves) — none of them gate eligibility.
+      //
+      // Deliberately EXCLUDED, same protection `verified` already has:
+      // profileStatus, onboardingVerificationStatus, submittedAt,
+      // reviewedAt, rejectionReason, onboardingCompleted. Those are the
+      // entire output of the review workflow — settable only by
+      // submitTutorOnboarding / a future admin-review callable via the
+      // Admin SDK, never by the tutor's own client. phoneVerified is
+      // ALSO on the allowlist below, but only because OTP verification is
+      // currently a client-side UI stub with no real backing (see
+      // onboarding/page.tsx) — it carries no real trust today. Move it
+      // into this excluded list the moment real Firebase Phone Auth
+      // replaces that stub, so a tutor can no longer just assert it.
       allow create: if request.auth != null && request.auth.uid == uid
         && request.resource.data.keys().hasOnly([
           "name", "bio", "subjects", "qualification", "teachingExperienceYears",
           "preferredLanguage", "profilePic", "tutorRole", "sessionFee",
-          "availability", "phone", "webPushToken", "pushToken", "updatedAt"
+          "availability", "phone", "webPushToken", "pushToken", "updatedAt",
+          "phoneNumber", "phoneVerified", "pinCode", "city", "state",
+          "gender", "tutorType", "studentLevels", "streams", "curriculumBoards",
+          "teachingMode", "offlineServiceAreas", "experience",
+          "highestQualification", "degreeName", "institutionName",
+          "completionYear", "specialization", "qualificationDocuments",
+          "experienceDocuments", "additionalCertificates", "onboardingStep",
+          "profileCompletionPercentage"
         ])
         && (!("sessionFee" in request.resource.data)
           || (request.resource.data.sessionFee is int && request.resource.data.sessionFee > 0));
@@ -877,7 +907,14 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "name", "bio", "subjects", "qualification", "teachingExperienceYears",
           "preferredLanguage", "profilePic", "tutorRole", "sessionFee",
-          "availability", "phone", "webPushToken", "pushToken", "updatedAt"
+          "availability", "phone", "webPushToken", "pushToken", "updatedAt",
+          "phoneNumber", "phoneVerified", "pinCode", "city", "state",
+          "gender", "tutorType", "studentLevels", "streams", "curriculumBoards",
+          "teachingMode", "offlineServiceAreas", "experience",
+          "highestQualification", "degreeName", "institutionName",
+          "completionYear", "specialization", "qualificationDocuments",
+          "experienceDocuments", "additionalCertificates", "onboardingStep",
+          "profileCompletionPercentage"
         ])
         && (!("sessionFee" in request.resource.data)
           || (request.resource.data.sessionFee is int && request.resource.data.sessionFee > 0));

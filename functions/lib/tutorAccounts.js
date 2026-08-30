@@ -22,7 +22,7 @@
 // and that distinction matters: don't copy that field for anything
 // privilege-gated.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reviewTutorVerification = exports.submitTutorVerification = exports.registerTutorAccount = void 0;
+exports.reviewTutorVerification = exports.submitTutorOnboarding = exports.submitTutorVerification = exports.registerTutorAccount = void 0;
 const admin = require("firebase-admin");
 const functionsV1 = require("firebase-functions/v1");
 const db = admin.firestore();
@@ -118,6 +118,121 @@ exports.submitTutorVerification = functionsV1
     }, { merge: true });
     console.log(`✅ Tutor verification submitted: uid=${uid} (${documents.length} document(s))`);
     return { status: "Submitted" };
+});
+// ─── submitTutorOnboarding ──────────────────────────────────────────────────
+// Final step (Step 5 "Submit Profile for Review") of the post-signup
+// onboarding wizard (apps/tutor's /onboarding, apps/tutor-mobile's
+// equivalent once built). Steps 2-4 write their fields directly to
+// tutors/{uid} from the client as they go (plain setDoc/merge, gated by
+// firestore.rules' allowlist — same trust level as Phase 1a's
+// qualification/subjects/bio fields already have) so progress autosaves
+// and survives a refresh/app-restart without needing a callable per step.
+//
+// This callable exists ONLY for the one thing a plain client write can't
+// safely do: flip profileStatus/onboardingVerificationStatus into the
+// review workflow. Those two fields are deliberately OFF
+// firestore.rules' tutors/{uid} allowlist (same protection `verified`
+// already has) so this is the only path that can ever set them — a
+// tutor can't self-declare "submitted"/"under_review" any more than they
+// could self-declare "verified" before this feature existed.
+//
+// Deliberately a SEPARATE status model from TutorVerification/
+// TutorVerificationStatus above (Draft/Submitted/Under Review/Verified/
+// Rejected/Suspended, already consumed by admin's Tutor Verifications
+// review queue) rather than reusing it — this onboarding flow's
+// profileStatus/onboardingVerificationStatus track the ONBOARDING
+// wizard's own review workflow (spec'd with snake_case values), and
+// wiring them into admin's existing queue is separate follow-up work,
+// not done here.
+//
+// Re-validates every required field server-side (never trust that a
+// tutor who reached Step 5 in the UI actually satisfied every earlier
+// step's client-side checks) and is idempotent-safe against
+// double-submission: once profileStatus is already submitted/
+// under_review/verified, a second call is rejected outright rather than
+// silently re-processing.
+const TUTOR_TYPES = [
+    "SCHOOL_TEACHER", "PRIVATE_TUTOR", "COLLEGE_FACULTY",
+    "SUBJECT_EXPERT", "EXAM_PREP_TUTOR", "SKILL_INSTRUCTOR",
+];
+const STUDENT_LEVELS = [
+    "PRIMARY", "MIDDLE", "SECONDARY", "HIGHER_SECONDARY",
+    "COLLEGE", "COMPETITIVE_EXAMS", "PROFESSIONAL_SKILL",
+];
+const TEACHING_MODES = ["ONLINE", "OFFLINE", "BOTH"];
+const EXPERIENCE_RANGES = [
+    "FRESHER", "LESS_THAN_1", "ONE_TO_2", "THREE_TO_5", "FIVE_TO_10", "TEN_PLUS",
+];
+const HIGHEST_QUALIFICATIONS = [
+    "HIGHER_SECONDARY", "DIPLOMA", "GRADUATE", "POSTGRADUATE",
+    "B_ED", "M_ED", "PHD", "PROFESSIONAL_CERTIFICATION", "OTHER",
+];
+// "rejected" is deliberately NOT in this list — a rejected tutor must be
+// able to fix their profile and resubmit.
+const NON_RESUBMITTABLE_STATUSES = ["submitted", "under_review", "verified"];
+exports.submitTutorOnboarding = functionsV1
+    .runWith({ timeoutSeconds: 30, memory: "256MB" })
+    .https.onCall(async (_data, context) => {
+    if (!context.auth) {
+        throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const tutorRef = db.doc(`tutors/${uid}`);
+    const snap = await tutorRef.get();
+    if (!snap.exists) {
+        throw new functionsV1.https.HttpsError("failed-precondition", "Complete the earlier onboarding steps before submitting.");
+    }
+    const t = snap.data();
+    if (NON_RESUBMITTABLE_STATUSES.includes(t.profileStatus)) {
+        throw new functionsV1.https.HttpsError("already-exists", "This profile has already been submitted for review.");
+    }
+    // ── Re-validate every required field (mirrors each step's client
+    // checks) — a single collected list of human-readable problems, not
+    // a throw-on-first-error, so the client can surface all of them at
+    // once if it ever needs to.
+    const problems = [];
+    const name = typeof t.name === "string" ? t.name.trim() : "";
+    if (name.length < 2 || name.length > 100)
+        problems.push("Full name must be 2-100 characters");
+    if (!t.phoneVerified)
+        problems.push("Mobile number must be verified");
+    // city/state deliberately NOT required — see Step2BasicInfo.tsx
+    if (!TUTOR_TYPES.includes(t.tutorType))
+        problems.push("Tutor type is required");
+    if (!Array.isArray(t.subjects) || t.subjects.length === 0)
+        problems.push("At least one subject is required");
+    if (!Array.isArray(t.studentLevels) || t.studentLevels.length === 0 || !t.studentLevels.every((l) => STUDENT_LEVELS.includes(l))) {
+        problems.push("At least one student level is required");
+    }
+    if (!TEACHING_MODES.includes(t.teachingMode))
+        problems.push("Teaching mode is required");
+    if (!EXPERIENCE_RANGES.includes(t.experience))
+        problems.push("Teaching experience is required");
+    if (!HIGHEST_QUALIFICATIONS.includes(t.highestQualification))
+        problems.push("Highest qualification is required");
+    if (!t.degreeName || typeof t.degreeName !== "string" || !t.degreeName.trim())
+        problems.push("Degree / course name is required");
+    if (!t.institutionName || typeof t.institutionName !== "string" || !t.institutionName.trim())
+        problems.push("Institution name is required");
+    if (typeof t.completionYear !== "number")
+        problems.push("Year of completion is required");
+    const bio = typeof t.bio === "string" ? t.bio.trim() : "";
+    if (bio.length < 100 || bio.length > 500)
+        problems.push("About section must be 100-500 characters");
+    if (problems.length > 0) {
+        throw new functionsV1.https.HttpsError("invalid-argument", problems.join("; "));
+    }
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await tutorRef.set({
+        profileStatus: "under_review",
+        onboardingVerificationStatus: "pending",
+        onboardingCompleted: true,
+        onboardingStep: 5,
+        submittedAt: now,
+        updatedAt: now,
+    }, { merge: true });
+    console.log(`✅ Tutor onboarding submitted for review: uid=${uid}`);
+    return { profileStatus: "under_review" };
 });
 // ─── reviewTutorVerification ───────────────────────────────────────────────
 // Admin-only (apps/admin's Tutor Verifications review queue). Deliberately

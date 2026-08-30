@@ -11,6 +11,7 @@
     "lint": "expo lint"
   },
   "dependencies": {
+    "@expo/metro-runtime": "~6.1.2",
     "@gloows/shared-logic": "workspace:*",
     "@gloows/tutor-i18n": "workspace:*",
     "@gloows/tutor-ui": "workspace:*",

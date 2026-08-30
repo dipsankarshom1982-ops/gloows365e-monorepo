@@ -11,3 +11,15 @@ html, body {
    packages/tutor-ui/src/tokens.ts, which only defines a dark-shell
    semantic palette (no light-mode tokens yet). A light theme is a later
    addition to tokens.ts, not something to half-implement here. */
+
+/* Gentle up/down drift for the /welcome brand logo — mirrors the
+   translateY(-12 -> 0) reanimated loop apps/mobile's (auth)/welcome.tsx
+   uses for its logo, ported to plain CSS since this app has no
+   animation library. */
+@keyframes brand-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-12px); }
+}
+.animate-brand-float {
+  animation: brand-float 4s ease-in-out infinite;
+}

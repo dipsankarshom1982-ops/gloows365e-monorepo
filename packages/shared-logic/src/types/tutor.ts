@@ -35,6 +35,53 @@ export type TutorVerificationStatus =
   | "Rejected"
   | "Suspended";
 
+// ── Onboarding (post-account-creation) — Step 2-5, all written onto the
+// same tutors/{uid} doc as Phase 1a's fields above (no separate
+// collection, no duplicate profile). Deliberately a PARALLEL status
+// model from TutorVerification/TutorVerificationStatus above (which
+// admin's existing review queue already consumes) rather than replacing
+// it — see functions/src/tutorAccounts.ts's submitTutorOnboarding for
+// the reasoning. profileStatus/onboardingVerificationStatus/submittedAt/
+// reviewedAt/rejectionReason are server-only (set exclusively by that
+// callable via the Admin SDK) — firestore.rules' tutors/{uid} allowlist
+// deliberately excludes them, same protection `verified` already has.
+export type TutorOnboardingProfileStatus =
+  | "draft" | "incomplete" | "submitted" | "under_review"
+  | "verified" | "rejected" | "suspended";
+
+export type TutorOnboardingVerificationStatus =
+  | "not_started" | "pending" | "verified" | "rejected";
+
+export type TutorGender = "male" | "female" | "prefer_not_to_say" | "other";
+
+export type TutorType =
+  | "SCHOOL_TEACHER" | "PRIVATE_TUTOR" | "COLLEGE_FACULTY"
+  | "SUBJECT_EXPERT" | "EXAM_PREP_TUTOR" | "SKILL_INSTRUCTOR";
+
+export type TutorStudentLevel =
+  | "PRIMARY" | "MIDDLE" | "SECONDARY" | "HIGHER_SECONDARY"
+  | "COLLEGE" | "COMPETITIVE_EXAMS" | "PROFESSIONAL_SKILL";
+
+export type TutorStream = "SCIENCE" | "COMMERCE" | "ARTS";
+export type TutorCurriculumBoard = "CBSE" | "ICSE_ISC" | "STATE_BOARD" | "OTHER";
+export type TutorTeachingMode = "ONLINE" | "OFFLINE" | "BOTH";
+export type TutorExperienceRange =
+  | "FRESHER" | "LESS_THAN_1" | "ONE_TO_2" | "THREE_TO_5" | "FIVE_TO_10" | "TEN_PLUS";
+export type TutorHighestQualification =
+  | "HIGHER_SECONDARY" | "DIPLOMA" | "GRADUATE" | "POSTGRADUATE"
+  | "B_ED" | "M_ED" | "PHD" | "PROFESSIONAL_CERTIFICATION" | "OTHER";
+
+export type TutorOnboardingDocumentStatus =
+  | "not_submitted" | "submitted" | "under_review" | "verified" | "rejected";
+
+export type TutorOnboardingDocument = {
+  name: string;
+  storagePath: string;
+  status: TutorOnboardingDocumentStatus;
+  rejectionReason?: string;
+  uploadedAt?: unknown;
+};
+
 // Phase 1a field set only — spec section 14's full marketplace profile
 // builder (cover image, achievements, demo video, reels, etc.) is later
 // phase scope, added onto this same tutors/{uid} doc without a schema
@@ -80,6 +127,55 @@ export type TutorProfile = {
   ratingSum?: number;
   ratingCount?: number;
   ratingAverage?: number;
+
+  // ── Onboarding (Step 2-5) — see the types above for each enum. ──────────
+  phoneNumber?: string;
+  phoneVerified?: boolean; // client-asserted until real Firebase Phone Auth
+                            // replaces the OTP stub — see onboarding/page.tsx
+  // Onboarding Step 2's photo upload writes into `profilePic` above
+  // (Phase 1a's field, already in tutorMarketplace.ts's SAFE_FIELDS)
+  // rather than a separate field — same reasoning as reusing `subjects`
+  // for Step 3 below.
+  pinCode?: string; // 6-digit Indian PIN — city/state are auto-filled from
+                     // this client-side (api.postalpincode.in) but remain
+                     // editable and optional, not derived server-side
+  city?: string;  // optional
+  state?: string; // optional
+  gender?: TutorGender;
+
+  tutorType?: TutorType;
+  // Onboarding Step 3's subject multi-select writes into `subjects` above
+  // (Phase 1a's field) rather than a separate one — both are just
+  // string[] of subject names, and reusing it means tutorMarketplace.ts's
+  // existing sync picks up onboarding's selection automatically.
+  studentLevels?: TutorStudentLevel[];
+  streams?: TutorStream[]; // only meaningful if HIGHER_SECONDARY is selected
+  curriculumBoards?: TutorCurriculumBoard[];
+  teachingMode?: TutorTeachingMode;
+  offlineServiceAreas?: string[]; // service city/area only — never an exact address
+  experience?: TutorExperienceRange;
+
+  highestQualification?: TutorHighestQualification;
+  degreeName?: string;
+  institutionName?: string;
+  completionYear?: number;
+  specialization?: string;
+  // `bio` above is Phase 1a's public marketplace bio (short); onboarding's
+  // richer 100-500 char "about" write to that same field — one bio, not two.
+
+  qualificationDocuments?: TutorOnboardingDocument[];
+  experienceDocuments?: TutorOnboardingDocument[];
+  additionalCertificates?: TutorOnboardingDocument[];
+
+  onboardingStep?: number; // 2-5, resume point
+  onboardingCompleted?: boolean;
+  profileCompletionPercentage?: number;
+  profileStatus?: TutorOnboardingProfileStatus;           // server-only, see above
+  onboardingVerificationStatus?: TutorOnboardingVerificationStatus; // server-only
+  submittedAt?: unknown;   // server-only
+  reviewedAt?: unknown;    // server-only
+  rejectionReason?: string; // server-only
+
   [key: string]: any;
 };
 
