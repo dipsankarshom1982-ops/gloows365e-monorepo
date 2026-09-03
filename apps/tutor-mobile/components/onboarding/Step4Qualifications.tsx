@@ -111,7 +111,11 @@ export default function Step4Qualifications({ uid, data, update, onContinue, onB
     if (!data.degreeName.trim()) next.degreeName = t("ob4DegreeRequiredError");
     if (!data.institutionName.trim()) next.institutionName = t("ob4InstitutionRequiredError");
     if (!data.completionYear) next.completionYear = t("ob4YearRequiredError");
+    if (!data.specialization.trim()) next.specialization = t("ob4SpecializationRequiredError");
     if (data.bio.trim().length < MIN_BIO_LENGTH) next.bio = t("ob4AboutTooShort", { min: MIN_BIO_LENGTH });
+    if (data.qualificationDocuments.length === 0) next.qualificationDocuments = t("ob4QualificationDocRequiredError");
+    if (data.experienceDocuments.length === 0) next.experienceDocuments = t("ob4ExperienceDocRequiredError");
+    if (data.additionalCertificates.length === 0) next.additionalCertificates = t("ob4CertificatesRequiredError");
     setErrors(next);
     if (Object.keys(next).length === 0) onContinue();
   }
@@ -120,7 +124,11 @@ export default function Step4Qualifications({ uid, data, update, onContinue, onB
     !!data.highestQualification &&
     !(data.highestQualification === "OTHER" && !data.qualificationOtherText.trim()) &&
     !!data.degreeName.trim() && !!data.institutionName.trim() && !!data.completionYear &&
-    data.bio.trim().length >= MIN_BIO_LENGTH;
+    !!data.specialization.trim() &&
+    data.bio.trim().length >= MIN_BIO_LENGTH &&
+    data.qualificationDocuments.length > 0 &&
+    data.experienceDocuments.length > 0 &&
+    data.additionalCertificates.length > 0;
 
   return (
     <View>
@@ -168,9 +176,9 @@ export default function Step4Qualifications({ uid, data, update, onContinue, onB
         placeholder={String(CURRENT_YEAR)} error={errors.completionYear}
       />
       <TextField
-        label={t("ob4SpecializationLabel")}
-        value={data.specialization} onChangeText={(v) => update({ specialization: v })}
-        placeholder={t("ob4SpecializationPlaceholder")}
+        label={t("ob4SpecializationLabel")} required
+        value={data.specialization} onChangeText={(v) => { update({ specialization: v }); setErrors((e) => ({ ...e, specialization: "" })); }}
+        placeholder={t("ob4SpecializationPlaceholder")} error={errors.specialization}
       />
 
       <View style={styles.section}>
@@ -193,24 +201,44 @@ export default function Step4Qualifications({ uid, data, update, onContinue, onB
       <View style={styles.docCard}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
           <Text style={styles.docTitle}>{t("ob4QualificationDocTitle")}</Text>
-          <View style={styles.recommendedBadge}><Text style={styles.recommendedBadgeText}>{t("onboardingRecommended")}</Text></View>
+          <Text style={styles.docRequiredMark}>*</Text>
         </View>
         <Text style={styles.docHint}>{t("ob4QualificationDocHint")}</Text>
-        <DocumentUploader uid={uid} category="qualification" docs={data.qualificationDocuments} onChange={(docs) => update({ qualificationDocuments: docs })} uploadLabel={t("ob4UploadFile")} t={t} />
+        <DocumentUploader
+          uid={uid} category="qualification" docs={data.qualificationDocuments}
+          onChange={(docs) => { update({ qualificationDocuments: docs }); setErrors((e) => ({ ...e, qualificationDocuments: "" })); }}
+          uploadLabel={t("ob4UploadFile")} t={t}
+        />
+        {errors.qualificationDocuments && <FieldError>{errors.qualificationDocuments}</FieldError>}
       </View>
 
       <View style={styles.docCard}>
-        <Text style={styles.docTitle}>{t("ob4ExperienceDocTitle")}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+          <Text style={styles.docTitle}>{t("ob4ExperienceDocTitle")}</Text>
+          <Text style={styles.docRequiredMark}>*</Text>
+        </View>
         <Text style={styles.docHint}>{t("ob4ExperienceDocHint")}</Text>
-        <DocumentUploader uid={uid} category="experience" docs={data.experienceDocuments} onChange={(docs) => update({ experienceDocuments: docs })} uploadLabel={t("ob4UploadFile")} t={t} />
+        <DocumentUploader
+          uid={uid} category="experience" docs={data.experienceDocuments}
+          onChange={(docs) => { update({ experienceDocuments: docs }); setErrors((e) => ({ ...e, experienceDocuments: "" })); }}
+          uploadLabel={t("ob4UploadFile")} t={t}
+        />
+        {errors.experienceDocuments && <FieldError>{errors.experienceDocuments}</FieldError>}
       </View>
 
       <View style={[styles.docCard, { marginBottom: 8 }]}>
-        <Text style={styles.docTitle}>{t("ob4CertificatesTitle")}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+          <Text style={styles.docTitle}>{t("ob4CertificatesTitle")}</Text>
+          <Text style={styles.docRequiredMark}>*</Text>
+        </View>
         <Text style={styles.docHint}>{t("ob4CertificatesHint")}</Text>
-        <DocumentUploader uid={uid} category="certificate" docs={data.additionalCertificates} onChange={(docs) => update({ additionalCertificates: docs })} multiple uploadLabel={t("ob4UploadFile")} t={t} />
+        <DocumentUploader
+          uid={uid} category="certificate" docs={data.additionalCertificates}
+          onChange={(docs) => { update({ additionalCertificates: docs }); setErrors((e) => ({ ...e, additionalCertificates: "" })); }}
+          multiple uploadLabel={t("ob4UploadFile")} t={t}
+        />
+        {errors.additionalCertificates && <FieldError>{errors.additionalCertificates}</FieldError>}
       </View>
-      <Text style={styles.laterNote}>{t("ob4LaterNote")}</Text>
 
       <View style={{ flexDirection: "row", gap: 12 }}>
         <SecondaryButton onPress={onBack} disabled={saving}>{t("back")}</SecondaryButton>
@@ -245,10 +273,8 @@ const styles = StyleSheet.create({
 
   docCard: { borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.03)", padding: 14, marginBottom: 14 },
   docTitle: { color: "#E2E8F0", fontSize: 13.5, fontWeight: "700" },
+  docRequiredMark: { color: "#F87171", fontSize: 10, fontWeight: "900" },
   docHint: { color: "#64748B", fontSize: 12, marginBottom: 10, marginTop: 4 },
-  recommendedBadge: { borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2, backgroundColor: "rgba(251,191,36,0.15)", borderWidth: 1, borderColor: "rgba(251,191,36,0.4)" },
-  recommendedBadgeText: { color: "#FCD34D", fontSize: 9, fontWeight: "800", letterSpacing: 0.5, textTransform: "uppercase" },
-  laterNote: { color: "#5B6478", fontSize: 12, marginBottom: 20 },
 
   docRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.05)", paddingHorizontal: 12, paddingVertical: 10 },
   docName: { flex: 1, color: "#CBD5E1", fontSize: 13, fontWeight: "600", marginRight: 8 },

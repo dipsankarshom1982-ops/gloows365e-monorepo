@@ -4,10 +4,11 @@
 // code (with city/state auto-fetch), gender. See file header of
 // ../../app/onboarding/page.tsx for the overall flow.
 //
-// City/state are optional and auto-filled from the PIN code via India
-// Post's free public lookup (api.postalpincode.in, no API key) — still
-// editable/overridable by hand, and the lookup failing (bad PIN, no
-// network) never blocks the tutor since neither field is required.
+// Every field on this step is mandatory. City/state are still
+// auto-filled from the PIN code via India Post's free public lookup
+// (api.postalpincode.in, no API key) and remain editable/overridable by
+// hand, but the lookup failing (bad PIN, no network) no longer lets the
+// tutor skip past them — they must be filled in manually in that case.
 //
 // OTP verification is a fully interactive UI STUB, not real Firebase
 // Phone Auth — per this feature's own scoping decision (real SMS needs
@@ -46,6 +47,9 @@ export default function Step2BasicInfo({ uid, data, update, onContinue, onSaveLa
 
   const [nameError, setNameError] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [genderError, setGenderError] = useState<string | null>(null);
+  const [cityError, setCityError] = useState<string | null>(null);
+  const [stateError, setStateError] = useState<string | null>(null);
 
   // PIN code -> city/state auto-fetch
   const [pinError, setPinError] = useState<string | null>(null);
@@ -196,11 +200,42 @@ export default function Step2BasicInfo({ uid, data, update, onContinue, onSaveLa
       setPhoneError(t("ob2VerifyPhoneRequiredError"));
       ok = false;
     }
-    // City/state are optional — see file header.
+    if (!data.profilePic) {
+      setPhotoError(t("ob2PhotoRequiredError"));
+      ok = false;
+    } else {
+      setPhotoError(null);
+    }
+    if (!PIN_RE.test(data.pinCode)) {
+      setPinError(t("ob2PinCodeInvalidError"));
+      ok = false;
+    } else {
+      setPinError(null);
+    }
+    if (!data.city.trim()) {
+      setCityError(t("ob2CityRequiredError"));
+      ok = false;
+    } else {
+      setCityError(null);
+    }
+    if (!data.state) {
+      setStateError(t("ob2StateRequiredError"));
+      ok = false;
+    } else {
+      setStateError(null);
+    }
+    if (!data.gender) {
+      setGenderError(t("ob2GenderRequiredError"));
+      ok = false;
+    } else {
+      setGenderError(null);
+    }
     if (ok) onContinue();
   }
 
-  const canContinue = data.name.trim().length >= 2 && data.phoneVerified;
+  const canContinue =
+    data.name.trim().length >= 2 && data.phoneVerified && !!data.profilePic &&
+    PIN_RE.test(data.pinCode) && !!data.city.trim() && !!data.state && !!data.gender;
 
   return (
     <div>
@@ -299,7 +334,7 @@ export default function Step2BasicInfo({ uid, data, update, onContinue, onSaveLa
 
       {/* Profile photo */}
       <div className="mb-5">
-        <SectionLabel>{t("ob2PhotoLabel")}</SectionLabel>
+        <SectionLabel required>{t("ob2PhotoLabel")}</SectionLabel>
         <div className="flex items-center gap-3.5">
           <div className="w-16 h-16 rounded-full bg-white/5 border border-white/10 overflow-hidden flex items-center justify-center shrink-0">
             {data.profilePic ? (
@@ -333,7 +368,7 @@ export default function Step2BasicInfo({ uid, data, update, onContinue, onSaveLa
       </div>
 
       <div className="mb-5">
-        <SectionLabel>{t("ob2PinCodeLabel")}</SectionLabel>
+        <SectionLabel required>{t("ob2PinCodeLabel")}</SectionLabel>
         <div className={`flex items-center rounded-2xl border px-3.5 bg-white/5 focus-within:border-brand-400 focus-within:bg-brand-500/10 transition-colors ${pinError ? "border-red-400" : "border-white/10"}`}>
           <input
             type="text"
@@ -353,38 +388,42 @@ export default function Step2BasicInfo({ uid, data, update, onContinue, onSaveLa
       <TextField
         id="ob2-city"
         label={t("ob2CityLabel")}
+        required
         value={data.city}
-        onChange={(v) => update({ city: v })}
+        onChange={(v) => { update({ city: v }); if (cityError) setCityError(null); }}
         placeholder={t("ob2CityPlaceholder")}
         list="ob2-city-options"
+        error={cityError}
       />
       <datalist id="ob2-city-options">
         {COMMON_INDIAN_CITIES.map((c) => <option key={c} value={c} />)}
       </datalist>
 
       <div className="mb-5">
-        <SectionLabel>{t("ob2StateLabel")}</SectionLabel>
+        <SectionLabel required>{t("ob2StateLabel")}</SectionLabel>
         <select
           value={data.state}
-          onChange={(e) => update({ state: e.target.value })}
-          className={`w-full rounded-2xl border border-white/10 px-3.5 py-3.5 text-[15px] bg-white/5 outline-none transition-colors focus:border-brand-400 focus:bg-brand-500/10 ${
+          onChange={(e) => { update({ state: e.target.value }); if (stateError) setStateError(null); }}
+          className={`w-full rounded-2xl border px-3.5 py-3.5 text-[15px] bg-white/5 outline-none transition-colors focus:border-brand-400 focus:bg-brand-500/10 ${
             data.state ? "text-slate-50" : "text-slate-500"
-          }`}
+          } ${stateError ? "border-red-400" : "border-white/10"}`}
         >
           <option value="" className="bg-[#0B1226]">{t("ob2StatePlaceholder")}</option>
           {INDIAN_STATES.map((s) => <option key={s} value={s} className="bg-[#0B1226] text-slate-50">{s}</option>)}
         </select>
+        {stateError && <FieldError>{stateError}</FieldError>}
       </div>
 
       <div className="mb-6">
-        <SectionLabel>{t("ob2GenderLabel")}</SectionLabel>
+        <SectionLabel required>{t("ob2GenderLabel")}</SectionLabel>
         <div className="flex flex-wrap gap-2">
           {GENDER_OPTIONS.map((g) => (
-            <Chip key={g.value} active={data.gender === g.value} onClick={() => update({ gender: data.gender === g.value ? "" : g.value })}>
+            <Chip key={g.value} active={data.gender === g.value} onClick={() => { update({ gender: g.value }); setGenderError(null); }}>
               {g.label}
             </Chip>
           ))}
         </div>
+        {genderError && <FieldError>{genderError}</FieldError>}
       </div>
 
       <PrimaryButton onClick={validateAndContinue} disabled={saving || !canContinue} loading={saving}>

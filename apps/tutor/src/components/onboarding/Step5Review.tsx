@@ -129,7 +129,7 @@ export default function Step5Review({ data, email, onEditStep, onBack, onSubmit,
         <Check done={data.phoneVerified} label={t("ob5MobileVerified")} />
 
         <p className="text-[11px] font-bold text-slate-500 tracking-widest mb-1.5 mt-3">{t("ob5ProfileSection").toUpperCase()}</p>
-        <Check done={!!data.name && !!data.city && !!data.state} label={t("ob5BasicCompleted")} />
+        <Check done={!!data.name && !!data.city && !!data.state && !!data.profilePic && !!data.gender} label={t("ob5BasicCompleted")} />
         <Check done={!!data.tutorType && data.subjects.length > 0} label={t("ob5TeachingCompleted")} />
 
         <p className="text-[11px] font-bold text-slate-500 tracking-widest mb-1.5 mt-3">{t("ob5DocumentsSection").toUpperCase()}</p>
@@ -142,7 +142,7 @@ export default function Step5Review({ data, email, onEditStep, onBack, onSubmit,
         <div className="flex items-center justify-between text-[13px] py-1">
           <span className="text-slate-400">{t("ob5ExperienceDocStatus")}</span>
           <span className={experienceDocCount ? "text-green-400 font-bold" : "text-slate-500"}>
-            {experienceDocCount ? t("ob5Submitted") : t("ob5OptionalLabel")}
+            {experienceDocCount ? t("ob5Submitted") : t("ob5NotSubmitted")}
           </span>
         </div>
       </div>

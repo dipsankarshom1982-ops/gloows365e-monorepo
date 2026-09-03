@@ -123,7 +123,11 @@ export default function Step4Qualifications({ uid, data, update, onContinue, onB
     if (!data.degreeName.trim()) next.degreeName = t("ob4DegreeRequiredError");
     if (!data.institutionName.trim()) next.institutionName = t("ob4InstitutionRequiredError");
     if (!data.completionYear) next.completionYear = t("ob4YearRequiredError");
+    if (!data.specialization.trim()) next.specialization = t("ob4SpecializationRequiredError");
     if (data.bio.trim().length < MIN_BIO_LENGTH) next.bio = t("ob4AboutTooShort", { min: MIN_BIO_LENGTH });
+    if (data.qualificationDocuments.length === 0) next.qualificationDocuments = t("ob4QualificationDocRequiredError");
+    if (data.experienceDocuments.length === 0) next.experienceDocuments = t("ob4ExperienceDocRequiredError");
+    if (data.additionalCertificates.length === 0) next.additionalCertificates = t("ob4CertificatesRequiredError");
     setErrors(next);
     if (Object.keys(next).length === 0) onContinue();
   }
@@ -132,7 +136,11 @@ export default function Step4Qualifications({ uid, data, update, onContinue, onB
     !!data.highestQualification &&
     !(data.highestQualification === "OTHER" && !data.qualificationOtherText.trim()) &&
     !!data.degreeName.trim() && !!data.institutionName.trim() && !!data.completionYear &&
-    data.bio.trim().length >= MIN_BIO_LENGTH;
+    !!data.specialization.trim() &&
+    data.bio.trim().length >= MIN_BIO_LENGTH &&
+    data.qualificationDocuments.length > 0 &&
+    data.experienceDocuments.length > 0 &&
+    data.additionalCertificates.length > 0;
 
   return (
     <div>
@@ -181,9 +189,9 @@ export default function Step4Qualifications({ uid, data, update, onContinue, onB
         placeholder={String(CURRENT_YEAR)} error={errors.completionYear}
       />
       <TextField
-        id="ob4-specialization" label={t("ob4SpecializationLabel")}
-        value={data.specialization} onChange={(v) => update({ specialization: v })}
-        placeholder={t("ob4SpecializationPlaceholder")}
+        id="ob4-specialization" label={t("ob4SpecializationLabel")} required
+        value={data.specialization} onChange={(v) => { update({ specialization: v }); setErrors((e) => ({ ...e, specialization: "" })); }}
+        placeholder={t("ob4SpecializationPlaceholder")} error={errors.specialization}
       />
 
       {/* About */}
@@ -210,24 +218,44 @@ export default function Step4Qualifications({ uid, data, update, onContinue, onB
       <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
         <div className="flex items-center gap-1.5 mb-1">
           <span className="text-[13px] font-bold text-slate-200">{t("ob4QualificationDocTitle")}</span>
-          {recommendedBadge(t("onboardingRecommended"))}
+          <span className="text-[10px] font-extrabold text-red-400">*</span>
         </div>
         <p className="text-xs text-slate-500 mb-3">{t("ob4QualificationDocHint")}</p>
-        <DocumentUploader uid={uid} category="qualification" docs={data.qualificationDocuments} onChange={(docs) => update({ qualificationDocuments: docs })} uploadLabel={t("ob4UploadFile")} />
+        <DocumentUploader
+          uid={uid} category="qualification" docs={data.qualificationDocuments}
+          onChange={(docs) => { update({ qualificationDocuments: docs }); setErrors((e) => ({ ...e, qualificationDocuments: "" })); }}
+          uploadLabel={t("ob4UploadFile")}
+        />
+        {errors.qualificationDocuments && <FieldError>{errors.qualificationDocuments}</FieldError>}
       </div>
 
       <div className="mb-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-        <span className="text-[13px] font-bold text-slate-200">{t("ob4ExperienceDocTitle")}</span>
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="text-[13px] font-bold text-slate-200">{t("ob4ExperienceDocTitle")}</span>
+          <span className="text-[10px] font-extrabold text-red-400">*</span>
+        </div>
         <p className="text-xs text-slate-500 mb-3 mt-1">{t("ob4ExperienceDocHint")}</p>
-        <DocumentUploader uid={uid} category="experience" docs={data.experienceDocuments} onChange={(docs) => update({ experienceDocuments: docs })} uploadLabel={t("ob4UploadFile")} />
+        <DocumentUploader
+          uid={uid} category="experience" docs={data.experienceDocuments}
+          onChange={(docs) => { update({ experienceDocuments: docs }); setErrors((e) => ({ ...e, experienceDocuments: "" })); }}
+          uploadLabel={t("ob4UploadFile")}
+        />
+        {errors.experienceDocuments && <FieldError>{errors.experienceDocuments}</FieldError>}
       </div>
 
-      <div className="mb-2 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-        <span className="text-[13px] font-bold text-slate-200">{t("ob4CertificatesTitle")}</span>
+      <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="text-[13px] font-bold text-slate-200">{t("ob4CertificatesTitle")}</span>
+          <span className="text-[10px] font-extrabold text-red-400">*</span>
+        </div>
         <p className="text-xs text-slate-500 mb-3 mt-1">{t("ob4CertificatesHint")}</p>
-        <DocumentUploader uid={uid} category="certificate" docs={data.additionalCertificates} onChange={(docs) => update({ additionalCertificates: docs })} multiple uploadLabel={t("ob4UploadFile")} />
+        <DocumentUploader
+          uid={uid} category="certificate" docs={data.additionalCertificates}
+          onChange={(docs) => { update({ additionalCertificates: docs }); setErrors((e) => ({ ...e, additionalCertificates: "" })); }}
+          multiple uploadLabel={t("ob4UploadFile")}
+        />
+        {errors.additionalCertificates && <FieldError>{errors.additionalCertificates}</FieldError>}
       </div>
-      <p className="text-xs text-slate-500 mb-6">{t("ob4LaterNote")}</p>
 
       <div className="flex gap-3">
         <SecondaryButton onClick={onBack} disabled={saving}>{t("back")}</SecondaryButton>
@@ -239,13 +267,5 @@ export default function Step4Qualifications({ uid, data, update, onContinue, onB
       </div>
       <TextLink onClick={onSaveLater} disabled={saving}>{t("onboardingSaveLater")}</TextLink>
     </div>
-  );
-}
-
-function recommendedBadge(label: string) {
-  return (
-    <span className="rounded-full px-2 py-0.5 bg-amber-400/15 border border-amber-400/40 text-amber-300 text-[9px] font-extrabold tracking-widest uppercase">
-      {label}
-    </span>
   );
 }

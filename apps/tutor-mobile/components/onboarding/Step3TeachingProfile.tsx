@@ -56,14 +56,22 @@ export default function Step3TeachingProfile({ data, update, onContinue, onBack,
     if (!data.tutorType) next.tutorType = t("ob3TutorTypeRequiredError");
     if (data.subjects.length === 0) next.subjects = t("ob3SubjectsRequiredError");
     if (data.studentLevels.length === 0) next.studentLevels = t("ob3LevelsRequiredError");
+    if (showStreams && data.streams.length === 0) next.streams = t("ob3StreamsRequiredError");
+    if (showBoards && data.curriculumBoards.length === 0) next.curriculumBoards = t("ob3BoardsRequiredError");
     if (!data.teachingMode) next.teachingMode = t("ob3ModeRequiredError");
+    if (showServiceArea && !serviceAreaValue.trim()) next.offlineServiceAreas = t("ob3ServiceAreaRequiredError");
     if (!data.experience) next.experience = t("ob3ExperienceRequiredError");
     setErrors(next);
     if (Object.keys(next).length === 0) onContinue();
   }
 
   const canContinue =
-    !!data.tutorType && data.subjects.length > 0 && data.studentLevels.length > 0 && !!data.teachingMode && !!data.experience;
+    !!data.tutorType && data.subjects.length > 0 && data.studentLevels.length > 0 &&
+    (!showStreams || data.streams.length > 0) &&
+    (!showBoards || data.curriculumBoards.length > 0) &&
+    !!data.teachingMode &&
+    (!showServiceArea || !!serviceAreaValue.trim()) &&
+    !!data.experience;
 
   return (
     <View>
@@ -154,27 +162,37 @@ export default function Step3TeachingProfile({ data, update, onContinue, onBack,
 
       {showStreams && (
         <View style={styles.section}>
-          <SectionLabel>{t("ob3StreamsQuestion")}</SectionLabel>
+          <SectionLabel required>{t("ob3StreamsQuestion")}</SectionLabel>
           <View style={styles.chipWrap}>
             {STREAM_OPTIONS.map((s) => (
-              <Chip key={s.value} active={data.streams.includes(s.value)} onPress={() => update({ streams: toggleInArray(data.streams, s.value) })}>
+              <Chip
+                key={s.value}
+                active={data.streams.includes(s.value)}
+                onPress={() => { update({ streams: toggleInArray(data.streams, s.value) }); setErrors((e) => ({ ...e, streams: "" })); }}
+              >
                 {s.label}
               </Chip>
             ))}
           </View>
+          {errors.streams && <FieldError>{errors.streams}</FieldError>}
         </View>
       )}
 
       {showBoards && (
         <View style={styles.section}>
-          <SectionLabel>{t("ob3BoardsQuestion")}</SectionLabel>
+          <SectionLabel required>{t("ob3BoardsQuestion")}</SectionLabel>
           <View style={styles.chipWrap}>
             {CURRICULUM_BOARD_OPTIONS.map((b) => (
-              <Chip key={b.value} active={data.curriculumBoards.includes(b.value)} onPress={() => update({ curriculumBoards: toggleInArray(data.curriculumBoards, b.value) })}>
+              <Chip
+                key={b.value}
+                active={data.curriculumBoards.includes(b.value)}
+                onPress={() => { update({ curriculumBoards: toggleInArray(data.curriculumBoards, b.value) }); setErrors((e) => ({ ...e, curriculumBoards: "" })); }}
+              >
                 {b.label}
               </Chip>
             ))}
           </View>
+          {errors.curriculumBoards && <FieldError>{errors.curriculumBoards}</FieldError>}
         </View>
       )}
 
@@ -202,15 +220,19 @@ export default function Step3TeachingProfile({ data, update, onContinue, onBack,
 
       {showServiceArea && (
         <View style={styles.section}>
-          <SectionLabel>{t("ob3ServiceAreaLabel")}</SectionLabel>
+          <SectionLabel required>{t("ob3ServiceAreaLabel")}</SectionLabel>
           <TextInput
             value={serviceAreaValue}
-            onChangeText={(v) => update({ offlineServiceAreas: v.trim() ? [v] : [] })}
+            onChangeText={(v) => {
+              update({ offlineServiceAreas: v.trim() ? [v] : [] });
+              setErrors((er) => ({ ...er, offlineServiceAreas: "" }));
+            }}
             placeholder={t("ob3ServiceAreaPlaceholder")}
             placeholderTextColor="#5B6478"
-            style={styles.searchInput}
+            style={[styles.searchInput, errors.offlineServiceAreas && { borderColor: "#F87171" }]}
           />
           <Text style={styles.hint}>{t("ob3ServiceAreaHint")}</Text>
+          {errors.offlineServiceAreas && <FieldError>{errors.offlineServiceAreas}</FieldError>}
         </View>
       )}
 

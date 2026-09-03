@@ -1,8 +1,8 @@
 // apps/tutor-mobile/components/onboarding/Step2BasicInfo.tsx
 // Mirrors apps/tutor/src/components/onboarding/Step2BasicInfo.tsx —
-// name, mobile+OTP, photo, PIN code (city/state auto-fetch, both
-// optional), gender. See ../../app/(auth)/onboarding.tsx's header for
-// the overall flow.
+// name, mobile+OTP, photo, PIN code (city/state auto-fetch), gender.
+// Every field on this step is mandatory. See ../../app/(auth)/
+// onboarding.tsx's header for the overall flow.
 //
 // Photo upload uses expo-document-picker (already installed, already
 // this app's established Storage-upload pattern — see
@@ -45,6 +45,9 @@ type Props = {
 export default function Step2BasicInfo({ uid, data, update, onContinue, onSaveLater, saving, t }: Props) {
   const [nameError, setNameError] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [genderError, setGenderError] = useState<string | null>(null);
+  const [cityError, setCityError] = useState<string | null>(null);
+  const [stateError, setStateError] = useState<string | null>(null);
 
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinFetching, setPinFetching] = useState(false);
@@ -173,10 +176,42 @@ export default function Step2BasicInfo({ uid, data, update, onContinue, onSaveLa
       setPhoneError(t("ob2VerifyPhoneRequiredError"));
       ok = false;
     }
+    if (!data.profilePic) {
+      setPhotoError(t("ob2PhotoRequiredError"));
+      ok = false;
+    } else {
+      setPhotoError(null);
+    }
+    if (!PIN_RE.test(data.pinCode)) {
+      setPinError(t("ob2PinCodeInvalidError"));
+      ok = false;
+    } else {
+      setPinError(null);
+    }
+    if (!data.city.trim()) {
+      setCityError(t("ob2CityRequiredError"));
+      ok = false;
+    } else {
+      setCityError(null);
+    }
+    if (!data.state) {
+      setStateError(t("ob2StateRequiredError"));
+      ok = false;
+    } else {
+      setStateError(null);
+    }
+    if (!data.gender) {
+      setGenderError(t("ob2GenderRequiredError"));
+      ok = false;
+    } else {
+      setGenderError(null);
+    }
     if (ok) onContinue();
   }
 
-  const canContinue = data.name.trim().length >= 2 && data.phoneVerified;
+  const canContinue =
+    data.name.trim().length >= 2 && data.phoneVerified && !!data.profilePic &&
+    PIN_RE.test(data.pinCode) && !!data.city.trim() && !!data.state && !!data.gender;
 
   return (
     <View>
@@ -265,7 +300,7 @@ export default function Step2BasicInfo({ uid, data, update, onContinue, onSaveLa
 
       {/* Profile photo */}
       <View style={styles.fieldWrap}>
-        <SectionLabel>{t("ob2PhotoLabel")}</SectionLabel>
+        <SectionLabel required>{t("ob2PhotoLabel")}</SectionLabel>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
           <View style={styles.photoCircle}>
             {data.profilePic ? (
@@ -295,7 +330,7 @@ export default function Step2BasicInfo({ uid, data, update, onContinue, onSaveLa
 
       {/* PIN code */}
       <View style={styles.fieldWrap}>
-        <SectionLabel>{t("ob2PinCodeLabel")}</SectionLabel>
+        <SectionLabel required>{t("ob2PinCodeLabel")}</SectionLabel>
         <View style={[styles.pinBox, pinError && styles.inputError]}>
           <TextInput
             style={styles.pinInput}
@@ -314,28 +349,33 @@ export default function Step2BasicInfo({ uid, data, update, onContinue, onSaveLa
 
       <TextField
         label={t("ob2CityLabel")}
+        required
         value={data.city}
-        onChangeText={(v) => update({ city: v })}
+        onChangeText={(v) => { update({ city: v }); if (cityError) setCityError(null); }}
         placeholder={t("ob2CityPlaceholder")}
+        error={cityError}
       />
 
       <SelectField
         label={t("ob2StateLabel")}
+        required
         value={data.state}
         options={INDIAN_STATES}
-        onSelect={(v) => update({ state: v })}
+        onSelect={(v) => { update({ state: v }); setStateError(null); }}
         placeholder={t("ob2StatePlaceholder")}
       />
+      {stateError && <FieldError>{stateError}</FieldError>}
 
       <View style={styles.fieldWrap}>
-        <SectionLabel>{t("ob2GenderLabel")}</SectionLabel>
+        <SectionLabel required>{t("ob2GenderLabel")}</SectionLabel>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {GENDER_OPTIONS.map((g) => (
-            <Chip key={g.value} active={data.gender === g.value} onPress={() => update({ gender: data.gender === g.value ? "" : g.value })}>
+            <Chip key={g.value} active={data.gender === g.value} onPress={() => { update({ gender: g.value }); setGenderError(null); }}>
               {g.label}
             </Chip>
           ))}
         </View>
+        {genderError && <FieldError>{genderError}</FieldError>}
       </View>
 
       <PrimaryButton onPress={validateAndContinue} disabled={saving || !canContinue} loading={saving} loadingLabel={t("loading")} style={{ marginTop: 4 }}>

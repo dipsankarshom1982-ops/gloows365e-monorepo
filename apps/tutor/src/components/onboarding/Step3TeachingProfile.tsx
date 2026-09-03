@@ -59,14 +59,22 @@ export default function Step3TeachingProfile({ data, update, onContinue, onBack,
     if (!data.tutorType) next.tutorType = t("ob3TutorTypeRequiredError");
     if (data.subjects.length === 0) next.subjects = t("ob3SubjectsRequiredError");
     if (data.studentLevels.length === 0) next.studentLevels = t("ob3LevelsRequiredError");
+    if (showStreams && data.streams.length === 0) next.streams = t("ob3StreamsRequiredError");
+    if (showBoards && data.curriculumBoards.length === 0) next.curriculumBoards = t("ob3BoardsRequiredError");
     if (!data.teachingMode) next.teachingMode = t("ob3ModeRequiredError");
+    if (showServiceArea && !serviceAreaValue.trim()) next.offlineServiceAreas = t("ob3ServiceAreaRequiredError");
     if (!data.experience) next.experience = t("ob3ExperienceRequiredError");
     setErrors(next);
     if (Object.keys(next).length === 0) onContinue();
   }
 
   const canContinue =
-    !!data.tutorType && data.subjects.length > 0 && data.studentLevels.length > 0 && !!data.teachingMode && !!data.experience;
+    !!data.tutorType && data.subjects.length > 0 && data.studentLevels.length > 0 &&
+    (!showStreams || data.streams.length > 0) &&
+    (!showBoards || data.curriculumBoards.length > 0) &&
+    !!data.teachingMode &&
+    (!showServiceArea || !!serviceAreaValue.trim()) &&
+    !!data.experience;
 
   return (
     <div>
@@ -160,28 +168,38 @@ export default function Step3TeachingProfile({ data, update, onContinue, onBack,
       {/* Streams — only if Higher Secondary selected */}
       {showStreams && (
         <div className="mb-6">
-          <SectionLabel>{t("ob3StreamsQuestion")}</SectionLabel>
+          <SectionLabel required>{t("ob3StreamsQuestion")}</SectionLabel>
           <div className="flex flex-wrap gap-2">
             {STREAM_OPTIONS.map((s) => (
-              <Chip key={s.value} active={data.streams.includes(s.value)} onClick={() => update({ streams: toggleInArray(data.streams, s.value) })}>
+              <Chip
+                key={s.value}
+                active={data.streams.includes(s.value)}
+                onClick={() => { update({ streams: toggleInArray(data.streams, s.value) }); setErrors((e) => ({ ...e, streams: "" })); }}
+              >
                 {s.label}
               </Chip>
             ))}
           </div>
+          {errors.streams && <FieldError>{errors.streams}</FieldError>}
         </div>
       )}
 
       {/* Curriculum boards — only when a school-relevant level is selected */}
       {showBoards && (
         <div className="mb-6">
-          <SectionLabel>{t("ob3BoardsQuestion")}</SectionLabel>
+          <SectionLabel required>{t("ob3BoardsQuestion")}</SectionLabel>
           <div className="flex flex-wrap gap-2">
             {CURRICULUM_BOARD_OPTIONS.map((b) => (
-              <Chip key={b.value} active={data.curriculumBoards.includes(b.value)} onClick={() => update({ curriculumBoards: toggleInArray(data.curriculumBoards, b.value) })}>
+              <Chip
+                key={b.value}
+                active={data.curriculumBoards.includes(b.value)}
+                onClick={() => { update({ curriculumBoards: toggleInArray(data.curriculumBoards, b.value) }); setErrors((e) => ({ ...e, curriculumBoards: "" })); }}
+              >
                 {b.label}
               </Chip>
             ))}
           </div>
+          {errors.curriculumBoards && <FieldError>{errors.curriculumBoards}</FieldError>}
         </div>
       )}
 
@@ -211,15 +229,21 @@ export default function Step3TeachingProfile({ data, update, onContinue, onBack,
 
       {showServiceArea && (
         <div className="mb-6">
-          <SectionLabel>{t("ob3ServiceAreaLabel")}</SectionLabel>
+          <SectionLabel required>{t("ob3ServiceAreaLabel")}</SectionLabel>
           <input
             type="text"
             value={serviceAreaValue}
-            onChange={(e) => update({ offlineServiceAreas: e.target.value.trim() ? [e.target.value] : [] })}
+            onChange={(e) => {
+              update({ offlineServiceAreas: e.target.value.trim() ? [e.target.value] : [] });
+              setErrors((er) => ({ ...er, offlineServiceAreas: "" }));
+            }}
             placeholder={t("ob3ServiceAreaPlaceholder")}
-            className="w-full rounded-2xl border border-white/10 px-3.5 py-3.5 text-[15px] text-slate-50 placeholder-slate-500 bg-white/5 outline-none focus:border-brand-400 focus:bg-brand-500/10 transition-colors"
+            className={`w-full rounded-2xl border px-3.5 py-3.5 text-[15px] text-slate-50 placeholder-slate-500 bg-white/5 outline-none focus:border-brand-400 focus:bg-brand-500/10 transition-colors ${
+              errors.offlineServiceAreas ? "border-red-400" : "border-white/10"
+            }`}
           />
           <p className="mt-1.5 ml-0.5 text-xs text-slate-500">{t("ob3ServiceAreaHint")}</p>
+          {errors.offlineServiceAreas && <FieldError>{errors.offlineServiceAreas}</FieldError>}
         </div>
       )}
 

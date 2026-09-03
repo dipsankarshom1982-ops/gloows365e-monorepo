@@ -74,13 +74,14 @@ export function ProgressBar({ step, totalSteps, t }: { step: number; totalSteps:
   );
 }
 
-export function SectionLabel({ children, required }: { children: string; required?: boolean }) {
+// Every field in this flow is mandatory (see Step2/3/4's file headers),
+// so this only ever renders the required asterisk — no "(optional)"
+// fallback text.
+export function SectionLabel({ children }: { children: string; required?: boolean }) {
   return (
     <div className="flex items-center gap-1.5 mb-2.5">
       <span className="text-[13px] font-bold text-slate-300 tracking-wide">{children}</span>
-      {required
-        ? <span className="text-[10px] font-extrabold text-red-400">*</span>
-        : <span className="text-[10px] font-semibold text-slate-500">(optional)</span>}
+      <span className="text-[10px] font-extrabold text-red-400">*</span>
     </div>
   );
 }
@@ -103,7 +104,7 @@ export function Chip({ active, onClick, children }: { active: boolean; onClick: 
 }
 
 export function TextField({
-  id, label, required, value, onChange, placeholder, type = "text", error, hint, disabled, list, inputMode,
+  id, label, value, onChange, placeholder, type = "text", error, hint, disabled, list, inputMode,
 }: {
   id: string; label: string; required?: boolean; value: string;
   onChange: (v: string) => void; placeholder?: string; type?: string;
@@ -112,7 +113,7 @@ export function TextField({
 }) {
   return (
     <div className="mb-5">
-      <SectionLabel required={required}>{label}</SectionLabel>
+      <SectionLabel>{label}</SectionLabel>
       <input
         id={id}
         type={type}

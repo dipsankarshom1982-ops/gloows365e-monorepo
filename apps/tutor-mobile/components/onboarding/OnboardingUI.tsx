@@ -71,11 +71,14 @@ export function ProgressBar({ step, totalSteps, t }: { step: number; totalSteps:
   );
 }
 
-export function SectionLabel({ children, required }: { children: string; required?: boolean }) {
+// Every field in this flow is mandatory (see Step2/3/4's file headers),
+// so this only ever renders the required asterisk — no "(optional)"
+// fallback text.
+export function SectionLabel({ children }: { children: string; required?: boolean }) {
   return (
     <View style={styles.sectionLabelRow}>
       <Text style={styles.sectionLabelText}>{children}</Text>
-      {required ? <Text style={styles.requiredMark}>*</Text> : <Text style={styles.optionalMark}>(optional)</Text>}
+      <Text style={styles.requiredMark}>*</Text>
     </View>
   );
 }
@@ -99,7 +102,7 @@ export function TextField({
 }) {
   return (
     <View style={styles.fieldWrap}>
-      <SectionLabel required={required}>{label}</SectionLabel>
+      <SectionLabel>{label}</SectionLabel>
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -139,7 +142,7 @@ export function SelectField({
 
   return (
     <View style={styles.fieldWrap}>
-      <SectionLabel required={required}>{label}</SectionLabel>
+      <SectionLabel>{label}</SectionLabel>
       <TouchableOpacity style={styles.selectBox} onPress={() => setOpen(true)} activeOpacity={0.8}>
         <Text style={value ? styles.selectValueText : styles.selectPlaceholderText}>{value || placeholder}</Text>
         <Text style={styles.selectChevron}>▾</Text>
@@ -242,7 +245,6 @@ const styles = StyleSheet.create({
   sectionLabelRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
   sectionLabelText: { color: "#CBD5E1", fontSize: 13, fontWeight: "700", letterSpacing: 0.2 },
   requiredMark: { color: "#F87171", fontSize: 10, fontWeight: "900" },
-  optionalMark: { color: "#64748B", fontSize: 10, fontWeight: "600" },
 
   chip: { borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.05)", minHeight: 40, justifyContent: "center" },
   chipActive: { borderColor: "#818CF8", backgroundColor: "rgba(99,102,241,0.15)" },

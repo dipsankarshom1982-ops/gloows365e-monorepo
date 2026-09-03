@@ -14,8 +14,8 @@ export type OnboardingData = {
   phoneVerified: boolean;
   profilePic: string;
   pinCode: string;    // 6-digit Indian PIN code — drives city/state auto-fetch
-  city: string;       // optional; auto-filled from pinCode, editable
-  state: string;      // optional; auto-filled from pinCode, editable
+  city: string;       // auto-filled from pinCode, editable — mandatory
+  state: string;      // auto-filled from pinCode, editable — mandatory
   gender: string; // "" | TutorGender
 
   // Step 3 — Teaching Profile

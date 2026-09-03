@@ -197,6 +197,10 @@ const HIGHEST_QUALIFICATIONS = [
   "HIGHER_SECONDARY", "DIPLOMA", "GRADUATE", "POSTGRADUATE",
   "B_ED", "M_ED", "PHD", "PROFESSIONAL_CERTIFICATION", "OTHER",
 ] as const;
+// Student levels that make an education board a real, applicable field
+// — mirrors Step3TeachingProfile.tsx's SCHOOL_STUDENT_LEVELS exactly, so
+// server-side "was a board required" agrees with what the client showed.
+const SCHOOL_STUDENT_LEVELS = ["PRIMARY", "MIDDLE", "SECONDARY", "HIGHER_SECONDARY"];
 // "rejected" is deliberately NOT in this list — a rejected tutor must be
 // able to fix their profile and resubmit.
 const NON_RESUBMITTABLE_STATUSES = ["submitted", "under_review", "verified"];
@@ -234,20 +238,44 @@ export const submitTutorOnboarding = functionsV1
     const name = typeof t.name === "string" ? t.name.trim() : "";
     if (name.length < 2 || name.length > 100) problems.push("Full name must be 2-100 characters");
     if (!t.phoneVerified) problems.push("Mobile number must be verified");
-    // city/state deliberately NOT required — see Step2BasicInfo.tsx
+    // Every field in this flow is mandatory (see Step2/3/4's file
+    // headers) — re-validated here in full, not just the subset the
+    // original Phase 1a callable checked.
+    if (!t.profilePic || typeof t.profilePic !== "string" || !t.profilePic.trim()) problems.push("Profile photo is required");
+    if (!t.pinCode || typeof t.pinCode !== "string" || !/^\d{6}$/.test(t.pinCode)) problems.push("A valid 6-digit PIN code is required");
+    if (!t.city || typeof t.city !== "string" || !t.city.trim()) problems.push("City is required");
+    if (!t.state || typeof t.state !== "string" || !t.state.trim()) problems.push("State is required");
+    if (!t.gender || typeof t.gender !== "string" || !t.gender.trim()) problems.push("Gender is required");
     if (!TUTOR_TYPES.includes(t.tutorType as any)) problems.push("Tutor type is required");
     if (!Array.isArray(t.subjects) || t.subjects.length === 0) problems.push("At least one subject is required");
-    if (!Array.isArray(t.studentLevels) || t.studentLevels.length === 0 || !(t.studentLevels as unknown[]).every((l) => STUDENT_LEVELS.includes(l as any))) {
+    const studentLevels = Array.isArray(t.studentLevels) ? (t.studentLevels as unknown[]) : [];
+    if (studentLevels.length === 0 || !studentLevels.every((l) => STUDENT_LEVELS.includes(l as any))) {
       problems.push("At least one student level is required");
     }
+    if (studentLevels.includes("HIGHER_SECONDARY") && (!Array.isArray(t.streams) || t.streams.length === 0)) {
+      problems.push("At least one stream is required for Classes 11-12");
+    }
+    if (studentLevels.some((l) => SCHOOL_STUDENT_LEVELS.includes(l as string)) && (!Array.isArray(t.curriculumBoards) || t.curriculumBoards.length === 0)) {
+      problems.push("At least one education board is required");
+    }
     if (!TEACHING_MODES.includes(t.teachingMode as any)) problems.push("Teaching mode is required");
+    if (
+      (t.teachingMode === "OFFLINE" || t.teachingMode === "BOTH") &&
+      (!Array.isArray(t.offlineServiceAreas) || t.offlineServiceAreas.length === 0 || !String(t.offlineServiceAreas[0] ?? "").trim())
+    ) {
+      problems.push("Service city / area is required for offline teaching");
+    }
     if (!EXPERIENCE_RANGES.includes(t.experience as any)) problems.push("Teaching experience is required");
     if (!HIGHEST_QUALIFICATIONS.includes(t.highestQualification as any)) problems.push("Highest qualification is required");
     if (!t.degreeName || typeof t.degreeName !== "string" || !t.degreeName.trim()) problems.push("Degree / course name is required");
     if (!t.institutionName || typeof t.institutionName !== "string" || !t.institutionName.trim()) problems.push("Institution name is required");
     if (typeof t.completionYear !== "number") problems.push("Year of completion is required");
+    if (!t.specialization || typeof t.specialization !== "string" || !t.specialization.trim()) problems.push("Specialization is required");
     const bio = typeof t.bio === "string" ? t.bio.trim() : "";
     if (bio.length < 100 || bio.length > 500) problems.push("About section must be 100-500 characters");
+    if (!Array.isArray(t.qualificationDocuments) || t.qualificationDocuments.length === 0) problems.push("Qualification certificate upload is required");
+    if (!Array.isArray(t.experienceDocuments) || t.experienceDocuments.length === 0) problems.push("Experience certificate upload is required");
+    if (!Array.isArray(t.additionalCertificates) || t.additionalCertificates.length === 0) problems.push("At least one additional certificate upload is required");
 
     if (problems.length > 0) {
       throw new functionsV1.https.HttpsError("invalid-argument", problems.join("; "));

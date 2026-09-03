@@ -119,7 +119,7 @@ export default function Step5Review({ data, email, onEditStep, onBack, onSubmit,
         <CheckRow done={data.phoneVerified} label={t("ob5MobileVerified")} />
 
         <Text style={[styles.sectionHeading, { marginTop: 10 }]}>{t("ob5ProfileSection").toUpperCase()}</Text>
-        <CheckRow done={!!data.name && !!data.city && !!data.state} label={t("ob5BasicCompleted")} />
+        <CheckRow done={!!data.name && !!data.city && !!data.state && !!data.profilePic && !!data.gender} label={t("ob5BasicCompleted")} />
         <CheckRow done={!!data.tutorType && data.subjects.length > 0} label={t("ob5TeachingCompleted")} />
 
         <Text style={[styles.sectionHeading, { marginTop: 10 }]}>{t("ob5DocumentsSection").toUpperCase()}</Text>
@@ -132,7 +132,7 @@ export default function Step5Review({ data, email, onEditStep, onBack, onSubmit,
         <View style={styles.docStatusRow}>
           <Text style={styles.docStatusLabel}>{t("ob5ExperienceDocStatus")}</Text>
           <Text style={[styles.docStatusValue, experienceDocCount ? { color: "#4ADE80" } : {}]}>
-            {experienceDocCount ? t("ob5Submitted") : t("ob5OptionalLabel")}
+            {experienceDocCount ? t("ob5Submitted") : t("ob5NotSubmitted")}
           </Text>
         </View>
       </View>
