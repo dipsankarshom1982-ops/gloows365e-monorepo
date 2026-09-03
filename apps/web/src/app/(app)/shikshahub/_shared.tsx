@@ -86,19 +86,41 @@ export function ShikshaHubStyles() {
         padding: 0 16px;
       }
 
+      /* LAYOUT FIX (desktop content-width bug) — repeat(N, minmax(0,1fr))
+         always creates exactly N tracks REGARDLESS of how many cards
+         actually exist, and 1fr divides the full row width equally among
+         them. With few tutors (the common case pre-launch and in any
+         niche subject/filter), the visible card(s) got stretched to
+         fill their 1fr share — up to ~400px on a 1280px desktop with
+         just one tutor — while the "extra" tracks sat empty and
+         invisible, making the whole discovery area look collapsed into
+         a narrow left column even though .shikshahub-container itself
+         was always full-width.
+         Below 640px, a capped minmax(280px,290px) card would itself have
+         left an unnecessary side margin on a 375/412px phone (content
+         width there is ~343-380px, wider than the 290px cap) — so mobile
+         gets a plain single 1fr column that always fills the available
+         content width exactly, no cap. From 640px up, auto-fit takes
+         over: column COUNT is driven purely by available width (verified
+         at 375/412/768/1024/1280/1440px to land on 1/1/2/3/4/4 columns),
+         and a card's width never goes past 290px no matter how few
+         tutors are in the result set — explicit justify-content: start
+         keeps that intentionally left-aligned (grid's own default, made
+         explicit here) rather than an accidental side-effect. */
       .shikshahub-grid {
         display: grid;
-        grid-template-columns: repeat(1, minmax(0, 1fr));
-        gap: 18px;
+        grid-template-columns: 1fr;
+        justify-content: start;
+        gap: 16px;
       }
       @media (min-width: 640px) {
-        .shikshahub-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .shikshahub-grid {
+          grid-template-columns: repeat(auto-fit, minmax(280px, 290px));
+          gap: 18px;
+        }
       }
       @media (min-width: 1024px) {
-        .shikshahub-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
-      }
-      @media (min-width: 1366px) {
-        .shikshahub-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .shikshahub-grid { gap: 20px; }
       }
 
       .shikshahub-card {

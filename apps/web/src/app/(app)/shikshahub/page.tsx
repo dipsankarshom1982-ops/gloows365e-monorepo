@@ -37,7 +37,7 @@ import {
   fetchAllTutors,
   type MarketplaceTutor,
 } from "@/lib/shikshahub";
-import { ShikshaHubStyles, SubjectChips, VerifiedBadge } from "./_shared";
+import { ShikshaHubStyles, SubjectChips, TutorAvatar, VerifiedBadge } from "./_shared";
 
 type SortMode = "name" | "rating";
 // "under500" / "500to1000" / "1000plus" — fixed buckets over sessionFee
@@ -233,6 +233,19 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
   );
 }
 
+// CARD REDESIGN (desktop layout pass) — the old card spent a fixed 4:3
+// aspect-ratio band (roughly half the card's height at typical card
+// widths) on a big image area that, for the very common no-profilePic
+// case, held nothing but a small centered emoji — exactly the "oversized
+// empty image area, tiny avatar" complaint. Replaced with a compact
+// header row (72px TutorAvatar + name/verified inline), so every pixel
+// of the card is either the avatar or actual information. Reuses the
+// existing TutorAvatar/VerifiedBadge/SubjectChips components — no new
+// data fields, nothing here reads anything beyond what MarketplaceTutor
+// already provides (teachingMode/studentLevels aren't in that public
+// mirror, so — same "hide fields that aren't available" rule this file
+// already follows for sessionFee/ratingAverage/etc — they're simply not
+// shown, rather than displaying invented data).
 function TutorCard({ tutor, onClick }: { tutor: MarketplaceTutor; onClick: () => void }) {
   return (
     <button
@@ -240,63 +253,61 @@ function TutorCard({ tutor, onClick }: { tutor: MarketplaceTutor; onClick: () =>
       className="shikshahub-card"
       style={{
         textAlign: "left", cursor: "pointer", border: "1px solid var(--border)",
-        borderRadius: 18, overflow: "hidden", background: "var(--bg-card)", padding: 0,
-        display: "flex", flexDirection: "column", height: "100%", width: "100%",
+        borderRadius: 18, background: "var(--bg-card)", padding: 14,
+        display: "flex", flexDirection: "column", gap: 8, height: "100%", width: "100%",
       }}
     >
-      <div style={{
-        position: "relative", aspectRatio: "4 / 3",
-        background: tutor.profilePic ? `url(${tutor.profilePic}) center/cover` : "rgba(20,184,166,0.12)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        {!tutor.profilePic && <span style={{ fontSize: 38 }}>🧑‍🏫</span>}
-        <div style={{ position: "absolute", top: 10, left: 10 }}>
-          <VerifiedBadge compact />
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <TutorAvatar tutor={tutor} size={72} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span style={{
+              fontSize: 15, fontWeight: 800, color: "var(--text)", lineHeight: "19px",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
+            }}>
+              {tutor.name || "Tutor"}
+            </span>
+            {tutor.ratingAverage != null && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 3, flexShrink: 0, fontSize: 12, fontWeight: 800, color: "var(--text)" }}>
+                ⭐ {tutor.ratingAverage.toFixed(1)}
+                <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>({tutor.ratingCount})</span>
+              </span>
+            )}
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <VerifiedBadge compact />
+          </div>
         </div>
       </div>
 
-      <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-          <span style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", lineHeight: "19px" }}>
-            {tutor.name || "Tutor"}
-          </span>
-          {tutor.ratingAverage != null && (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 3, flexShrink: 0, fontSize: 12, fontWeight: 800, color: "var(--text)" }}>
-              ⭐ {tutor.ratingAverage.toFixed(1)}
-              <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>({tutor.ratingCount})</span>
-            </span>
-          )}
+      {(!!tutor.qualification || tutor.teachingExperienceYears != null) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>
+          {!!tutor.qualification && <span>🎓 {tutor.qualification}</span>}
+          {!!tutor.qualification && tutor.teachingExperienceYears != null && <span>·</span>}
+          {tutor.teachingExperienceYears != null && <span>{tutor.teachingExperienceYears} yrs exp</span>}
         </div>
+      )}
 
-        {(!!tutor.qualification || tutor.teachingExperienceYears != null) && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>
-            {!!tutor.qualification && <span>🎓 {tutor.qualification}</span>}
-            {!!tutor.qualification && tutor.teachingExperienceYears != null && <span>·</span>}
-            {tutor.teachingExperienceYears != null && <span>{tutor.teachingExperienceYears} yrs exp</span>}
-          </div>
-        )}
+      {!!tutor.preferredLanguage && (
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>
+          🗣️ {tutor.preferredLanguage}
+        </span>
+      )}
 
-        {!!tutor.preferredLanguage && (
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>
-            🗣️ {tutor.preferredLanguage}
-          </span>
-        )}
+      {tutor.subjects.length > 0 && <SubjectChips subjects={tutor.subjects} limit={3} />}
 
-        {tutor.subjects.length > 0 && <SubjectChips subjects={tutor.subjects} limit={3} />}
+      {!!tutor.bio && (
+        <p className="shikshahub-clamp2" style={{ fontSize: 12, lineHeight: "17px", fontWeight: 500, color: "var(--text-muted)", margin: 0 }}>
+          {tutor.bio}
+        </p>
+      )}
 
-        {!!tutor.bio && (
-          <p className="shikshahub-clamp2" style={{ fontSize: 12, lineHeight: "17px", fontWeight: 500, color: "var(--text-muted)", margin: 0 }}>
-            {tutor.bio}
-          </p>
-        )}
-
-        <div style={{
-          marginTop: "auto", paddingTop: 8, display: "flex", alignItems: "center",
-          justifyContent: "space-between", fontSize: 12.5, fontWeight: 800, color: "#0d9488",
-        }}>
-          View Profile
-          <span aria-hidden>→</span>
-        </div>
+      <div style={{
+        marginTop: "auto", paddingTop: 8, display: "flex", alignItems: "center",
+        justifyContent: "space-between", fontSize: 12.5, fontWeight: 800, color: "#0d9488",
+      }}>
+        View Profile
+        <span aria-hidden>→</span>
       </div>
     </button>
   );
