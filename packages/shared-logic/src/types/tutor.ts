@@ -80,6 +80,28 @@ export type TutorOnboardingDocument = {
   status: TutorOnboardingDocumentStatus;
   rejectionReason?: string;
   uploadedAt?: unknown;
+  // Added for the Document Management screen (Tutor Profile Completion &
+  // Verification Dashboard) — optional so documents uploaded before this
+  // field existed still typecheck and render (just without a type/size
+  // badge). `version` increments on replace, starting at 1 on first upload.
+  mimeType?: string;
+  fileSize?: number;
+  version?: number;
+};
+
+// Tutor Profile Completion & Verification Dashboard — bands are derived
+// from calculateTutorProfileCompletion's completionPercentage, see
+// packages/shared-logic/src/lib/tutorProfileCompletion.ts. Deliberately
+// encouraging language throughout (spec: "do not make this feel
+// punitive") — there is no "poor"/"weak" tier.
+export type TutorProfileStrength = "beginner" | "developing" | "good" | "strong" | "excellent";
+
+export type TutorProfileCompletionResult = {
+  completionPercentage: number; // 0-100
+  completedSections: string[];   // section ids, see tutorProfileCompletion.ts
+  incompleteSections: string[];  // section ids, in priority order
+  nextRecommendedAction: string; // human-readable, ready to render as-is
+  profileStrength: TutorProfileStrength;
 };
 
 // Phase 1a field set only — spec section 14's full marketplace profile
@@ -138,9 +160,9 @@ export type TutorProfile = {
   // for Step 3 below.
   pinCode?: string; // 6-digit Indian PIN — city/state are auto-filled from
                      // this client-side (api.postalpincode.in) but remain
-                     // editable and optional, not derived server-side
-  city?: string;  // optional
-  state?: string; // optional
+                     // editable by hand
+  city?: string;  // mandatory as of the onboarding flow's later revision
+  state?: string; // mandatory as of the onboarding flow's later revision
   gender?: TutorGender;
 
   tutorType?: TutorType;
@@ -169,7 +191,12 @@ export type TutorProfile = {
 
   onboardingStep?: number; // 2-5, resume point
   onboardingCompleted?: boolean;
+  // Both computed client-side by calculateTutorProfileCompletion (see
+  // packages/shared-logic/src/lib/tutorProfileCompletion.ts) and saved
+  // alongside whatever else the client is already writing — same trust
+  // level as the rest of this section, not server-validated.
   profileCompletionPercentage?: number;
+  profileStrength?: TutorProfileStrength;
   profileStatus?: TutorOnboardingProfileStatus;           // server-only, see above
   onboardingVerificationStatus?: TutorOnboardingVerificationStatus; // server-only
   submittedAt?: unknown;   // server-only

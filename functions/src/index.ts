@@ -110,7 +110,7 @@ export { processRefund, resolveRefundReconciliation, reconcileRefundStatuses } f
 export { searchPaymentOrders, getPaymentDetail } from "./refundSearch";
 
 // ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
-export { registerTutorAccount, submitTutorVerification, reviewTutorVerification, submitTutorOnboarding } from "./tutorAccounts";
+export { registerTutorAccount, submitTutorVerification, reviewTutorVerification, submitTutorOnboarding, reviewTutorOnboarding } from "./tutorAccounts";
 
 // ── ShikshaHub — public tutor marketplace mirror ────────────────────────────────
 export { syncTutorMarketplaceProfile } from "./tutorMarketplace";

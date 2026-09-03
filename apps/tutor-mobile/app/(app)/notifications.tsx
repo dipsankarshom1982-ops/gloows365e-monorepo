@@ -15,6 +15,8 @@ const TYPE_META: Record<AppNotification["type"], string> = {
   payout: "💸",
   review: "⭐",
   shikshahub: "🎓",
+  // QA fix — see apps/tutor's notifications/page.tsx counterpart.
+  tutor_verification: "🛡️",
 };
 
 function timeAgo(ts: any): string {

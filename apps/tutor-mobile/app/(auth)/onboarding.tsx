@@ -14,7 +14,7 @@
 // looser auth check (signed in only) instead.
 
 import { useEffect, useRef, useState } from "react";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -47,6 +47,11 @@ const submitTutorOnboardingFn = httpsCallable<undefined, { profileStatus: string
 
 export default function OnboardingScreen() {
   const { t } = useTranslation();
+  // QA fix — see web onboarding page.tsx's identical comment: without
+  // this, the redirect below permanently blocked every dashboard link
+  // back into onboarding for any tutor who had ever submitted.
+  const params = useLocalSearchParams<{ edit?: string }>();
+  const isEditIntent = params.edit === "1";
   const { user, authLoading, tutorProfile, profileLoading } = useTutorProfile();
 
   const [step, setStep] = useState(2);
@@ -74,7 +79,7 @@ export default function OnboardingScreen() {
     if (profileLoading || hydratedRef.current) return;
     hydratedRef.current = true;
 
-    if (tutorProfile?.onboardingCompleted) {
+    if (tutorProfile?.onboardingCompleted && !isEditIntent) {
       router.replace("/dashboard");
       return;
     }
@@ -110,7 +115,7 @@ export default function OnboardingScreen() {
       }));
       setStep(tutorProfile.onboardingStep ?? 2);
     }
-  }, [profileLoading, tutorProfile]);
+  }, [profileLoading, tutorProfile, isEditIntent]);
 
   async function persistStep2(nextStep: number) {
     await registerTutorAccountFn({ tutorRole: "TUTOR", name: data.name.trim(), phone: data.phoneNumber.trim() });
@@ -179,6 +184,8 @@ export default function OnboardingScreen() {
   }
 
   async function handleSubmit() {
+    // QA fix — see apps/tutor/src/app/onboarding/page.tsx's counterpart.
+    if (submitting) return;
     setSubmitting(true);
     setSubmitError(null);
     try {

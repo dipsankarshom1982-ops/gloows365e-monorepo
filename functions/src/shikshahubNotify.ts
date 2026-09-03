@@ -35,7 +35,14 @@ import axios from "axios";
 
 const db = admin.firestore();
 
-export type ShikshaHubNotificationType = "instant_help" | "payout" | "review" | "shikshahub";
+export type ShikshaHubNotificationType =
+  | "instant_help" | "payout" | "review" | "shikshahub"
+  // Tutor Profile Completion & Verification Dashboard — profile
+  // submitted/verified/rejected events. Kept in sync with the client-side
+  // copy of this union in packages/shared-logic/src/types/notification.ts
+  // (server code doesn't import that package — see this file's own header
+  // on why token/push logic is duplicated rather than shared).
+  | "tutor_verification";
 
 export type ShikshaHubNotification = {
   title: string;

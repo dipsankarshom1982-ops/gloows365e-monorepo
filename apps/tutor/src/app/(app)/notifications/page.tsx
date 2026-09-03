@@ -16,6 +16,11 @@ const TYPE_META: Record<AppNotification["type"], { icon: string }> = {
   payout: { icon: "💸" },
   review: { icon: "⭐" },
   shikshahub: { icon: "🎓" },
+  // QA fix — this Record wasn't updated when the Tutor Dashboard added
+  // "tutor_verification" to ShikshaHubNotificationType; tsc's incremental
+  // cache (apps/tutor/tsconfig.tsbuildinfo) had been masking the error
+  // across the packages/shared-logic boundary until a clean re-check.
+  tutor_verification: { icon: "🛡️" },
 };
 
 function timeAgo(ts: any): string {

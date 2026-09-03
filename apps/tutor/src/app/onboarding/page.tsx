@@ -49,8 +49,8 @@
 //    header. i18next's fallbackLng keeps it working (in English) for
 //    Hindi-selected tutors rather than breaking.
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { doc, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useTutorProfile } from "@gloows/shared-logic";
@@ -78,9 +78,38 @@ const submitTutorOnboardingFn = httpsCallable<undefined, { profileStatus: string
   functions, "submitTutorOnboarding"
 );
 
+// QA fix — this app's next.config.ts sets `output: "export"` in
+// production, and useSearchParams() (added for the ?edit=1 fix above)
+// requires a Suspense boundary during static export or the production
+// build can fail/de-opt this route entirely. `next dev` doesn't enforce
+// this, so the gap wasn't visible there.
 export default function OnboardingPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-dvh flex items-center justify-center bg-gradient-to-br from-[#060A17] via-[#0B1226] to-[#111C3A]">
+        <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-brand-400 animate-spin" />
+      </div>
+    }>
+      <OnboardingPageInner />
+    </Suspense>
+  );
+}
+
+function OnboardingPageInner() {
   const { t } = useTutorT();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // QA fix — CRITICAL: onboardingCompleted is set true by
+  // submitTutorOnboarding and never reset afterward, so this page's own
+  // "already done, bounce to dashboard" redirect below permanently
+  // blocked EVERY dashboard link back into onboarding (Complete Profile,
+  // Update Teaching Profile, Edit Profile, and Action Required's
+  // profile/photo items) for any tutor who had ever submitted —
+  // including a REJECTED tutor with no other way to fix and resubmit
+  // their profile. The dashboard's links to this route now append
+  // ?edit=1; only that explicit intent skips the redirect, so a stray
+  // bookmark/back-button visit still behaves as before.
+  const isEditIntent = searchParams.get("edit") === "1";
   const { user, authLoading, tutorProfile, profileLoading } = useTutorProfile();
 
   const [step, setStep] = useState(2);
@@ -112,7 +141,7 @@ export default function OnboardingPage() {
     if (profileLoading || hydratedRef.current) return;
     hydratedRef.current = true;
 
-    if (tutorProfile?.onboardingCompleted) {
+    if (tutorProfile?.onboardingCompleted && !isEditIntent) {
       router.replace("/dashboard");
       return;
     }
@@ -148,7 +177,7 @@ export default function OnboardingPage() {
       }));
       setStep(tutorProfile.onboardingStep ?? 2);
     }
-  }, [profileLoading, tutorProfile, router]);
+  }, [profileLoading, tutorProfile, router, isEditIntent]);
 
   async function persistStep2(nextStep: number) {
     // registerTutorAccount both bootstraps tutors/{uid} (first time) and
@@ -222,6 +251,12 @@ export default function OnboardingPage() {
   }
 
   async function handleSubmit() {
+    // QA fix — the button's own `disabled={submitting}` doesn't take
+    // effect until the next render, so a fast double-click could still
+    // fire this twice before React catches up; the server side is
+    // already idempotent (NON_RESUBMITTABLE_STATUSES), but this avoids a
+    // second in-flight request (and a duplicate "submitted" notification).
+    if (submitting) return;
     setSubmitting(true);
     setSubmitError(null);
     try {

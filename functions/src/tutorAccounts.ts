@@ -23,6 +23,7 @@
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { notifyTutor } from "./shikshahubNotify";
 
 const db = admin.firestore();
 
@@ -291,8 +292,119 @@ export const submitTutorOnboarding = functionsV1
       updatedAt: now,
     }, { merge: true });
 
+    await notifyTutor(uid, {
+      title: "Profile submitted for review",
+      body: "Your tutor profile has been submitted. We'll notify you once it's been reviewed.",
+      type: "tutor_verification",
+    });
+
     console.log(`✅ Tutor onboarding submitted for review: uid=${uid}`);
     return { profileStatus: "under_review" as const };
+  });
+
+// ─── reviewTutorOnboarding ──────────────────────────────────────────────────
+// Admin-only. Closes the loop submitTutorOnboarding opens: the only path
+// that can move profileStatus/onboardingVerificationStatus out of
+// "under_review" into "verified"/"rejected" — without this, every
+// onboarding submission sits at under_review forever. Deliberately its
+// own callable rather than extending reviewTutorVerification above:
+// that one drives the OLDER TutorVerification/tutorVerifications system
+// (admin's original review queue, Draft/Submitted/Under Review/Verified/
+// Rejected/Suspended) which this feature intentionally leaves untouched
+// — see this file's header note on the two parallel status models.
+//
+// Reviews the whole profile at once (not per-document) — matches
+// reviewTutorVerification's existing scope/complexity; per-document
+// approve/reject is a natural follow-up, not built here.
+//
+// Deliberately does NOT persist a reviewedBy field onto tutors/{uid}
+// (which the tutor can read) — the reviewing admin's uid is only ever
+// logged server-side (console.log below), never exposed to the tutor
+// interface, per this feature's own "never expose reviewer identity"
+// requirement.
+export const reviewTutorOnboarding = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (
+    data: { uid: string; action: "approve" | "reject"; reason?: string },
+    context
+  ) => {
+    if (!context.auth?.token?.admin) {
+      throw new functionsV1.https.HttpsError("permission-denied", "Admins only");
+    }
+    const { uid, action, reason } = data ?? ({} as typeof data);
+    if (!uid || !["approve", "reject"].includes(action)) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "uid and action (approve|reject) are required");
+    }
+    // QA fix — spec's "admin must provide a rejection reason" requirement
+    // wasn't enforced server-side; the tutor dashboard always shows the
+    // reason for a rejected profile (StatusCard.tsx), so a reject without
+    // one would silently leave that box empty.
+    if (action === "reject" && (!reason || !reason.trim())) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "A rejection reason is required");
+    }
+
+    const tutorRef = db.doc(`tutors/${uid}`);
+    const snap = await tutorRef.get();
+    if (!snap.exists) {
+      throw new functionsV1.https.HttpsError("not-found", "No tutor profile found for this uid");
+    }
+    // QA fix — only a profile actually awaiting review can be
+    // approved/rejected. Without this, calling the callable directly
+    // (bypassing the admin UI's under_review-filtered queue) could flip
+    // verified:true on a tutor who never submitted (still "draft"), or
+    // re-decide one already verified/rejected outside the resubmission
+    // flow submitTutorOnboarding's NON_RESUBMITTABLE_STATUSES enforces.
+    const current = snap.data() as Record<string, unknown>;
+    if (current.profileStatus !== "under_review") {
+      throw new functionsV1.https.HttpsError(
+        "failed-precondition",
+        "This profile is not currently awaiting review."
+      );
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    if (action === "approve") {
+      await tutorRef.set({
+        profileStatus: "verified",
+        onboardingVerificationStatus: "verified",
+        // Flipping this (the pre-existing marketplace-visibility flag) is
+        // what already drives functions/src/tutorMarketplace.ts's
+        // syncTutorMarketplaceProfile trigger — no separate "publish"
+        // mechanism needed for this profile to become publicly listed.
+        verified: true,
+        reviewedAt: now,
+        rejectionReason: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+      }, { merge: true });
+
+      await notifyTutor(uid, {
+        title: "Your tutor profile is verified! 🎉",
+        body: "Congratulations — your Gloows Tutor profile has been verified and is now visible to students.",
+        type: "tutor_verification",
+      });
+    } else {
+      await tutorRef.set({
+        profileStatus: "rejected",
+        onboardingVerificationStatus: "rejected",
+        verified: false,
+        reviewedAt: now,
+        rejectionReason: reason ?? "",
+        updatedAt: now,
+      }, { merge: true });
+
+      await notifyTutor(uid, {
+        title: "Action needed on your tutor profile",
+        body: reason?.trim()
+          ? `Your profile needs a correction: ${reason.trim()}`
+          : "Some information on your profile needs to be corrected before it can be verified.",
+        type: "tutor_verification",
+      });
+    }
+
+    console.log(`✅ Tutor onboarding ${action}d: uid=${uid} by admin ${context.auth.uid}`);
+    const resultStatus: "verified" | "rejected" = action === "approve" ? "verified" : "rejected";
+    return { profileStatus: resultStatus };
   });
 
 // ─── reviewTutorVerification ───────────────────────────────────────────────

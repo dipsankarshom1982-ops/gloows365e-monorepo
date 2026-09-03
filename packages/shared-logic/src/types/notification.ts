@@ -4,7 +4,13 @@
 // is what gives apps/tutor and apps/tutor-mobile (which had no
 // notification inbox at all before this phase) the same capability.
 
-export type ShikshaHubNotificationType = "instant_help" | "payout" | "review" | "shikshahub";
+export type ShikshaHubNotificationType =
+  | "instant_help" | "payout" | "review" | "shikshahub"
+  // Tutor Profile Completion & Verification Dashboard — profile
+  // submitted/verified/rejected events, sent by
+  // functions/src/tutorAccounts.ts's submitTutorOnboarding and
+  // reviewTutorOnboarding via the notifyTutor helper below.
+  | "tutor_verification";
 
 export type AppNotification = {
   id: string;

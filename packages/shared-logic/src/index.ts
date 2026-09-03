@@ -16,6 +16,7 @@ export * from "./context/TutorProfileContext";
 
 // ─── Firebase bootstrap ──────────────────────────────────────────────────
 export * from "./lib/firebaseConfig";
+export * from "./lib/tutorProfileCompletion";
 
 // ─── Hooks ───────────────────────────────────────────────────────────────
 export * from "./hooks/useVCoins";
