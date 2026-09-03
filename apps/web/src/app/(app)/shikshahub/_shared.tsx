@@ -56,6 +56,21 @@ export function SubjectChips({ subjects, limit }: { subjects: string[]; limit?: 
   );
 }
 
+// Public Tutor Profile page — one consistent card wrapper for every
+// section below the hero (About/Subjects/Languages/Availability/Trust/
+// Reviews/Related), so adding a section is one component call rather
+// than re-typing the same border/radius/padding style object each time.
+export function ProfileSectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 20, background: "var(--bg-card)", padding: 20 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 12 }}>
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export function TutorAvatar({
   tutor, size, ring,
 }: { tutor: Pick<MarketplaceTutor, "profilePic" | "name">; size: number; ring?: boolean }) {

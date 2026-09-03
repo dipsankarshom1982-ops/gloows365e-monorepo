@@ -246,7 +246,9 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
 // mirror, so — same "hide fields that aren't available" rule this file
 // already follows for sessionFee/ratingAverage/etc — they're simply not
 // shown, rather than displaying invented data).
-function TutorCard({ tutor, onClick }: { tutor: MarketplaceTutor; onClick: () => void }) {
+// Exported so the profile page's "You May Also Like" section can reuse
+// the exact same card rather than a near-duplicate — see profile/page.tsx.
+export function TutorCard({ tutor, onClick }: { tutor: MarketplaceTutor; onClick: () => void }) {
   return (
     <button
       onClick={onClick}

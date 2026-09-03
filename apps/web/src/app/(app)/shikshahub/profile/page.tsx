@@ -25,11 +25,31 @@
 // listenToBooking(). "Contact Tutor" stays a disabled placeholder;
 // messaging is still out of Phase 1's scope, unlike booking. No payment
 // anywhere in this file — see requestBooking's own header comment for why.
+// (Contact Tutor since links to a real thread — Phase 1's own note above
+// is stale, left as-is rather than rewritten.)
+//
+// Public Tutor Profile pass — everything in this section reads ONLY
+// MarketplaceTutor (tutorMarketplaceProfiles/{uid}, the collection that
+// structurally only ever contains currently-verified tutors — see
+// functions/src/tutorMarketplace.ts's SAFE_FIELDS and its sync trigger,
+// and firestore.rules' tutorMarketplaceProfiles block). No new Firestore
+// collection, field, or query was added: Availability reuses the same
+// `availability` field BookingPanel already reads; Related Tutors reuses
+// fetchAllTutors() (the exact call the discovery grid already makes,
+// ranked client-side); Trust & Verification is static, accurate copy,
+// not a new flag. Fields the detailed brief asked for that do NOT exist
+// on this public profile — city/location, structured degree/institution/
+// year, teaching mode, student levels, curriculum board — are
+// deliberately NOT fabricated here; see this feature's final report for
+// the recommended follow-up to mirror them from tutors/{uid} if/when
+// they're judged public-safe.
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppTranslation } from "@/context/LanguageContext";
 import {
+  fetchAllTutors,
   fetchTutorById,
   fetchTutorServices,
   requestBookingCall,
@@ -37,11 +57,13 @@ import {
   requestInstantHelpCall,
   listenToBooking,
   slotOptionsForDate,
+  weekdayKeyForDate,
   type MarketplaceTutor,
 } from "@/lib/shikshahub";
-import type { Booking, BookingSessionType, TutorService } from "@gloows/shared-logic";
+import type { Booking, BookingSessionType, TutorService, TutorWeekday } from "@gloows/shared-logic";
 import { useTutorReviews } from "@gloows/shared-logic";
-import { ShikshaHubStyles, SubjectChips, TutorAvatar, VerifiedBadge } from "../_shared";
+import { ProfileSectionCard, ShikshaHubStyles, SubjectChips, TutorAvatar, VerifiedBadge } from "../_shared";
+import { TutorCard } from "../page";
 
 const SERVICE_TYPE_LABEL: Record<TutorService["serviceType"], string> = {
   one_time: "One-time",
@@ -72,34 +94,71 @@ function ShikshaHubProfileContent() {
       .finally(() => setLoading(false));
   }, [uid]);
 
-  if (loading) {
-    return <div style={{ textAlign: "center", padding: 80, color: "var(--text-muted)" }}>Loading…</div>;
-  }
+  if (loading) return <ProfileSkeleton />;
 
+  // Covers every reason a profile can be unreachable — invalid/typo'd id,
+  // never existed, rejected, unverified, or since-unverified — as one
+  // generic state. This isn't a client-side check standing in for real
+  // access control: fetchTutorById reads tutorMarketplaceProfiles/{uid},
+  // a collection that structurally only ever contains currently-verified
+  // tutors (functions/src/tutorMarketplace.ts's sync trigger deletes the
+  // mirror doc the instant verified flips false, and firestore.rules
+  // blocks all client writes to it) — so a manually-typed id for a
+  // draft/rejected/test tutor gets exactly the same "not found" result
+  // as a nonexistent one, never their private data or the real reason.
   if (notFound || !tutor) {
     return (
       <div style={{ textAlign: "center", padding: 80 }}>
         <div style={{ fontSize: 40 }}>🤔</div>
-        <div style={{ marginTop: 8, color: "var(--text-muted)", fontSize: 14, fontWeight: 600 }}>
-          {t("shikshaHubNotFound", "This tutor profile isn't available anymore.")}
+        <div style={{ marginTop: 10, color: "var(--text)", fontSize: 15, fontWeight: 800 }}>
+          {t("shikshaHubNotFoundTitle", "Tutor Not Available")}
+        </div>
+        <div style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13, fontWeight: 600 }}>
+          {t("shikshaHubNotFound", "This tutor profile is currently unavailable.")}
         </div>
         <button
           onClick={() => router.replace("/shikshahub")}
-          style={{ marginTop: 12, background: "#14b8a6", color: "#fff", border: "none", borderRadius: 12, padding: "10px 16px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+          style={{ marginTop: 14, background: "#14b8a6", color: "#fff", border: "none", borderRadius: 12, padding: "10px 16px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}
         >
-          {t("browseShikshaHub", "Browse ShikshaHub")}
+          {t("browseShikshaHub", "Browse Tutors")}
         </button>
       </div>
     );
   }
 
   const hasMeta = !!tutor.qualification || tutor.teachingExperienceYears != null || !!tutor.preferredLanguage;
+  // preferredLanguage is a single free-text field on the public profile
+  // (see lib/shikshahub's MarketplaceTutor) — a tutor CAN enter multiple
+  // ("English, Hindi"), so split on comma to render as a proper multi-
+  // language list rather than fabricating a structured field that
+  // doesn't exist. A single language still renders as one chip.
+  const languages = tutor.preferredLanguage.split(",").map((l) => l.trim()).filter(Boolean);
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", paddingBottom: 60 }}>
       <ShikshaHubStyles />
 
       <div className="shikshahub-container" style={{ padding: "16px 16px 40px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 14, fontSize: 12.5, fontWeight: 600, color: "var(--text-muted)" }}>
+          <Link href="/shikshahub" style={{ color: "var(--text-muted)", textDecoration: "none" }}>
+            {t("shikshaHubTitle", "ShikshaHub")}
+          </Link>
+          {/* Not a filtered-list link — /shikshahub doesn't read an
+              initial subject filter from the URL today, and wiring that
+              up is discovery-page scope, not this page's. Plain
+              breadcrumb text still gives the "where am I" context the
+              spec asks for without implying a filter link that doesn't
+              actually filter. */}
+          {tutor.subjects[0] && (
+            <>
+              <span aria-hidden>/</span>
+              <span>{tutor.subjects[0]} {t("shikshaHubTutorsSuffix", "Tutors")}</span>
+            </>
+          )}
+          <span aria-hidden>/</span>
+          <span style={{ color: "var(--text)" }}>{tutor.name || "Tutor"}</span>
+        </div>
+
         <button
           onClick={() => router.back()}
           style={{
@@ -148,28 +207,30 @@ function ShikshaHubProfileContent() {
                     )}
                     {!!tutor.preferredLanguage && (
                       <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>
-                        🗣️ {tutor.preferredLanguage}
+                        🗣️ {languages.join(", ")}
                       </span>
                     )}
                   </div>
                 )}
 
-                {tutor.subjects.length > 0 && <SubjectChips subjects={tutor.subjects} />}
+                {tutor.subjects.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text-muted)", marginBottom: 6, letterSpacing: 0.2 }}>
+                      {t("shikshaHubSubjectsLabel", "Subjects I Teach")}
+                    </div>
+                    <SubjectChips subjects={tutor.subjects} />
+                  </div>
+                )}
               </div>
             </div>
 
-            {!!tutor.bio && (
-              <div style={{
-                border: "1px solid var(--border)", borderRadius: 20, background: "var(--bg-card)", padding: 20,
-              }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 8 }}>
-                  {t("shikshaHubAboutTitle", "About the Tutor")}
-                </div>
-                <div style={{ fontSize: 13.5, lineHeight: "21px", fontWeight: 500, color: "var(--text-muted)" }}>
-                  {tutor.bio}
-                </div>
-              </div>
-            )}
+            <ProfileSectionCard title={t("shikshaHubAboutTitle", "About the Tutor")}>
+              <BioText bio={tutor.bio} />
+            </ProfileSectionCard>
+
+            <AvailabilitySection availability={tutor.availability} />
+
+            <TrustSection />
 
             <ReviewsSection tutorUid={tutor.uid} />
           </div>
@@ -200,6 +261,236 @@ function ShikshaHubProfileContent() {
             </div>
           </div>
         </div>
+
+        <div style={{ marginTop: 16 }}>
+          <RelatedTutorsSection currentTutor={tutor} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Bio with a 4-line clamp + Read more/less toggle, and an honest empty
+ *  state ("About information is not available yet.") rather than
+ *  omitting the whole About card when a tutor hasn't written one — the
+ *  spec's own distinction: qualifications get omitted when missing,
+ *  bio gets an explicit placeholder. Plain text only — bio is stored
+ *  and served as plain text everywhere else in this codebase (see
+ *  functions/src/tutorReviews.ts's identical note on reviewText), so
+ *  no HTML/markdown rendering is introduced here either. */
+function BioText({ bio }: { bio: string }) {
+  const { t } = useAppTranslation();
+  const [expanded, setExpanded] = useState(false);
+
+  if (!bio.trim()) {
+    return (
+      <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text-muted)", fontStyle: "italic" }}>
+        {t("shikshaHubNoBio", "About information is not available yet.")}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 13.5, lineHeight: "21px", fontWeight: 500, color: "var(--text-muted)",
+          whiteSpace: "pre-wrap", overflow: "hidden",
+          display: expanded ? "block" : "-webkit-box",
+          WebkitLineClamp: expanded ? undefined : 4,
+          WebkitBoxOrient: "vertical",
+        }}
+      >
+        {bio}
+      </div>
+      {bio.length > 220 && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          style={{ marginTop: 6, background: "none", border: "none", padding: 0, color: "#0d9488", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}
+        >
+          {expanded ? t("readLess", "Read less") : t("readMore", "Read more")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const WEEKDAY_LABELS: { key: string; label: string }[] = [
+  { key: "monday", label: "Mon" }, { key: "tuesday", label: "Tue" }, { key: "wednesday", label: "Wed" },
+  { key: "thursday", label: "Thu" }, { key: "friday", label: "Fri" }, { key: "saturday", label: "Sat" },
+  { key: "sunday", label: "Sun" },
+];
+
+/** Public availability summary — reuses the SAME tutor.availability field
+ *  the booking panel already reads (public-safe: it's on tutorMarketplace
+ *  -Profiles already, a weekly enabled/start/end template, no exact
+ *  calendar/booked-slot data). Deliberately shows only WHICH DAYS have
+ *  some availability, never the start/end times themselves — a simplified
+ *  summary, not the tutor's real schedule, per the spec's "do not expose
+ *  exact personal schedules" rule. */
+function AvailabilitySection({ availability }: { availability: MarketplaceTutor["availability"] }) {
+  const { t } = useAppTranslation();
+  const enabledDays = WEEKDAY_LABELS.filter((d) => availability?.[d.key as TutorWeekday]?.enabled);
+
+  if (enabledDays.length === 0) {
+    return (
+      <ProfileSectionCard title={t("shikshaHubAvailabilityTitle", "Availability")}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>
+          {t("shikshaHubNoAvailability", "Availability information is currently not available.")}
+        </div>
+      </ProfileSectionCard>
+    );
+  }
+
+  const todayKey = weekdayKeyForDate(todayDateStr());
+  const isTodayEnabled = todayKey ? enabledDays.some((d) => d.key === todayKey) : false;
+  const statusText = isTodayEnabled
+    ? t("shikshaHubAvailableToday", "Available Today")
+    : enabledDays.length >= 4
+    ? t("shikshaHubAvailableThisWeek", "Available This Week")
+    : t("shikshaHubLimitedAvailability", "Limited Availability");
+  const statusColor = isTodayEnabled ? "#22c55e" : enabledDays.length >= 4 ? "#14b8a6" : "#f59e0b";
+
+  return (
+    <ProfileSectionCard title={t("shikshaHubAvailabilityTitle", "Availability")}>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+        <span style={{ width: 7, height: 7, borderRadius: "50%", background: statusColor }} />
+        <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{statusText}</span>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {WEEKDAY_LABELS.map((d) => {
+          const on = enabledDays.some((e) => e.key === d.key);
+          return (
+            <span
+              key={d.key}
+              style={{
+                width: 40, textAlign: "center", borderRadius: 10, padding: "6px 0", fontSize: 11, fontWeight: 800,
+                border: on ? "1px solid #14b8a6" : "1px solid var(--border)",
+                background: on ? "rgba(20,184,166,0.12)" : "var(--bg)",
+                color: on ? "#0d9488" : "var(--text-muted)",
+              }}
+            >
+              {d.label}
+            </span>
+          );
+        })}
+      </div>
+    </ProfileSectionCard>
+  );
+}
+
+/** Accurately worded, never overclaiming — every profile this page can
+ *  reach is already verified by construction (tutorMarketplaceProfiles
+ *  only exists for verified:true, see fetchTutorById's caller), so this
+ *  is unconditional, not a per-tutor check. Deliberately does NOT claim
+ *  "Identity Verified" or "Background Checked" — no such step exists
+ *  anywhere in the real Gloows365 verification process (onboarding's
+ *  mobile OTP is a client-side stub, and no government-ID collection
+ *  exists at all), only that an admin reviewed the submitted profile and
+ *  documents before approving it. */
+function TrustSection() {
+  const { t } = useAppTranslation();
+  const items = [
+    t("shikshaHubTrustVerified", "Gloows Verified Tutor"),
+    t("shikshaHubTrustReviewed", "Profile & qualifications reviewed by our team"),
+  ];
+  return (
+    <ProfileSectionCard title={t("shikshaHubTrustTitle", "Why Learn With This Tutor?")}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {items.map((label) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+            <span style={{ color: "#22c55e", fontWeight: 900 }}>✓</span>
+            {label}
+          </div>
+        ))}
+      </div>
+    </ProfileSectionCard>
+  );
+}
+
+/** "You May Also Like" — reuses fetchAllTutors (the exact same call the
+ *  discovery grid already makes, no new query/index) and ranks
+ *  client-side: shared subjects first, then shared language, then
+ *  rating, capped at 4. Excludes the current tutor. Every candidate
+ *  already comes from tutorMarketplaceProfiles, so — same as the main
+ *  profile fetch — unverified/test/inactive tutors are structurally
+ *  absent already, nothing extra to filter here. */
+function RelatedTutorsSection({ currentTutor }: { currentTutor: MarketplaceTutor }) {
+  const { t } = useAppTranslation();
+  const router = useRouter();
+  const [related, setRelated] = useState<MarketplaceTutor[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAllTutors().then((all) => {
+      if (cancelled) return;
+      const others = all.filter((tu) => tu.uid !== currentTutor.uid);
+      const scored = others.map((tu) => {
+        const sharedSubjects = tu.subjects.filter((s) => currentTutor.subjects.includes(s)).length;
+        const sameLanguage = tu.preferredLanguage && tu.preferredLanguage === currentTutor.preferredLanguage ? 1 : 0;
+        return { tu, score: sharedSubjects * 10 + sameLanguage * 2 + (tu.ratingAverage ?? 0) };
+      });
+      scored.sort((a, b) => b.score - a.score);
+      setRelated(scored.slice(0, 4).map((s) => s.tu));
+    }).catch(() => setRelated([]));
+    return () => { cancelled = true; };
+  }, [currentTutor.uid, currentTutor.subjects, currentTutor.preferredLanguage]);
+
+  if (!related || related.length === 0) return null;
+
+  return (
+    <div>
+      <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginBottom: 12 }}>
+        {t("shikshaHubRelatedTitle", "You May Also Like")}
+      </div>
+      <div className="shikshahub-grid">
+        {related.map((tu) => (
+          <TutorCard key={tu.uid} tutor={tu} onClick={() => router.push(`/shikshahub/profile?id=${tu.uid}`)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Loading skeleton — matches the real layout's shape (avatar, name,
+ *  metadata, about card, sidebar action card) instead of a blank page
+ *  or bare "Loading…" text. */
+function ProfileSkeleton() {
+  const pulse: React.CSSProperties = { background: "var(--bg-card)", borderRadius: 8, animation: "shikshahub-pulse 1.4s ease-in-out infinite" };
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+      <style>{`@keyframes shikshahub-pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }`}</style>
+      <div className="shikshahub-container" style={{ padding: "16px 16px 40px" }}>
+        <div style={{ ...pulse, width: 80, height: 34, marginBottom: 16 }} />
+        <div className="shikshahub-detail-grid">
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 20, padding: 20, display: "flex", gap: 16 }}>
+              <div style={{ ...pulse, width: 92, height: 92, borderRadius: "50%", flexShrink: 0 }} />
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ ...pulse, width: "60%", height: 22 }} />
+                <div style={{ ...pulse, width: "40%", height: 14 }} />
+                <div style={{ ...pulse, width: "50%", height: 14 }} />
+                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                  <div style={{ ...pulse, width: 70, height: 26, borderRadius: 20 }} />
+                  <div style={{ ...pulse, width: 90, height: 26, borderRadius: 20 }} />
+                </div>
+              </div>
+            </div>
+            <div style={{ border: "1px solid var(--border)", borderRadius: 20, padding: 20 }}>
+              <div style={{ ...pulse, width: "30%", height: 14, marginBottom: 10 }} />
+              <div style={{ ...pulse, width: "100%", height: 12, marginBottom: 6 }} />
+              <div style={{ ...pulse, width: "90%", height: 12, marginBottom: 6 }} />
+              <div style={{ ...pulse, width: "70%", height: 12 }} />
+            </div>
+          </div>
+          <div className="shikshahub-action-card">
+            <div style={{ border: "1px solid var(--border)", borderRadius: 20, padding: 20, height: 260 }}>
+              <div style={{ ...pulse, width: "80%", height: 16, marginBottom: 16 }} />
+              <div style={{ ...pulse, width: "100%", height: 44, borderRadius: 14, marginBottom: 10 }} />
+              <div style={{ ...pulse, width: "100%", height: 44, borderRadius: 14 }} />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -207,19 +498,23 @@ function ShikshaHubProfileContent() {
 
 /** ShikshaHub Phase 6 — non-hidden reviews for this tutor, off completed
  *  Instant Help sessions only (see functions/src/tutorReviews.ts's header
- *  comment). Renders nothing if there are none, same "hide fields that
- *  aren't available" rule this page already follows elsewhere. */
+ *  comment). Shows an honest empty state rather than hiding the section —
+ *  review infrastructure genuinely exists and works here, so per the
+ *  spec's own distinction that's the "reviews exist but none yet" case,
+ *  not the "no review system at all" case. */
 function ReviewsSection({ tutorUid }: { tutorUid: string }) {
   const { t } = useAppTranslation();
   const { reviews, loading } = useTutorReviews(tutorUid);
 
-  if (loading || reviews.length === 0) return null;
+  if (loading) return null;
 
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 20, background: "var(--bg-card)", padding: 20 }}>
-      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 12 }}>
-        {t("reviewsTitle", "Reviews")} ({reviews.length})
-      </div>
+    <ProfileSectionCard title={`${t("reviewsTitle", "Reviews")}${reviews.length > 0 ? ` (${reviews.length})` : ""}`}>
+      {reviews.length === 0 ? (
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)" }}>
+          {t("shikshaHubNoReviews", "This tutor has not received any student reviews yet.")}
+        </div>
+      ) : (
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {reviews.map((r) => (
           <div key={r.id} style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
@@ -243,7 +538,8 @@ function ReviewsSection({ tutorUid }: { tutorUid: string }) {
           </div>
         ))}
       </div>
-    </div>
+      )}
+    </ProfileSectionCard>
   );
 }
 
