@@ -295,14 +295,26 @@ service cloud.firestore {
         // batch — see submitVidyastarContestQuiz.ts for the full story).
         allow update: if false;
       }
+      // SECURITY FIX (VidyaStar Phase 1 — score integrity, see
+      // functions/src/submitVidyastarContestQuiz.ts's header comment):
+      // this doc used to be world-readable to any authenticated user, and
+      // (until the contestLesson.ts split) its lessonJson.quiz carried
+      // correctAnswerIndex/explanation for the contest's actual scored
+      // quiz — so any student could read the full answer key directly.
+      // getContestLesson (the only legitimate way to fetch this content)
+      // now strips quiz answers before ever returning a response, so
+      // direct client reads of this doc are no longer needed for anything
+      // legitimate — closed entirely rather than "closed except for the
+      // sanitized fields", since Firestore rules can't do field-level
+      // read redaction.
       match /lessons/{language} {
-        // Lesson content is generated lazily per (contest, language) by the
-        // getContestLesson Cloud Function (Admin SDK, bypasses these rules)
-        // the first time a student in that language opens the lesson —
-        // never written directly by a client, same reason participant
-        // writes are Cloud-Function-only above.
-        allow read: if request.auth != null;
-        allow write: if false;
+        allow read, write: if false;
+      }
+      // Private answer key — Admin-SDK-only, never returned by any
+      // callable. Populated by getContestLesson, read only by
+      // submitVidyastarContestQuiz for server-side grading.
+      match /lessonAnswers/{language} {
+        allow read, write: if false;
       }
     }
 

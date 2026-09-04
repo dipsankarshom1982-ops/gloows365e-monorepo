@@ -487,3 +487,101 @@ describe("posts/{postId} — non-owner update allowlist (changedKeys→affectedK
     await assertSucceeds(db.doc(`posts/${postId}`).update({ caption: "Updated caption" }));
   });
 });
+
+// ─── VidyaStar Phase 1 — Critical Security & Score Integrity Repair ────────
+// See functions/src/submitVidyastarContestQuiz.ts's header comment for the
+// full vulnerability this closes: the client used to be able to read the
+// contest quiz's answer key directly (this doc was world-readable) and
+// assert its own score/correctness, which the grading function trusted.
+describe("contests/{id}/lessons and lessonAnswers — answer-key lockdown", () => {
+  const contestId = "contest_1";
+  const uid = "student_quiz";
+
+  test("a student CANNOT read the (now-sanitized) public lesson doc directly", async () => {
+    await seed(async (db) => {
+      await db.doc(`contests/${contestId}/lessons/English`).set({
+        status: "completed",
+        lessonJson: { quiz: [{ question: "2+2?", options: ["3", "4"] }] },
+      });
+    });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`contests/${contestId}/lessons/English`).get());
+  });
+
+  test("a student CANNOT read the private answer-key doc", async () => {
+    await seed(async (db) => {
+      await db.doc(`contests/${contestId}/lessonAnswers/English`).set({
+        answerKey: [{ correctAnswerIndex: 1, explanation: "2+2=4" }],
+      });
+    });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`contests/${contestId}/lessonAnswers/English`).get());
+  });
+
+  test("a student CANNOT write to either collection", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`contests/${contestId}/lessons/English`).set({ lessonJson: {} }));
+    await assertFails(db.doc(`contests/${contestId}/lessonAnswers/English`).set({ answerKey: [] }));
+  });
+
+  test("even an admin's client SDK cannot read the private answer key — Admin SDK only, no admin-claim exception carved out", async () => {
+    await seed(async (db) => {
+      await db.doc(`contests/${contestId}/lessonAnswers/English`).set({ answerKey: [{ correctAnswerIndex: 0, explanation: "" }] });
+    });
+    const adminAuthDb = testEnv.authenticatedContext("admin_uid", { admin: true }).firestore();
+    await assertFails(adminAuthDb.doc(`contests/${contestId}/lessonAnswers/English`).get());
+  });
+});
+
+describe("contests/{id}/participant/{uid} — score/rank/result forgery prevention", () => {
+  const contestId = "contest_2";
+  const uid = "student_join";
+
+  test("a student CANNOT create their own participant doc directly (join is Cloud-Function-only)", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(
+      db.doc(`contests/${contestId}/participant/${uid}`).set({
+        userId: uid, contestId, joinedAt: new Date(), score: 0, completed: false, entryFeePaid: 0,
+      })
+    );
+  });
+
+  test("a student CANNOT forge their own score/rank/completed on an existing participant doc (submission is Cloud-Function-only)", async () => {
+    await seed(async (db) => {
+      await db.doc(`contests/${contestId}/participant/${uid}`).set({
+        userId: uid, contestId, score: 0, completed: false,
+      });
+    });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`contests/${contestId}/participant/${uid}`).update({ score: 999999, completed: true, rank: 1 }));
+  });
+
+  test("a student CAN still read participant docs (per-contest leaderboard needs this)", async () => {
+    await seed(async (db) => {
+      await db.doc(`contests/${contestId}/participant/${uid}`).set({ userId: uid, contestId, score: 40 });
+    });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc(`contests/${contestId}/participant/${uid}`).get());
+  });
+});
+
+describe("leaderboard/{tab}/entries/{uid} — Starboard points forgery prevention", () => {
+  const uid = "student_star";
+
+  test("a student CANNOT write their own Starboard points directly", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`leaderboard/daily/entries/${uid}`).set({ points: 999999, name: "Cheater" }));
+  });
+
+  test("a student CANNOT increment their own points on an existing entry", async () => {
+    await seed(async (db) => { await db.doc(`leaderboard/daily/entries/${uid}`).set({ points: 10, name: "Real" }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`leaderboard/daily/entries/${uid}`).update({ points: 999999 }));
+  });
+
+  test("a student CAN still read Starboard entries (the whole point of the leaderboard)", async () => {
+    await seed(async (db) => { await db.doc(`leaderboard/daily/entries/${uid}`).set({ points: 10, name: "Real" }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc(`leaderboard/daily/entries/${uid}`).get());
+  });
+});

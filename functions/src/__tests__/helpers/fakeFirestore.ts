@@ -63,6 +63,9 @@ interface FakeCollectionRef {
   add(data: DocData): Promise<FakeDocRef>;
   where(field: string, op: "==", value: unknown): FakeQueryRef;
   orderBy(field: string, direction?: "asc" | "desc"): FakeQueryRef;
+  // A real CollectionReference IS a Query — get() works unfiltered too
+  // (e.g. `db.collection(path).get()` with no where()/orderBy() first).
+  get(): ReturnType<FakeQueryRef["get"]>;
 }
 
 interface FakeQueryRef {
@@ -163,6 +166,9 @@ export class FakeFirestore {
       orderBy(field, direction) {
         return self.queryRef(path, [], undefined, { field, direction: direction ?? "asc" });
       },
+      get() {
+        return self.queryRef(path, []).get();
+      },
     };
   }
 
@@ -243,6 +249,33 @@ export class FakeFirestore {
   }
   collection(path: string): FakeCollectionRef {
     return this.collectionRef(path);
+  }
+
+  // Matches the real Admin SDK's WriteBatch: operations buffer until
+  // commit(), applied in call order — same as runTransaction's writes
+  // above, just without the paired reads.
+  batch(): {
+    set: (ref: FakeDocRef, data: DocData, opts?: { merge?: boolean }) => void;
+    update: (ref: FakeDocRef, data: DocData) => void;
+    delete: (ref: FakeDocRef) => void;
+    commit: () => Promise<void>;
+  } {
+    const self = this;
+    const ops: Array<() => void> = [];
+    return {
+      set(ref, data, opts) {
+        ops.push(() => self.writeSync(ref.path, data, !!opts?.merge));
+      },
+      update(ref, data) {
+        ops.push(() => self.updateSync(ref.path, data));
+      },
+      delete(ref) {
+        ops.push(() => self.store.delete(ref.path));
+      },
+      async commit() {
+        ops.forEach((op) => op());
+      },
+    };
   }
 
   async runTransaction<T>(fn: (tx: {

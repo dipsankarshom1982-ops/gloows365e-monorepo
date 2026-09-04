@@ -8,15 +8,20 @@
 // to stamp EVERY participant's rank in one batch, which used to fail the
 // whole batch (Firestore batches are all-or-nothing) on any contest with
 // more than one participant.
+//
+// SECURITY (VidyaStar Phase 1): QuizAnswer intentionally has NO `correct`
+// field — the client never determines or asserts answer correctness.
+// Whether an answer was correct is graded server-side, from a private
+// answer key the client never receives. `timeTakenSeconds` is an optional
+// measured hint the server clamps to a sane range, never trusted outright.
 
 import { functions } from "@/lib/firebase";
 import { httpsCallable } from "firebase/functions";
 
 export interface QuizAnswer {
-  questionIndex: number;
-  selectedIndex: number | null;
-  correct: boolean;
-  timeTakenSeconds: number;
+  questionIndex:    number;
+  selectedIndex:    number | null;
+  timeTakenSeconds?: number;
 }
 
 const submitVidyastarContestQuizCF = httpsCallable<

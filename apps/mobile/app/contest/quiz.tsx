@@ -1,5 +1,7 @@
 import { auth, db } from "@/lib/firebase";
 import { submitContestQuiz, QuizAnswer } from "@/services/submitContestQuiz";
+import { getContestLesson } from "@/services/getContestLesson";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -18,18 +20,33 @@ import { SafeAreaView } from "react-native-safe-area-context";
 const SECONDS_PER_Q = 30;
 const OPTION_LABELS = ["A", "B", "C", "D"];
 
+// SECURITY (VidyaStar Phase 1): no correctAnswerIndex here — the client
+// never receives the answer key. getContestLesson strips it server-side
+// before this shape ever reaches the app. See functions/src/
+// contestLesson.ts and submitVidyastarContestQuiz.ts for where grading
+// actually happens now.
 interface Question {
   question: string;
   options: string[];
-  correctAnswerIndex: number;
   difficulty?: string;
   concept?: string;
+}
+
+// Mirrors the VidyaStar hub's getDate — contest docs store either Firestore
+// Timestamps or ISO strings depending on how they were created.
+function getDate(t: any): Date | null {
+  if (!t) return null;
+  if (typeof t.toDate === "function") return t.toDate();
+  if (t.seconds) return new Date(t.seconds * 1000);
+  if (typeof t === "string" && t.length > 0) return new Date(t);
+  return null;
 }
 
 export default function ContestQuizScreen() {
   const { contestId } = useLocalSearchParams<{ contestId: string }>();
   const router = useRouter();
   const userId = auth.currentUser?.uid;
+  const { studentProfile } = useStudentProfile();
 
   const [questions, setQuestions]   = useState<Question[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -39,15 +56,27 @@ export default function ContestQuizScreen() {
   const [locked, setLocked]         = useState(false);
   const [timeLeft, setTimeLeft]     = useState(SECONDS_PER_Q);
   const [submitting, setSubmitting] = useState(false);
+  // "upcoming" | "ended" | null (null = live, i.e. playable) — same deep-
+  // link guard as the lesson screen: this is the actual scoring entry
+  // point, so it's the more important of the two to gate. Reachable
+  // directly via the OS back/forward stack even if the lesson screen
+  // already turned someone away once.
+  const [notLive, setNotLive] = useState<"upcoming" | "ended" | null>(null);
+  const [contestStart, setContestStart] = useState<Date | null>(null);
 
   const timerRef      = useRef<ReturnType<typeof setInterval> | null>(null);
   const questionStart = useRef<number>(Date.now());
   const progressAnim  = useRef(new Animated.Value(1)).current;
 
-  // Load lessonJson.quiz; redirect if already completed
+  // Load the quiz via getContestLesson — a callable, not a direct Firestore
+  // read (contests/{id}/lessons/{language} is now deny-all in
+  // firestore.rules; getContestLesson also strips quiz answers from its
+  // response before it ever reaches the client — see contestLesson.ts).
+  // Redirect if already completed.
   useEffect(() => {
     if (!contestId || !userId) return;
     (async () => {
+      const language = studentProfile?.preferredLanguage ?? "English";
       const [contestSnap, participantSnap] = await Promise.all([
         getDoc(doc(db, "contests", contestId as string)),
         getDoc(doc(db, "contests", contestId as string, "participant", userId)),
@@ -60,12 +89,29 @@ export default function ContestQuizScreen() {
       }
 
       if (contestSnap.exists()) {
-        const quiz: Question[] = contestSnap.data()?.lessonJson?.quiz ?? [];
+        const c     = contestSnap.data() as any;
+        const now   = new Date();
+        const start = getDate(c.startTime ?? c.startDate);
+        const end   = getDate(c.endTime ?? c.endDate);
+        const isLive = !!(start && start <= now && (!end || end > now));
+        if (!isLive) {
+          setContestStart(start);
+          setNotLive(end && end < now ? "ended" : "upcoming");
+          setLoading(false);
+          return;
+        }
+      }
+
+      try {
+        const { lessonJson } = await getContestLesson(contestId as string, language);
+        const quiz: Question[] = lessonJson?.quiz ?? [];
         setQuestions(quiz);
+      } catch (e) {
+        console.error("Failed to load quiz:", e);
       }
       setLoading(false);
     })();
-  }, [contestId, userId]);
+  }, [contestId, userId, studentProfile?.preferredLanguage]);
 
   // Timer per question
   useEffect(() => {
@@ -102,9 +148,11 @@ export default function ContestQuizScreen() {
     setTimeout(() => handleAdvance(idx), 1200);
   };
 
+  // SECURITY (VidyaStar Phase 1): no correctness is computed here — the
+  // client doesn't have the answer key anymore. Only what the student
+  // actually did (selection + time taken) is recorded; grading happens
+  // server-side in submitVidyastarContestQuiz.
   const handleAdvance = (selectedIdx: number | null) => {
-    const q = questions[currentIdx];
-    const correct = selectedIdx !== null && selectedIdx === q.correctAnswerIndex;
     const timeTakenSeconds = Math.min(
       SECONDS_PER_Q,
       Math.round((Date.now() - questionStart.current) / 1000)
@@ -112,7 +160,7 @@ export default function ContestQuizScreen() {
 
     const newAnswers: QuizAnswer[] = [
       ...answers,
-      { questionIndex: currentIdx, selectedIndex: selectedIdx, correct, timeTakenSeconds },
+      { questionIndex: currentIdx, selectedIndex: selectedIdx, timeTakenSeconds },
     ];
     setAnswers(newAnswers);
 
@@ -156,12 +204,31 @@ export default function ContestQuizScreen() {
     );
   }
 
+  if (notLive) {
+    return (
+      <SafeAreaView style={S.center}>
+        <Ionicons name={notLive === "upcoming" ? "hourglass-outline" : "flag-outline"} size={64} color="#374151" />
+        <Text style={S.emptyTitle}>
+          {notLive === "upcoming" ? "Contest hasn't started yet" : "This contest has ended"}
+        </Text>
+        <Text style={S.emptySub}>
+          {notLive === "upcoming"
+            ? `You can play this contest once it goes live${contestStart ? ` on ${contestStart.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}.`
+            : "Contests can only be played while they're live."}
+        </Text>
+        <TouchableOpacity style={S.backBtn} onPress={() => router.replace("/(drawer)/(tabs)/vidyastar" as any)}>
+          <Text style={S.backBtnText}>Back to VidyaStar</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
   if (questions.length === 0) {
     return (
       <SafeAreaView style={S.center}>
         <Ionicons name="help-circle-outline" size={64} color="#374151" />
         <Text style={S.emptyTitle}>No Quiz Available</Text>
-        <Text style={S.emptySub}>The quiz for this contest hasn't been generated yet.</Text>
+        <Text style={S.emptySub}>The quiz for this contest hasn&apos;t been generated yet.</Text>
         <TouchableOpacity style={S.backBtn} onPress={() => router.back()}>
           <Text style={S.backBtnText}>Go Back</Text>
         </TouchableOpacity>
@@ -227,34 +294,35 @@ export default function ContestQuizScreen() {
         {!!q.concept && <Text style={S.conceptHint}>Topic: {q.concept}</Text>}
       </View>
 
-      {/* Options */}
+      {/* Options — SECURITY (VidyaStar Phase 1): no correct/wrong reveal
+          here anymore. The client no longer has the answer key, so it
+          genuinely can't show which option was right — only which one the
+          student picked. Grading happens server-side after submission. */}
       <View style={S.options}>
         {q.options.map((opt, i) => {
           const isSelected = selected === i;
-          const isCorrect  = locked && i === q.correctAnswerIndex;
-          const isWrong    = locked && isSelected && !isCorrect;
           return (
             <TouchableOpacity
               key={i}
               activeOpacity={locked ? 1 : 0.8}
-              style={[S.optBtn, isCorrect && S.optCorrect, isWrong && S.optWrong, isSelected && !locked && S.optSelected]}
+              style={[S.optBtn, isSelected && S.optSelected]}
               onPress={() => handleSelect(i)}
             >
-              <View style={[S.optLabel, isCorrect && S.optLabelCorrect, isWrong && S.optLabelWrong]}>
+              <View style={S.optLabel}>
                 <Text style={S.optLabelText}>{OPTION_LABELS[i]}</Text>
               </View>
-              <Text style={[S.optText, (isCorrect || isWrong) && S.optTextBold]}>{opt}</Text>
-              {isCorrect && <Ionicons name="checkmark-circle" size={20} color="#10b981" />}
-              {isWrong   && <Ionicons name="close-circle"     size={20} color="#ef4444" />}
+              <Text style={[S.optText, isSelected && S.optTextBold]}>{opt}</Text>
+              {isSelected && <Ionicons name="checkmark-circle" size={20} color="#6366f1" />}
             </TouchableOpacity>
           );
         })}
       </View>
 
-      {/* Score tracker */}
+      {/* Progress tracker — answered/skipped only; correctness is unknown
+          client-side by design until the server grades the submission. */}
       <View style={S.scoreTracker}>
         <Text style={S.scoreTrackerText}>
-          ✅ {answers.filter((a) => a.correct).length} correct  ·  ❌ {answers.filter((a) => !a.correct && a.selectedIndex !== null).length} wrong  ·  ⏩ {answers.filter((a) => a.selectedIndex === null).length} skipped
+          ✍️ {answers.filter((a) => a.selectedIndex !== null).length} answered  ·  ⏩ {answers.filter((a) => a.selectedIndex === null).length} skipped
         </Text>
       </View>
     </SafeAreaView>
@@ -299,11 +367,7 @@ const S = StyleSheet.create({
   options:       { paddingHorizontal: 16, gap: 10 },
   optBtn:        { flexDirection: "row", alignItems: "center", backgroundColor: "#1e293b", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#334155", gap: 12 },
   optSelected:   { borderColor: "#6366f1" },
-  optCorrect:    { borderColor: "#10b981", backgroundColor: "#052e16" },
-  optWrong:      { borderColor: "#ef4444", backgroundColor: "#450a0a" },
   optLabel:      { width: 32, height: 32, borderRadius: 8, backgroundColor: "#334155", justifyContent: "center", alignItems: "center" },
-  optLabelCorrect: { backgroundColor: "#064e3b" },
-  optLabelWrong:   { backgroundColor: "#7f1d1d" },
   optLabelText:  { color: "#a5b4fc", fontWeight: "800", fontSize: 13 },
   optText:       { flex: 1, color: "#cbd5e1", fontSize: 15, lineHeight: 22 },
   optTextBold:   { fontWeight: "700" },

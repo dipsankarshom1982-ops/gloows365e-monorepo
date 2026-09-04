@@ -9,16 +9,21 @@ import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { auth, db } from "@/lib/firebase";
 import { submitContestQuiz, QuizAnswer } from "@/services/submitContestQuiz";
+import { getContestLesson } from "@/services/getContestLesson";
 import { useStudentProfile } from "@gloows/shared-logic";
 import { doc, getDoc } from "firebase/firestore";
 
 const SECONDS_PER_Q = 30;
 const OPTION_LABELS = ["A", "B", "C", "D"];
 
+// SECURITY (VidyaStar Phase 1): no correctAnswerIndex here — the client
+// never receives the answer key. getContestLesson strips it server-side
+// before this shape ever reaches the app. See functions/src/
+// contestLesson.ts and submitVidyastarContestQuiz.ts for where grading
+// actually happens now.
 interface Question {
   question: string;
   options: string[];
-  correctAnswerIndex: number;
   difficulty?: string;
   concept?: string;
 }
@@ -66,16 +71,17 @@ function ContestQuizContent() {
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const questionStart = useRef<number>(Date.now());
 
-  // Load the quiz from the same per-language cached lesson doc the lesson
-  // page just generated/read (contests/{id}/lessons/{language} — see
-  // functions/src/contestLesson.ts). Redirect if already completed.
+  // Load the quiz via getContestLesson — a callable, not a direct Firestore
+  // read (contests/{id}/lessons/{language} is now deny-all in
+  // firestore.rules; getContestLesson also strips quiz answers from its
+  // response before it ever reaches the client — see contestLesson.ts).
+  // Redirect if already completed.
   useEffect(() => {
     if (!contestId || !userId) return;
     (async () => {
       const language = studentProfile?.preferredLanguage ?? "English";
-      const [contestSnap, lessonSnap, participantSnap] = await Promise.all([
+      const [contestSnap, participantSnap] = await Promise.all([
         getDoc(doc(db, "contests", contestId)),
-        getDoc(doc(db, "contests", contestId, "lessons", language)),
         getDoc(doc(db, "contests", contestId, "participant", userId)),
       ]);
 
@@ -98,16 +104,22 @@ function ContestQuizContent() {
         }
       }
 
-      if (lessonSnap.exists()) {
-        const quiz: Question[] = lessonSnap.data()?.lessonJson?.quiz ?? [];
+      try {
+        const { lessonJson } = await getContestLesson(contestId, language);
+        const quiz: Question[] = lessonJson?.quiz ?? [];
         setQuestions(quiz);
+      } catch (e) {
+        console.error("Failed to load quiz:", e);
       }
       setLoading(false);
     })();
   }, [contestId, userId, router, studentProfile?.preferredLanguage]);
 
-  const handleAdvance = (selectedIdx: number | null, q: Question, idx: number, currentAnswers: QuizAnswer[]) => {
-    const correct = selectedIdx !== null && selectedIdx === q.correctAnswerIndex;
+  // SECURITY (VidyaStar Phase 1): no correctness is computed here — the
+  // client doesn't have the answer key anymore. Only what the student
+  // actually did (selection + time taken) is recorded; grading happens
+  // server-side in submitVidyastarContestQuiz.
+  const handleAdvance = (selectedIdx: number | null, _q: Question, idx: number, currentAnswers: QuizAnswer[]) => {
     const timeTakenSeconds = Math.min(
       SECONDS_PER_Q,
       Math.round((Date.now() - questionStart.current) / 1000)
@@ -115,7 +127,7 @@ function ContestQuizContent() {
 
     const newAnswers: QuizAnswer[] = [
       ...currentAnswers,
-      { questionIndex: idx, selectedIndex: selectedIdx, correct, timeTakenSeconds },
+      { questionIndex: idx, selectedIndex: selectedIdx, timeTakenSeconds },
     ];
     setAnswers(newAnswers);
 
@@ -263,43 +275,43 @@ function ContestQuizContent() {
         {q.concept && <span style={{ color: "#475569", fontSize: 12, fontStyle: "italic" }}>Topic: {q.concept}</span>}
       </div>
 
-      {/* Options */}
+      {/* Options — SECURITY (VidyaStar Phase 1): no correct/wrong reveal
+          here anymore. The client no longer has the answer key, so it
+          genuinely can't show which option was right — only which one the
+          student picked. Grading happens server-side after submission. */}
       <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
         {q.options.map((opt, i) => {
           const isSelected = selected === i;
-          const isCorrect  = locked && i === q.correctAnswerIndex;
-          const isWrong    = locked && isSelected && !isCorrect;
           return (
             <button
               key={i}
               onClick={() => handleSelect(i)}
               style={{
                 display: "flex", alignItems: "center", gap: 12, textAlign: "left",
-                background: isCorrect ? "#052e16" : isWrong ? "#450a0a" : "#1e293b",
+                background: "#1e293b",
                 borderRadius: 16, padding: 14,
-                border: `1px solid ${isCorrect ? "#10b981" : isWrong ? "#ef4444" : isSelected ? "#6366f1" : "#334155"}`,
+                border: `1px solid ${isSelected ? "#6366f1" : "#334155"}`,
                 cursor: locked ? "default" : "pointer",
               }}
             >
               <span style={{
                 width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                background: isCorrect ? "#064e3b" : isWrong ? "#7f1d1d" : "#334155",
+                background: "#334155",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 color: "#a5b4fc", fontWeight: 800, fontSize: 13,
               }}>{OPTION_LABELS[i]}</span>
-              <span style={{ flex: 1, color: "#cbd5e1", fontSize: 15, lineHeight: 1.5, fontWeight: (isCorrect || isWrong) ? 700 : 400 }}>{opt}</span>
-              {isCorrect && <span style={{ color: "#10b981", fontSize: 18 }}>✓</span>}
-              {isWrong && <span style={{ color: "#ef4444", fontSize: 18 }}>✕</span>}
+              <span style={{ flex: 1, color: "#cbd5e1", fontSize: 15, lineHeight: 1.5, fontWeight: isSelected ? 700 : 400 }}>{opt}</span>
+              {isSelected && <span style={{ color: "#6366f1", fontSize: 18 }}>✓</span>}
             </button>
           );
         })}
       </div>
 
-      {/* Score tracker */}
+      {/* Progress tracker — answered/skipped only; correctness is unknown
+          client-side by design until the server grades the submission. */}
       <div style={{ position: "fixed", bottom: 16, left: 16, right: 16, background: "#1e293b", borderRadius: 12, padding: 12, textAlign: "center" }}>
         <span style={{ color: "#94a3b8", fontSize: 12, fontWeight: 700 }}>
-          ✅ {answers.filter((a) => a.correct).length} correct &nbsp;·&nbsp;
-          ❌ {answers.filter((a) => !a.correct && a.selectedIndex !== null).length} wrong &nbsp;·&nbsp;
+          ✍️ {answers.filter((a) => a.selectedIndex !== null).length} answered &nbsp;·&nbsp;
           ⏩ {answers.filter((a) => a.selectedIndex === null).length} skipped
         </span>
       </div>

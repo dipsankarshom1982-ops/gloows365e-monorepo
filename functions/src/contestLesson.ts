@@ -34,6 +34,77 @@ Rules:
 
 const FALLBACK_BANNER = { emoji: "🌟", tagline: "Learn, Compete & Shine!", gradientStart: "#0f0c29", gradientEnd: "#7c3aed" };
 
+// ── SECURITY (VidyaStar Phase 1 — score integrity) ──────────────────────────
+// The AI-generated quiz naturally comes back with correctAnswerIndex/
+// explanation embedded per question (see buildContestLessonPrompt above —
+// the model is asked for both, since the SAME quiz shape is reused for the
+// in-lesson scene checkQuestions, which legitimately do reveal their answer
+// immediately as a local, ungraded "check your understanding" prompt).
+//
+// The contest's final quiz (lessonJson.quiz) is different: it's what
+// functions/src/submitVidyastarContestQuiz.ts actually scores and rewards.
+// That answer key must never reach the client — not via a direct Firestore
+// read of this doc, and not via this callable's own return value (both were
+// previously true: contests/{id}/lessons/{language} was world-readable AND
+// this function returned lessonJson verbatim, answers included).
+//
+// Fix: split storage. The PUBLIC doc (this collection, still what the
+// callable returns) never carries quiz answers. A new PRIVATE doc —
+// contests/{id}/lessonAnswers/{language}, firestore.rules deny-all,
+// Admin-SDK-only — carries just the per-question answer key, index-aligned
+// with the public quiz array, and is read only by the grading function.
+//
+// scenes[].checkQuestion is intentionally left untouched: it's never
+// submitted anywhere or used for scoring/reward, so it isn't part of this
+// trust boundary.
+interface QuizAnswerKeyEntry { correctAnswerIndex: number; explanation: string; }
+
+function splitQuizAnswerKey(lessonJson: any): { publicLessonJson: any; answerKey: QuizAnswerKeyEntry[] } {
+  const rawQuiz: any[] = Array.isArray(lessonJson?.quiz) ? lessonJson.quiz : [];
+
+  const answerKey: QuizAnswerKeyEntry[] = rawQuiz.map((q, i) => {
+    const optionCount = Array.isArray(q?.options) ? q.options.length : 0;
+    let correctAnswerIndex = Number(q?.correctAnswerIndex);
+    // Defensive: validateLessonJson only checks question/options shape, not
+    // that correctAnswerIndex is a valid in-range integer — Gemini has no
+    // hard guarantee here. A malformed index would otherwise make every
+    // submitted answer to this question silently unscoreable-as-correct.
+    if (!Number.isInteger(correctAnswerIndex) || correctAnswerIndex < 0 || correctAnswerIndex >= optionCount) {
+      console.warn(`getContestLesson: quiz[${i}] has an invalid correctAnswerIndex (${q?.correctAnswerIndex}) for ${optionCount} options — defaulting to 0`);
+      correctAnswerIndex = 0;
+    }
+    return { correctAnswerIndex, explanation: typeof q?.explanation === "string" ? q.explanation : "" };
+  });
+
+  const publicQuiz = rawQuiz.map((q) => ({
+    question:   q?.question ?? "",
+    options:    Array.isArray(q?.options) ? q.options : [],
+    difficulty: q?.difficulty,
+    concept:    q?.concept,
+  }));
+
+  return { publicLessonJson: { ...lessonJson, quiz: publicQuiz }, answerKey };
+}
+
+// Belt-and-suspenders for historical docs: any lesson doc written before
+// this fix shipped may still have the raw quiz (with answers) sitting in
+// its `lessonJson.quiz`. Rather than migrating that data (explicitly out of
+// scope — see the Phase 1 report), every return path re-sanitizes at read
+// time, so a pre-fix cached doc can never leak its embedded answer key
+// through this callable, regardless of when it was generated.
+function sanitizeForClient(lessonJson: any): any {
+  if (!lessonJson || !Array.isArray(lessonJson.quiz)) return lessonJson;
+  return {
+    ...lessonJson,
+    quiz: lessonJson.quiz.map((q: any) => ({
+      question:   q?.question,
+      options:    q?.options,
+      difficulty: q?.difficulty,
+      concept:    q?.concept,
+    })),
+  };
+}
+
 // Lessons no longer live on the contest doc — a contest is now visible to
 // every student regardless of language (admin no longer picks one), and the
 // AI generates the lesson lazily, per (contest, language), the first time a
@@ -60,8 +131,10 @@ export const getContestLesson = functionsV1
     }
 
     const db = admin.firestore();
-    const contestRef = db.doc(`contests/${contestId}`);
-    const lessonRef  = contestRef.collection("lessons").doc(language);
+    const contestRef       = db.doc(`contests/${contestId}`);
+    const lessonRef        = contestRef.collection("lessons").doc(language);
+    // Private, Admin-SDK-only — firestore.rules denies all client access.
+    const lessonAnswersRef = contestRef.collection("lessonAnswers").doc(language);
 
     const claim = await db.runTransaction(async (tx) => {
       const lessonSnap = await tx.get(lessonRef);
@@ -79,7 +152,9 @@ export const getContestLesson = functionsV1
     });
 
     if (claim.outcome === "cached") {
-      return { lessonJson: claim.data.lessonJson, bannerMeta: claim.data.bannerMeta, status: "completed" as const };
+      // sanitizeForClient covers historical docs generated before the
+      // public/private split shipped — see that function's header comment.
+      return { lessonJson: sanitizeForClient(claim.data.lessonJson), bannerMeta: claim.data.bannerMeta, status: "completed" as const };
     }
     if (claim.outcome === "in-progress") {
       throw new functionsV1.https.HttpsError(
@@ -111,14 +186,22 @@ export const getContestLesson = functionsV1
         bannerMeta = FALLBACK_BANNER;
       }
 
-      await lessonRef.set({
-        lessonJson,
+      const { publicLessonJson, answerKey } = splitQuizAnswerKey(lessonJson);
+
+      const batch = db.batch();
+      batch.set(lessonRef, {
+        lessonJson: publicLessonJson,
         bannerMeta,
         status: "completed",
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+      batch.set(lessonAnswersRef, {
+        answerKey,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      await batch.commit();
 
-      return { lessonJson, bannerMeta, status: "completed" as const };
+      return { lessonJson: publicLessonJson, bannerMeta, status: "completed" as const };
     } catch (err: any) {
       const msg: string = err?.message ?? "Unknown error";
       console.error(`getContestLesson error (contest=${contestId} language=${language}):`, msg);
