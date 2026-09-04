@@ -243,68 +243,85 @@ function VideoItem({
   const [comments,        setComments]        = useState<any[]>([]);
   const [commentText,     setCommentText]     = useState("");
   const [commentCount,    setCommentCount]    = useState(item.comments || 0);
-  const [cfState,         setCfState]         = useState<CfState>("checking");
+  // PERF FIX (student report — "reels take so much time to load"): this
+  // used to run waitForManifest() — a network round trip to the CF Worker's
+  // /video-status endpoint (or a manifest GET) — for EVERY reel BEFORE
+  // player.replace() was even called, gated behind cfState === "ready".
+  // That serialized "check, then play" flow added a full extra network
+  // hop in front of every single video, even ones encoded days ago that
+  // were certainly ready. Only a just-uploaded video still mid-encode
+  // actually needs this check.
+  //
+  // FIX: default to "ready" and let the player attempt playback
+  // immediately (see the player.replace effect below, no longer gated on
+  // cfState). The manifest-poll fallback now only kicks in if the player
+  // itself reports a load error (the real signal for "not encoded yet"),
+  // at which point we show the processing overlay and poll until it's
+  // ready or we give up. Already-ready videos (the vast majority) never
+  // pay the network round trip at all.
+  const [cfState,         setCfState]         = useState<CfState>("ready");
   const [pollAttempt,     setPollAttempt]     = useState(0);
   const [pollMax,         setPollMax]         = useState(20);
-  const pollingRef = useRef(false);
+  const pollingRef      = useRef(false);
+  const hasTriedPollRef = useRef(false); // avoid re-polling on repeat error events
   const isOwner    = !isShortReel && auth.currentUser?.uid === item.userId;
 
   const playbackUrl = resolvePlaybackUrl(item);
 
-  useEffect(() => {
-    if (!playbackUrl || pollingRef.current) return;
+  const startPoll = useCallback(() => {
+    if (pollingRef.current || !playbackUrl) return;
+    hasTriedPollRef.current = true;
+    pollingRef.current = true;
+    setCfState("checking");
+    setPollAttempt(0);
     const poll = async () => {
-      pollingRef.current = true;
-      setCfState("checking");
       const ready = await waitForManifest(
         playbackUrl,
         (a, m) => { setPollAttempt(a); setPollMax(m); if (a > 1) setCfState("processing"); },
         2_000, 20
       );
       pollingRef.current = false;
-      setCfState(ready ? "ready" : "error");
+      if (ready) {
+        setCfState("ready");
+        try { player.replace(playbackUrl); } catch (e) {}
+      } else {
+        setCfState("error");
+      }
     };
     poll();
   }, [playbackUrl]);
 
   const retryPoll = () => {
-    if (pollingRef.current || !playbackUrl) return;
-    pollingRef.current = false;
-    setCfState("checking");
-    setPollAttempt(0);
-    const poll = async () => {
-      pollingRef.current = true;
-      const ready = await waitForManifest(
-        playbackUrl,
-        (a, m) => { setPollAttempt(a); setPollMax(m); setCfState("processing"); },
-        2_000, 20
-      );
-      pollingRef.current = false;
-      setCfState(ready ? "ready" : "error");
-    };
-    poll();
+    hasTriedPollRef.current = false;
+    startPoll();
   };
 
   const [playerReady, setPlayerReady] = useState(false);
   const player = useVideoPlayer(null, (p) => { p.loop = true; });
 
+  // Fire playback immediately once we have a URL — no pre-flight check.
   useEffect(() => {
-    if (cfState !== "ready" || !playbackUrl || !player) return;
+    if (!playbackUrl || !player) return;
     try { player.replace(playbackUrl); } catch (e) {}
-  }, [cfState, playbackUrl]);
+  }, [playbackUrl]);
 
   useEffect(() => {
     if (!player) return;
     const sub = player.addListener("statusChange", ({ status }: { status: string }) => {
       if (status === "readyToPlay") {
         setPlayerReady(true);
+        setCfState("ready");
         if (isActiveRef.current && !isPausedRef.current) { player.play(); onView(item); }
       } else if (status === "error") {
         setPlayerReady(false);
+        // Real signal the stream isn't playable yet — fall back to the
+        // manifest poll (once) instead of assuming it's just broken.
+        if (!hasTriedPollRef.current) startPoll();
+        else setCfState("error");
       }
     });
     return () => sub.remove();
-  }, [player]);
+  }, [player, startPoll]);
 
   useEffect(() => {
     if (!player || !playerReady) return;

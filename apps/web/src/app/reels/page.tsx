@@ -164,19 +164,39 @@ function ReelItem({
   const [comments,         setComments]        = useState<any[]>([]);
   const [commentText,      setCommentText]     = useState("");
   const [commentCount,     setCommentCount]    = useState(item.comments || 0);
-  const [cfState,          setCfState]         = useState<CfState>("checking");
+  // PERF FIX (student report — "reels take so much time to load", same root
+  // cause fixed in mobile's app/(drawer)/(tabs)/reels.tsx): this used to run
+  // waitForManifest() — a network round trip to the CF Worker's
+  // /video-status endpoint (or a manifest GET) — for EVERY reel BEFORE the
+  // <video>/hls.js source was even attached, gated behind cfState ===
+  // "ready". That serialized "check, then play" flow added a full extra
+  // network hop in front of every single video, even ones encoded days ago
+  // that were certainly ready. Only a just-uploaded video still mid-encode
+  // actually needs this check.
+  //
+  // FIX: default to "ready" and attach the source immediately (see the
+  // "Attach HLS source" effect below, no longer gated on cfState). The
+  // manifest-poll fallback now only kicks in if playback itself reports a
+  // load error (the real signal for "not encoded yet"), at which point we
+  // show the processing overlay and poll until it's ready or give up.
+  // Already-ready videos (the vast majority) never pay the network round
+  // trip at all.
+  const [cfState,          setCfState]         = useState<CfState>("ready");
   const [pollAttempt,      setPollAttempt]     = useState(0);
   const [pollMax,          setPollMax]         = useState(20);
   const [playerReady,      setPlayerReady]     = useState(false);
+  const hasTriedPollRef = useRef(false); // avoid re-polling on repeat error events
 
   const isOwner = !isShortReel && auth.currentUser?.uid === item.userId;
   const playbackUrl = resolvePlaybackUrl(item);
 
   const startPoll = useCallback(() => {
     if (pollingRef.current || !playbackUrl) return;
+    hasTriedPollRef.current = true;
     const poll = async () => {
       pollingRef.current = true;
       setCfState("checking");
+      setPollAttempt(0);
       const ready = await waitForManifest(
         playbackUrl,
         (a, m) => { setPollAttempt(a); setPollMax(m); if (a > 1) setCfState("processing"); },
@@ -184,18 +204,31 @@ function ReelItem({
       );
       pollingRef.current = false;
       setCfState(ready ? "ready" : "error");
+      if (ready) attachSource();
     };
     poll();
-  }, [playbackUrl]);
+  }, [playbackUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { setPollAttempt(0); startPoll(); }, [playbackUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  const retryPoll = () => {
+    hasTriedPollRef.current = false;
+    startPoll();
+  };
 
-  // Attach HLS source once CF reports ready
-  useEffect(() => {
+  // Attaches the <video>/hls.js source and wires up an error listener that
+  // falls back to the manifest poll on a real load failure — see the FIX
+  // comment above for why this no longer waits on cfState first.
+  const attachSource = useCallback(() => {
     const video = videoRef.current;
-    if (cfState !== "ready" || !playbackUrl || !video) return;
+    if (!playbackUrl || !video) return;
+
+    const handleError = () => {
+      setPlayerReady(false);
+      if (!hasTriedPollRef.current) startPoll();
+      else setCfState("error");
+    };
 
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.onerror = handleError;
       video.src = playbackUrl;
       setPlayerReady(true);
     } else {
@@ -206,15 +239,23 @@ function ReelItem({
           hls.loadSource(playbackUrl);
           hls.attachMedia(video);
           hls.on(Hls.Events.MANIFEST_PARSED, () => setPlayerReady(true));
+          hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
+            if (data?.fatal) handleError();
+          });
         } else {
+          video.onerror = handleError;
           video.src = playbackUrl;
           setPlayerReady(true);
         }
-      }).catch(() => { video.src = playbackUrl; setPlayerReady(true); });
+      }).catch(() => { video.onerror = handleError; video.src = playbackUrl; setPlayerReady(true); });
     }
+  }, [playbackUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fire playback immediately once we have a URL — no pre-flight check.
+  useEffect(() => {
+    attachSource();
     return () => { hlsRef.current?.destroy(); hlsRef.current = null; };
-  }, [cfState, playbackUrl]);
+  }, [playbackUrl, attachSource]);
 
   // Play/pause + watch-time tracking
   useEffect(() => {
@@ -359,7 +400,7 @@ function ReelItem({
                   Cloudflare Stream is still encoding.<br/>Check back in a few minutes.
                 </span>
                 <button
-                  onClick={startPoll}
+                  onClick={retryPoll}
                   style={{ marginTop: 12, padding: "10px 24px", borderRadius: 20, background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
                 >↺ Check Again</button>
               </>
