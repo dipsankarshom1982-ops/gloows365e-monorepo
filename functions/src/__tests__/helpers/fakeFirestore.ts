@@ -60,6 +60,7 @@ interface FakeDocRef {
 
 interface FakeCollectionRef {
   doc(id?: string): FakeDocRef;
+  add(data: DocData): Promise<FakeDocRef>;
   where(field: string, op: "==", value: unknown): FakeQueryRef;
   orderBy(field: string, direction?: "asc" | "desc"): FakeQueryRef;
 }
@@ -148,6 +149,13 @@ export class FakeFirestore {
       doc(id?: string) {
         const docId = id ?? `auto_${Math.random().toString(36).slice(2)}`;
         return self.docRef(`${path}/${docId}`);
+      },
+      // add() = real Firestore's auto-id create shorthand — doc(<auto-id>).set(data)
+      // then resolve with the new ref, matching the real Admin SDK's return shape.
+      async add(data: DocData) {
+        const ref = this.doc();
+        await ref.set(data);
+        return ref;
       },
       where(field, op, value) {
         return self.queryRef(path, [(d) => d[field] === value]);

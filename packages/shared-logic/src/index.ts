@@ -63,3 +63,4 @@ export * from "./types/review";
 export * from "./types/conversation";
 export * from "./types/notification";
 export * from "./types/vcoins";
+export * from "./types/financial";

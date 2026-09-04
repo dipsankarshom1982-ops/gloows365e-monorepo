@@ -89,21 +89,62 @@ export type TutorCreditOrder = {
 // balance to a bank account today (vCoins, aiGuruCredits, tutorEarnings
 // all accumulate only) — that's explicitly later-phase scope, not
 // something this type or its callables should invent unprompted.
+//
+// Phase C+D (booking payment confirmation) added heldBalance below — the
+// held side of this SAME unified Tutor Financial Account, `balance` being
+// the available side. Per the locked "One Tutor Financial Ecosystem"
+// decision, this is deliberately NOT a marketplace-specific field
+// (an earlier draft used marketplaceHeldBalance/marketplaceBalance —
+// corrected after architecture review: those names implied a second,
+// parallel balance, which the locked architecture explicitly prohibits).
+// `heldBalance` is earning-type-agnostic by name and shape; today only
+// marketplace bookings populate it (see functions/src/bookingPayment.ts),
+// but nothing ties it to that source — WHICH source contributed is
+// answered at the ledger/transaction level (earningType/bookingId/
+// paymentOrderId/holdStatus on TutorEarningsTransaction below), never by
+// which balance field it landed in. On release (a future phase — no
+// release mechanism exists yet, so heldBalance is inert/unread by anything
+// today), held funds move into the EXISTING `balance` field below, same
+// field Instant Help already credits — not a second "available" bucket.
 export type TutorEarningsBalance = {
   uid?: string;
   balance: number;
   lifetimeEarned?: number;
   updatedAt?: unknown; // Firestore Timestamp
+
+  // Unified held-earnings bucket — not withdrawable, not read by
+  // requestPayout (functions/src/tutorPayouts.ts) or anything else yet.
+  // Absent means 0, exactly like an existing tutor document that predates
+  // this phase.
+  heldBalance?: number;
 };
 
+// `type`/`source` were single-literal unions describing the one earning
+// kind that has ever existed (Instant Help). Phase A2 widens `source` to
+// admit a second, still-hypothetical value for a future marketplace
+// booking settlement — a pure additive union widen: every existing call
+// site assigning `source: "INSTANT_HELP_SESSION"` still typechecks
+// unchanged. `earningType`/`bookingId`/`paymentOrderId`/`holdStatus` are
+// new optional fields a future marketplace-earning ledger entry would
+// carry (see the locked "Marketplace Financial Ledger" decision's chosen
+// hybrid design — extend this existing subcollection rather than build a
+// parallel one); an existing Instant Help ledger entry simply lacks them.
 export type TutorEarningsTransaction = {
   id?: string;
   type: "EARNING";
   amount: number;
-  source: "INSTANT_HELP_SESSION";
+  source: "INSTANT_HELP_SESSION" | "MARKETPLACE_BOOKING_PAYMENT";
   title: string;
   description?: string;
-  referenceId: string; // sessionId
+  referenceId: string; // sessionId (Instant Help) or bookingId (future marketplace)
   metadata?: Record<string, unknown>;
   createdAt?: unknown; // Firestore Timestamp
+
+  // Marketplace-booking-sourced ledger entries only — absent on every
+  // Instant Help entry that exists today and on every entry this phase
+  // itself produces (nothing writes these fields yet).
+  earningType?: "instant_help" | "marketplace_booking" | "manual_adjustment";
+  bookingId?: string;
+  paymentOrderId?: string;
+  holdStatus?: "held" | "available" | "payout_requested" | "paid_out" | "reversed" | "negative_adjustment";
 };

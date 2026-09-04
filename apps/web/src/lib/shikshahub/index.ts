@@ -202,6 +202,26 @@ export async function cancelBookingCall(
   return res.data;
 }
 
+/** Booking payment phase — starts a Razorpay order for an "accepted"
+ *  booking. Server resolves the amount from bookings/{id}.sessionFee
+ *  (never trusts anything sent here beyond bookingId itself); the
+ *  returned razorpayOrderId/grossAmountPaise feed straight into the
+ *  existing <RazorpayCheckout> component. Confirmation happens ONLY via
+ *  the server-side webhook (functions/src/razorpayWebhook.ts) — there is
+ *  no separate "payment success" callable for bookings to call afterward;
+ *  the caller instead watches listenToBooking below for
+ *  financialStatus to flip. */
+export async function createBookingPaymentOrderCall(
+  bookingId: string
+): Promise<{ razorpayOrderId: string; grossAmountPaise: number; paymentExpiresAtMillis: number }> {
+  const fn = httpsCallable<
+    { bookingId: string },
+    { razorpayOrderId: string; grossAmountPaise: number; keyId: string; paymentExpiresAtMillis: number }
+  >(functions, "createBookingPaymentOrder");
+  const res = await fn({ bookingId });
+  return res.data;
+}
+
 /** Live status for one booking the current student owns — relies on
  *  firestore.rules' bookings/{id} read rule (studentUid/tutorUid ==
  *  caller), not on trusting anything client-side. */

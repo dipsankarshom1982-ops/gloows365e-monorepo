@@ -3,12 +3,20 @@
 // verified tutor for a trial/regular session. studentUid/tutorUid are the
 // authoritative relationship (never studentName/tutorName, which are
 // display-only snapshots taken at request time — see requestBooking in
-// functions/src/tutorBooking.ts). Deliberately excludes anything payment/
-// refund/commission/rating-related — that's later-phase scope per the
-// Phase 1 architecture audit. Client never writes this collection
+// functions/src/tutorBooking.ts). Client never writes this collection
 // directly (firestore.rules: allow write: if false) — requestBooking and
-// respondToBooking are the only two ways a doc here is ever created or
-// changed, both via the Admin SDK.
+// respondToBooking are the only two ways this doc's WORKFLOW fields
+// (status, etc.) are ever created or changed, both via the Admin SDK.
+//
+// Booking payment phase (functions/src/bookingPayment.ts) added
+// financialStatus/paymentExpiresAt below — a deliberately SEPARATE,
+// additive companion to `status` above, never a replacement (see
+// BookingFinancialStatus's own header in ./financial for why). Written
+// only by createBookingPaymentOrder and the webhook's confirmation path;
+// a booking that predates this phase simply has neither field, which
+// every reader treats identically to an explicit "not_required".
+
+import type { BookingFinancialStatus } from "./financial";
 
 export type BookingSessionType = "trial" | "regular";
 
@@ -66,4 +74,9 @@ export type Booking = {
   // pattern this codebase already uses (e.g. hideTutorReview's
   // hiddenReason).
   reminderSentAt?: unknown; // Firestore Timestamp
+
+  // Booking payment phase — see this file's header. Absent on every
+  // booking that predates payment support.
+  financialStatus?: BookingFinancialStatus;
+  paymentExpiresAt?: unknown; // Firestore Timestamp — set only while financialStatus === "payment_pending"
 };

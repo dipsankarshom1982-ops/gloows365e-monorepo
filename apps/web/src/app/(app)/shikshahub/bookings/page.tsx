@@ -16,7 +16,8 @@ import { db } from "@/lib/firebase";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useStudentProfile, type Booking } from "@gloows/shared-logic";
 import { useStudentBookings } from "@gloows/shared-logic";
-import { cancelBookingCall, submitBookingReviewCall } from "@/lib/shikshahub";
+import { cancelBookingCall, submitBookingReviewCall, createBookingPaymentOrderCall } from "@/lib/shikshahub";
+import { RazorpayCheckout } from "@/components/RazorpayCheckout";
 import { ShikshaHubStyles } from "../_shared";
 
 const STATUS_META: Record<Booking["status"], { label: string; color: string }> = {
@@ -27,6 +28,117 @@ const STATUS_META: Record<Booking["status"], { label: string; color: string }> =
   // Booking completion phase.
   completed: { label: "Completed", color: "#0d9488" },
 };
+
+// Booking payment phase (Phase C+D) — only rendered for an "accepted"
+// booking (server enforces this too; gating client-side avoids showing a
+// button doomed to fail). Two steps, same UX shape as
+// shikshahub/credits/page.tsx's pack-purchase flow: "Pay ₹X" creates the
+// Razorpay order, then swaps to the existing <RazorpayCheckout> component
+// (itself the actual "Pay" button that opens checkout.js).
+//
+// Confirmation is DELIBERATELY not driven from this component at all —
+// there is no booking-specific "payment success" endpoint to call.
+// functions/src/razorpayWebhook.ts is the sole confirmation authority
+// (Decision 1); this component's job after checkout succeeds is only to
+// show a "confirming…" state until the ALREADY-LIVE useStudentBookings
+// onSnapshot listener (driving this whole page) reflects
+// booking.financialStatus flipping to payment_confirmed/payment_failed on
+// its own — no extra listener or polling needed here.
+function BookingPaymentStep({ booking }: { booking: Booking }) {
+  const { t } = useAppTranslation();
+  const [pendingOrder, setPendingOrder] = useState<{ orderId: string; amountPaise: number } | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const [error, setError] = useState("");
+
+  // The live booking prop (from useStudentBookings' onSnapshot) reaching a
+  // terminal financial status is what actually clears the "confirming…"
+  // state — not a timer, not a poll.
+  useEffect(() => {
+    if (booking.financialStatus !== "payment_pending") {
+      setAwaitingConfirmation(false);
+      setPendingOrder(null);
+    }
+  }, [booking.financialStatus]);
+
+  async function handleStart() {
+    setStarting(true);
+    setError("");
+    try {
+      const order = await createBookingPaymentOrderCall(booking.id!);
+      setPendingOrder({ orderId: order.razorpayOrderId, amountPaise: order.grossAmountPaise });
+    } catch (e: any) {
+      setError(e?.message ?? "Could not start payment. Please try again.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  function handleCheckoutSuccess() {
+    setPendingOrder(null);
+    setAwaitingConfirmation(true);
+  }
+
+  function handleCheckoutError(message: string) {
+    setPendingOrder(null);
+    if (!message.toLowerCase().includes("cancel")) setError(message);
+  }
+
+  if (booking.financialStatus === "payment_confirmed") {
+    return (
+      <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: "#22c55e" }}>
+        ✅ {t("shikshaHubPaymentConfirmed", "Payment confirmed")}
+      </div>
+    );
+  }
+
+  if (awaitingConfirmation) {
+    return (
+      <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: "var(--text-muted)" }}>
+        {t("shikshaHubConfirmingPayment", "Confirming your payment… this can take a few seconds.")}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      {pendingOrder ? (
+        <RazorpayCheckout
+          orderId={pendingOrder.orderId}
+          amount={pendingOrder.amountPaise}
+          description={`Tutoring session — ${booking.subject}`}
+          onSuccess={handleCheckoutSuccess}
+          onError={handleCheckoutError}
+        >
+          {`${t("shikshaHubPay", "Pay")} ₹${(pendingOrder.amountPaise / 100).toLocaleString("en-IN")}`}
+        </RazorpayCheckout>
+      ) : (
+        <button
+          onClick={handleStart}
+          disabled={starting}
+          style={{
+            border: "none", background: "linear-gradient(90deg,#0f766e,#14b8a6)", color: "#fff",
+            borderRadius: 10, padding: "10px 16px", fontSize: 12, fontWeight: 800, width: "100%",
+            cursor: starting ? "not-allowed" : "pointer", opacity: starting ? 0.6 : 1,
+          }}
+        >
+          {starting ? t("shikshaHubPreparingCheckout", "Preparing checkout…") : `${t("shikshaHubPayNow", "Pay")} ₹${booking.sessionFee}`}
+        </button>
+      )}
+      {booking.financialStatus === "payment_failed" && (
+        <div style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: "#ef4444" }}>
+          {t("shikshaHubPaymentFailedRetry", "Payment didn't go through — you can try again.")}
+        </div>
+      )}
+      {booking.financialStatus === "payment_expired" && (
+        <div style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: "var(--text-muted)" }}>
+          {t("shikshaHubPaymentExpiredRetry", "Your last payment attempt expired — you can start a new one.")}
+        </div>
+      )}
+      {error && <div style={{ marginTop: 6, fontSize: 11.5, fontWeight: 600, color: "#ef4444" }}>{error}</div>}
+    </div>
+  );
+}
 
 // Booking completion phase — inline "leave a review" form for a completed
 // booking with no review yet. Same star-rating shape as Phase 6's
@@ -233,6 +345,8 @@ export default function ShikshaHubMyBookingsPage() {
                       {rowError[b.id!]}
                     </div>
                   )}
+
+                  {b.status === "accepted" && <BookingPaymentStep booking={b} />}
 
                   {b.status === "completed" && <BookingReviewCta bookingId={b.id!} />}
                 </div>

@@ -109,6 +109,11 @@ export { processStarboardPayout } from "./starboardPayouts";
 export { processRefund, resolveRefundReconciliation, reconcileRefundStatuses } from "./refunds";
 export { searchPaymentOrders, getPaymentDetail } from "./refundSearch";
 
+// ── Financial domain — Phase B: shared Razorpay webhook (verify + record
+// only this phase; does not yet drive confirmation for any existing flow
+// or any future booking payment — see razorpayWebhook.ts's header) ────────
+export { razorpayWebhook } from "./razorpayWebhook";
+
 // ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
 export { registerTutorAccount, submitTutorVerification, reviewTutorVerification, submitTutorOnboarding, reviewTutorOnboarding } from "./tutorAccounts";
 
@@ -117,6 +122,12 @@ export { syncTutorMarketplaceProfile } from "./tutorMarketplace";
 
 // ── ShikshaHub — Phase 1 minimum viable tutor booking ───────────────────────────
 export { requestBooking, respondToBooking, cancelBooking, tickBookingCompletion, tickBookingReminders } from "./tutorBooking";
+
+// ── Financial domain — Phase C+D: booking payment order creation. The
+// matching confirmation logic (confirmBookingPaymentFromWebhook) is called
+// from razorpayWebhook.ts, not exported as its own callable — the webhook
+// is the only path that confirms a booking payment. ──────────────────────
+export { createBookingPaymentOrder } from "./bookingPayment";
 
 // ── ShikshaHub — Phase 3 tutor services (multi-service, online/offline,
 // one-time/short-term/long-term, instant-help config-only) ─────────────────────
