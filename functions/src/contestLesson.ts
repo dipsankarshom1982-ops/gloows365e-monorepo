@@ -152,6 +152,11 @@ export const getContestLesson = functionsV1
     });
 
     if (claim.outcome === "cached") {
+      // Lazy backfill: contests/{id}.banners.{language} was added after
+      // some lessons already existed (see the write below and the
+      // COMPATIBILITY comment above it) — a pre-fix cached doc won't have
+      // populated it yet. Best-effort, never blocks the response.
+      contestRef.set({ banners: { [language]: claim.data.bannerMeta } }, { merge: true }).catch(() => {});
       // sanitizeForClient covers historical docs generated before the
       // public/private split shipped — see that function's header comment.
       return { lessonJson: sanitizeForClient(claim.data.lessonJson), bannerMeta: claim.data.bannerMeta, status: "completed" as const };
@@ -199,6 +204,17 @@ export const getContestLesson = functionsV1
         answerKey,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+      // COMPATIBILITY (VidyaStar Phase 1 validation): useContestBanner.ts
+      // (both platforms) reads bannerMeta with a plain, uncalled Firestore
+      // getDoc — deliberately not through this callable, since calling it
+      // would trigger a full Gemini generation just from rendering a
+      // contest card (see that hook's own header comment). Locking
+      // contests/{id}/lessons/{language} down to deny-all (Phase 1) broke
+      // that direct read. bannerMeta carries no quiz/answer data, so
+      // mirroring it onto the contest doc itself — already world-readable
+      // to any authenticated user, unaffected by the Phase 1 rule change —
+      // keeps that hook working without reopening the answer-key leak.
+      batch.set(contestRef, { banners: { [language]: bannerMeta } }, { merge: true });
       await batch.commit();
 
       return { lessonJson: publicLessonJson, bannerMeta, status: "completed" as const };

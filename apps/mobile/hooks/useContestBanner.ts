@@ -1,6 +1,5 @@
-"use client";
-
-// PATH: apps/web/src/hooks/useContestBanner.ts
+// PATH: apps/mobile/hooks/useContestBanner.ts
+// Mirrors web src/hooks/useContestBanner.ts.
 //
 // Reads the AI-generated per-contest banner theme — a unique
 // {emoji, tagline, gradientStart, gradientEnd} per (contest, language),
@@ -23,8 +22,9 @@
 // that's always been world-readable to any authenticated user and is
 // unaffected by that lockdown.
 
+import { db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
-import { doc, getDoc, getFirestore } from "firebase/firestore";
 
 export interface ContestBanner {
   emoji: string;
@@ -39,7 +39,7 @@ export function useContestBanner(contestId: string | undefined, language: string
   useEffect(() => {
     if (!contestId || !language) return;
     let cancelled = false;
-    getDoc(doc(getFirestore(), "contests", contestId))
+    getDoc(doc(db, "contests", contestId))
       .then((snap) => {
         if (cancelled || !snap.exists()) return;
         const meta = snap.data()?.banners?.[language];

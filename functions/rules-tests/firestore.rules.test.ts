@@ -585,3 +585,38 @@ describe("leaderboard/{tab}/entries/{uid} — Starboard points forgery preventio
     await assertSucceeds(db.doc(`leaderboard/daily/entries/${uid}`).get());
   });
 });
+
+// ─── contests/{id}.banners — Phase 1 compatibility fix ─────────────────────
+// useContestBanner.ts now reads bannerMeta off the contest doc itself
+// (contests/{id}.banners.{language}) instead of the now-deny-all
+// contests/{id}/lessons/{language} — see that hook's header comment. This
+// only re-verifies that field didn't accidentally become client-writable
+// by piggybacking on the doc's existing narrow joinedCount-only exception.
+describe("contests/{id}.banners — not client-writable", () => {
+  const contestId = "contest_banner_1";
+  const uid = "student_banner";
+
+  test("a student CANNOT write contests/{id}.banners directly", async () => {
+    await seed(async (db) => {
+      await db.doc(`contests/${contestId}`).set({ title: "x", joinedCount: 0, totalSpots: 100 });
+    });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`contests/${contestId}`).update({ banners: { English: { emoji: "🔥" } } }));
+  });
+
+  test("a student CAN still read contests/{id}.banners (the whole point of the fix)", async () => {
+    await seed(async (db) => {
+      await db.doc(`contests/${contestId}`).set({ title: "x", banners: { English: { emoji: "🔥", tagline: "t", gradientStart: "#000", gradientEnd: "#fff" } } });
+    });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc(`contests/${contestId}`).get());
+  });
+
+  test("the existing joinedCount-increment exception still works unaffected", async () => {
+    await seed(async (db) => {
+      await db.doc(`contests/${contestId}`).set({ title: "x", joinedCount: 0, totalSpots: 100 });
+    });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc(`contests/${contestId}`).update({ joinedCount: 1, updatedAt: new Date() }));
+  });
+});
