@@ -3,6 +3,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { createHash } from "crypto";
 import { getRedis, RK, TTL } from "./redish";
 import { checkAskGuruLimit, incrementAskGuruUsage } from "./usageCheck";
+import { refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { callGeminiText } from "./gemini";
 
 const db = admin.firestore();
@@ -140,12 +141,25 @@ export const askAiGuruQuestion = onRequest(
       console.warn("[AskAiGuru] Could not read preferredLanguage, defaulting to English:", err?.message);
     }
 
-    // Usage check
+    // Usage check — pays with an AI Guru credit once the free daily limit
+    // is exceeded (unless already premium, which bypasses this entirely).
+    // creditTxId is non-null only when this specific request was paid for;
+    // refund it below if the request fails after this point.
+    let creditTxId: string | null = null;
     try {
-      await checkAskGuruLimit(uid, db);
+      const quota = await checkAskGuruLimit(uid, db);
+      creditTxId = quota.creditTxId;
     } catch (err: any) {
       const msg: string = err?.message ?? "";
-      if (msg.startsWith("FREE_LIMIT_REACHED:")) {
+      if (msg.startsWith("CREDITS_EXHAUSTED:")) {
+        res.status(429).json({
+          error: msg.slice("CREDITS_EXHAUSTED:".length),
+          code:  "CREDITS_EXHAUSTED",
+          limit: FREE_ASK_GURU_DAILY,
+          creditBalance:   err?.creditBalance   ?? 0,
+          creditsRequired: err?.creditsRequired ?? 1,
+        });
+      } else if (msg.startsWith("FREE_LIMIT_REACHED:")) {
         res.status(429).json({
           error: msg.slice("FREE_LIMIT_REACHED:".length),
           code:  "LIMIT_REACHED",
@@ -199,6 +213,7 @@ export const askAiGuruQuestion = onRequest(
       res.json({ answer, mode: modeStr });
     } catch (err: any) {
       console.error("[AskAiGuru] error:", err?.message);
+      if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "ASK_GURU", db);
       res.status(500).json({ error: "Could not get an answer. Please try again." });
     }
   }

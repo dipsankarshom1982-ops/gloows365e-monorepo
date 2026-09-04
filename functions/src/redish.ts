@@ -53,6 +53,11 @@ export const TTL = {
   // Ask AI Guru
   askGuruAnswer: 3600, // 1 hr — cache answer per question hash
 
+  // AI Guru Credits (pay-as-you-go) — display/fast-path only; the debit
+  // transaction in aiGuruCreditDebit.ts always re-reads Firestore directly,
+  // so a stale cached cost can never authorize an over-spend.
+  aiGuruCreditCost: 300, // 5 min
+
   // Ads system
   ads:      300,   // 5 min — per-module ad list
   adEvents: 60,    // 1 min — dedup window for impression/click events
@@ -102,6 +107,9 @@ export const RK = {
   // Ask AI Guru
   askGuruChat:      (uid: string, date: string) => `askguru:chat:${uid}:${date}`,
   askGuruAnswer:    (hash: string)              => `askguru:ans:${hash}`,
+
+  // AI Guru Credits (pay-as-you-go)
+  aiGuruCreditCost: ()                          => `aiguru:creditcost`,
 
   // Ads system
   ads:       (module: string, cls: string)   => `ads:${module}:${cls}`,

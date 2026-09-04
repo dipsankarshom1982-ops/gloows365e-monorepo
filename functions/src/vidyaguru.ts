@@ -3,6 +3,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import axios from "axios";
 import { callGeminiText, callGeminiWithAudio } from "./gemini";
 import { checkVidyaGuruLimit, incrementVidyaGuruUsage } from "./usageCheck";
+import { refundAiGuruCredit } from "./aiGuruCreditDebit";
 
 const db = admin.firestore();
 
@@ -188,11 +189,20 @@ export const vidyaguruChat = onRequest(
       return;
     }
 
+    let creditTxId: string | null = null;
     try {
-      await checkVidyaGuruLimit(uid, db);
+      const quota = await checkVidyaGuruLimit(uid, db);
+      creditTxId = quota.creditTxId;
     } catch (err: any) {
       const msg: string = err?.message ?? "";
-      if (msg.startsWith("FREE_LIMIT_REACHED:")) {
+      if (msg.startsWith("CREDITS_EXHAUSTED:")) {
+        res.status(429).json({
+          error: msg.replace("CREDITS_EXHAUSTED:", ""),
+          code: "CREDITS_EXHAUSTED",
+          creditBalance:   err?.creditBalance   ?? 0,
+          creditsRequired: err?.creditsRequired ?? 1,
+        });
+      } else if (msg.startsWith("FREE_LIMIT_REACHED:")) {
         res.status(429).json({ error: msg.replace("FREE_LIMIT_REACHED:", ""), code: "FREE_LIMIT_REACHED" });
       } else {
         res.status(500).json({ error: "Usage check failed" });
@@ -269,6 +279,7 @@ export const vidyaguruChat = onRequest(
       });
     } catch (err: any) {
       console.error("vidyaguruChat error:", err?.message);
+      if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "VIDYAGURU", db);
       res.status(500).json({ error: "Failed to get response from VidyaGuru. Please try again." });
     }
   }
