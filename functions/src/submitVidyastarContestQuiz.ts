@@ -19,6 +19,15 @@
 //      firestore.rules deny-all, populated only by getContestLesson's
 //      Admin SDK write (see functions/src/contestLesson.ts). Grading
 //      happens here, independently of anything the client asserted.
+//      COMPATIBILITY: every contest live in production before this phase
+//      shipped has its lesson generated under the OLD schema — no
+//      lessonAnswers doc exists for any of them yet. If one is missing,
+//      this function derives the key on-the-fly from the historical
+//      lessons/{language} doc's still-embedded lessonJson.quiz (Admin SDK
+//      read, never exposed to the client) and backfills lessonAnswers in
+//      the same transaction, so grading works immediately for existing
+//      contests and self-heals after the first submission per (contest,
+//      language) — no bulk data migration performed or needed.
 //   3. `language` is resolved server-side from students/{uid}.
 //      preferredLanguage — the same source the client itself uses to fetch
 //      the quiz — never from a client-supplied parameter, so a client can't
@@ -46,6 +55,7 @@
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { deriveAnswerKey } from "./contestQuizAnswerKey";
 
 const db = admin.firestore();
 
@@ -151,6 +161,7 @@ export const submitVidyastarContestQuiz = functionsV1
       // different language's (potentially differently-graded) answer key.
       const language = (studentSnap.exists && studentSnap.data()?.preferredLanguage) || "English";
       const answerKeyRef = db.doc(`contests/${contestId}/lessonAnswers/${language}`);
+      const lessonRef    = db.doc(`contests/${contestId}/lessons/${language}`);
 
       const [answerKeySnap, lockSnap, rewardRuleSnap] = await Promise.all([
         tx.get(answerKeyRef),
@@ -158,10 +169,22 @@ export const submitVidyastarContestQuiz = functionsV1
         tx.get(rewardRuleRef),
       ]);
 
-      if (!answerKeySnap.exists) {
-        throw new functionsV1.https.HttpsError("failed-precondition", "Your submission could not be verified. Please try again.");
+      let answerKey: AnswerKeyEntry[];
+      let needsAnswerKeyBackfill = false;
+
+      if (answerKeySnap.exists) {
+        answerKey = (answerKeySnap.data()?.answerKey ?? []) as AnswerKeyEntry[];
+      } else {
+        // COMPATIBILITY fallback — see header comment. Still a read, still
+        // has to happen before any tx write below.
+        const lessonSnap = await tx.get(lessonRef);
+        const rawQuiz = lessonSnap.exists ? lessonSnap.data()?.lessonJson?.quiz : undefined;
+        if (!Array.isArray(rawQuiz) || rawQuiz.length === 0) {
+          throw new functionsV1.https.HttpsError("failed-precondition", "Your submission could not be verified. Please try again.");
+        }
+        answerKey = deriveAnswerKey(rawQuiz, `submitVidyastarContestQuiz fallback (contest=${contestId})`);
+        needsAnswerKeyBackfill = true;
       }
-      const answerKey = (answerKeySnap.data()?.answerKey ?? []) as AnswerKeyEntry[];
       if (answerKey.length === 0) {
         throw new functionsV1.https.HttpsError("failed-precondition", "Your submission could not be verified. Please try again.");
       }
@@ -225,6 +248,10 @@ export const submitVidyastarContestQuiz = functionsV1
 
       // ── ALL WRITES (after every read above) ──
       const nowTs = admin.firestore.FieldValue.serverTimestamp();
+
+      if (needsAnswerKeyBackfill) {
+        tx.set(answerKeyRef, { answerKey, updatedAt: nowTs, backfilledFrom: "legacy-lessonJson" });
+      }
 
       tx.set(participantRef, {
         answers: graded,

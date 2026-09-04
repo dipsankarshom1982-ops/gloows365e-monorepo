@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
 import { validateLessonJson } from "./validateLesson";
+import { deriveAnswerKey, sanitizeQuizForClient, quizLooksUnsplit } from "./contestQuizAnswerKey";
 
 function buildContestLessonPrompt(title: string, description: string, language: string): string {
   return `You are AI Guru, a friendly Indian AI teacher for school students.
@@ -57,32 +58,15 @@ const FALLBACK_BANNER = { emoji: "🌟", tagline: "Learn, Compete & Shine!", gra
 // scenes[].checkQuestion is intentionally left untouched: it's never
 // submitted anywhere or used for scoring/reward, so it isn't part of this
 // trust boundary.
-interface QuizAnswerKeyEntry { correctAnswerIndex: number; explanation: string; }
-
-function splitQuizAnswerKey(lessonJson: any): { publicLessonJson: any; answerKey: QuizAnswerKeyEntry[] } {
+//
+// deriveAnswerKey/sanitizeQuizForClient/quizLooksUnsplit now live in
+// contestQuizAnswerKey.ts, shared with submitVidyastarContestQuiz.ts's own
+// historical-lesson fallback (see that file's header comment) — both need
+// the exact same extraction logic.
+function splitQuizAnswerKey(lessonJson: any): { publicLessonJson: any; answerKey: ReturnType<typeof deriveAnswerKey> } {
   const rawQuiz: any[] = Array.isArray(lessonJson?.quiz) ? lessonJson.quiz : [];
-
-  const answerKey: QuizAnswerKeyEntry[] = rawQuiz.map((q, i) => {
-    const optionCount = Array.isArray(q?.options) ? q.options.length : 0;
-    let correctAnswerIndex = Number(q?.correctAnswerIndex);
-    // Defensive: validateLessonJson only checks question/options shape, not
-    // that correctAnswerIndex is a valid in-range integer — Gemini has no
-    // hard guarantee here. A malformed index would otherwise make every
-    // submitted answer to this question silently unscoreable-as-correct.
-    if (!Number.isInteger(correctAnswerIndex) || correctAnswerIndex < 0 || correctAnswerIndex >= optionCount) {
-      console.warn(`getContestLesson: quiz[${i}] has an invalid correctAnswerIndex (${q?.correctAnswerIndex}) for ${optionCount} options — defaulting to 0`);
-      correctAnswerIndex = 0;
-    }
-    return { correctAnswerIndex, explanation: typeof q?.explanation === "string" ? q.explanation : "" };
-  });
-
-  const publicQuiz = rawQuiz.map((q) => ({
-    question:   q?.question ?? "",
-    options:    Array.isArray(q?.options) ? q.options : [],
-    difficulty: q?.difficulty,
-    concept:    q?.concept,
-  }));
-
+  const answerKey = deriveAnswerKey(rawQuiz, "getContestLesson");
+  const publicQuiz = sanitizeQuizForClient(rawQuiz);
   return { publicLessonJson: { ...lessonJson, quiz: publicQuiz }, answerKey };
 }
 
@@ -94,15 +78,7 @@ function splitQuizAnswerKey(lessonJson: any): { publicLessonJson: any; answerKey
 // through this callable, regardless of when it was generated.
 function sanitizeForClient(lessonJson: any): any {
   if (!lessonJson || !Array.isArray(lessonJson.quiz)) return lessonJson;
-  return {
-    ...lessonJson,
-    quiz: lessonJson.quiz.map((q: any) => ({
-      question:   q?.question,
-      options:    q?.options,
-      difficulty: q?.difficulty,
-      concept:    q?.concept,
-    })),
-  };
+  return { ...lessonJson, quiz: sanitizeQuizForClient(lessonJson.quiz) };
 }
 
 // Lessons no longer live on the contest doc — a contest is now visible to
@@ -157,6 +133,25 @@ export const getContestLesson = functionsV1
       // COMPATIBILITY comment above it) — a pre-fix cached doc won't have
       // populated it yet. Best-effort, never blocks the response.
       contestRef.set({ banners: { [language]: claim.data.bannerMeta } }, { merge: true }).catch(() => {});
+
+      // COMPATIBILITY (historical contests, pre-Phase-1): a lesson
+      // generated before the public/private answer-key split shipped still
+      // has its raw quiz (with correctAnswerIndex/explanation) sitting in
+      // this doc's own lessonJson — submitVidyastarContestQuiz.ts derives
+      // the same key on-the-fly as a fallback so grading never breaks for
+      // these, but self-heals here too: the next time anyone re-opens this
+      // lesson, backfill lessonAnswers/{language} so that fallback path
+      // isn't needed again for this (contest, language). Best-effort,
+      // never blocks the response.
+      const rawQuiz = claim.data.lessonJson?.quiz;
+      if (quizLooksUnsplit(rawQuiz)) {
+        lessonAnswersRef.get().then((existing) => {
+          if (existing.exists) return;
+          const answerKey = deriveAnswerKey(rawQuiz, `getContestLesson backfill (contest=${contestId})`);
+          return lessonAnswersRef.set({ answerKey, updatedAt: admin.firestore.FieldValue.serverTimestamp(), backfilledFrom: "legacy-lessonJson" });
+        }).catch(() => {});
+      }
+
       // sanitizeForClient covers historical docs generated before the
       // public/private split shipped — see that function's header comment.
       return { lessonJson: sanitizeForClient(claim.data.lessonJson), bannerMeta: claim.data.bannerMeta, status: "completed" as const };

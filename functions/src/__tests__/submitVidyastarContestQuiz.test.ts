@@ -219,6 +219,87 @@ describe("submitVidyastarContestQuiz — Test 6: question IDs from another conte
   });
 });
 
+describe("submitVidyastarContestQuiz — historical contest compatibility (pre-Phase-1 lessons)", () => {
+  // No lessonAnswers/{language} doc seeded at all — simulates a contest
+  // whose lesson was generated before the public/private split shipped,
+  // i.e. every contest live in production before this phase deployed.
+  function seedLegacyLesson() {
+    fakeDb.seed(`contests/${CONTEST_ID}/lessons/English`, {
+      status: "completed",
+      lessonJson: {
+        quiz: [
+          { question: "Q0", options: ["a", "b"], correctAnswerIndex: 1, explanation: "" },
+          { question: "Q1", options: ["a", "b"], correctAnswerIndex: 0, explanation: "" },
+          { question: "Q2", options: ["a", "b", "c"], correctAnswerIndex: 2, explanation: "" },
+        ],
+      },
+      bannerMeta: { emoji: "🌟", tagline: "t", gradientStart: "#000", gradientEnd: "#fff" },
+    });
+  }
+
+  test("grades correctly from the historical lessons/{language} doc when no lessonAnswers doc exists", async () => {
+    seedLiveContest();
+    seedJoinedParticipant();
+    fakeDb.seed(`students/${UID}`, { name: "Test Student", preferredLanguage: "English", class: "8" });
+    fakeDb.seed(`users/${UID}`, { role: "student", vCoinsBalance: 0 });
+    seedLegacyLesson();
+    // Deliberately NOT seeding contests/{id}/lessonAnswers/English.
+
+    const { submitVidyastarContestQuiz } = require("../submitVidyastarContestQuiz");
+    const result = await submitVidyastarContestQuiz.run(
+      { contestId: CONTEST_ID, answers: [
+        { questionIndex: 0, selectedIndex: 1, timeTakenSeconds: 5 },
+        { questionIndex: 1, selectedIndex: 1, timeTakenSeconds: 5 }, // wrong (real answer 0)
+        { questionIndex: 2, selectedIndex: 2, timeTakenSeconds: 5 },
+      ] },
+      CTX
+    );
+
+    // 2 correct * 10 + time bonus for 2 correct at 5s each (5 each) = 30.
+    expect(result.score).toBe(30);
+    expect(fakeDb.peek(`contests/${CONTEST_ID}/participant/${UID}`)?.correctAnswers).toBe(2);
+
+    // Reward/Starboard still fire normally off the fallback-derived score.
+    expect(fakeDb.peek(`users/${UID}`)?.vCoinsBalance).toBe(50);
+    expect(fakeDb.peek(`leaderboard/daily/entries/${UID}`)?.points).toBe(30);
+  });
+
+  test("self-heals: backfills lessonAnswers/{language} so the next submission doesn't need the fallback", async () => {
+    seedLiveContest();
+    seedJoinedParticipant();
+    fakeDb.seed(`students/${UID}`, { name: "Test Student", preferredLanguage: "English", class: "8" });
+    fakeDb.seed(`users/${UID}`, { role: "student", vCoinsBalance: 0 });
+    seedLegacyLesson();
+
+    const { submitVidyastarContestQuiz } = require("../submitVidyastarContestQuiz");
+    await submitVidyastarContestQuiz.run(
+      { contestId: CONTEST_ID, answers: [
+        { questionIndex: 0, selectedIndex: 1 }, { questionIndex: 1, selectedIndex: 0 }, { questionIndex: 2, selectedIndex: 2 },
+      ] },
+      CTX
+    );
+
+    const backfilled = fakeDb.peek(`contests/${CONTEST_ID}/lessonAnswers/English`);
+    expect(backfilled?.answerKey).toEqual([
+      { correctAnswerIndex: 1, explanation: "" },
+      { correctAnswerIndex: 0, explanation: "" },
+      { correctAnswerIndex: 2, explanation: "" },
+    ]);
+    expect(backfilled?.backfilledFrom).toBe("legacy-lessonJson");
+  });
+
+  test("still rejects when NEITHER lessonAnswers NOR a historical lessons doc exists", async () => {
+    seedLiveContest();
+    seedJoinedParticipant();
+    fakeDb.seed(`students/${UID}`, { name: "Test Student", preferredLanguage: "English" });
+    // No lessons doc, no lessonAnswers doc at all — genuinely never generated.
+    const { submitVidyastarContestQuiz } = require("../submitVidyastarContestQuiz");
+    await expect(
+      submitVidyastarContestQuiz.run({ contestId: CONTEST_ID, answers: [{ questionIndex: 0, selectedIndex: 0 }] }, CTX)
+    ).rejects.toMatchObject({ code: "failed-precondition" });
+  });
+});
+
 describe("submitVidyastarContestQuiz — Test 7: invalid option index", () => {
   test("rejects a negative/non-integer selectedIndex", async () => {
     seedAll();
