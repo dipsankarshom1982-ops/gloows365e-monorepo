@@ -343,6 +343,7 @@ html, body {
 
 .auth-input {
   width: 100%;
+  min-height: 52px;
   background: rgba(255,255,255,0.06);
   border: 1.5px solid rgba(255,255,255,0.08);
   border-radius: 14px;
@@ -354,6 +355,7 @@ html, body {
   -webkit-appearance: none;
   appearance: none;
 }
+.auth-input:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .auth-input-wrap .auth-input { padding-left: 42px; }
 
@@ -375,7 +377,7 @@ html, body {
 
 .auth-eye-btn {
   position: absolute;
-  right: 12px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
   background: none;
@@ -384,9 +386,16 @@ html, body {
   cursor: pointer;
   display: flex;
   align-items: center;
-  padding: 4px;
+  justify-content: center;
+  /* ~44px touch target (WCAG) without the icon itself growing */
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  transition: color 0.15s, background 0.15s;
 }
-.auth-eye-btn:hover { color: var(--text); }
+.auth-eye-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+[data-theme="light"] .auth-eye-btn:hover { background: rgba(0,0,0,0.05); }
+.auth-eye-btn:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
 
 .btn-primary {
   width: 100%;
@@ -408,6 +417,24 @@ html, body {
 .btn-primary:hover  { opacity: 0.92; box-shadow: 0 10px 28px rgba(139,92,246,0.45); }
 .btn-primary:active { transform: scale(0.98); }
 .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+
+/* Loading spinner for auth buttons (e.g. btn-primary "Signing you in…") */
+.btn-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btn-spin 0.7s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  /* Functional feedback, not decorative — keep spinning but slower rather
+     than freezing it into a state that reads as "stuck". */
+  .btn-spinner { animation-duration: 1.4s; }
+}
 
 .btn-google {
   width: 100%;
