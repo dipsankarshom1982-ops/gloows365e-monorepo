@@ -83,13 +83,11 @@ export { voiceTutorAnswer } from "./voiceTutor";
 // ── AI Guru Subscription (Razorpay) ────────────────────────────────────────────
 export { aiGuruCheckoutPage, aiGuruCreateSubscription, aiGuruPaymentSuccess } from "./aiGuruSubscription";
 
-// ── AI Guru Credits — pay-as-you-go (Razorpay), coexists with the
-// subscription above (see aiGuruCredits.ts) ────────────────────────────────────
-export {
-  aiGuruCreateCreditOrder,
-  aiGuruCreditPaymentSuccess,
-  reconcileAiGuruCreditOrders,
-} from "./aiGuruCredits";
+// ── AI Guru Credits — pay-as-you-go (Razorpay) — functions/src/aiGuruCredits.ts
+// exists on disk but is NOT YET COMMITTED (see the Phase D.6/D.7 deployment-
+// readiness audit); this export is removed for now so the predeploy build
+// isn't blocked on an unresolved import. Re-add once that feature batch is
+// reviewed and committed on its own. ─────────────────────────────────────────
 
 // ── Unified Ads System ─────────────────────────────────────────────────────────
 export { aggregateAdAnalytics, claimAdReward, getAds, recordAdEvent } from "./ads";
@@ -103,9 +101,11 @@ export { getContestLesson } from "./contestLesson";
 // ── VidyaStar Board Aggregation ───────────────────────────────────────────────
 export { onContestParticipantWrite } from "./vidyastarBoard";
 
-// ── Starboard period reset (daily/weekly/monthly/yearly rollover) ─────────────
-export { resetStarboardPeriods } from "./starboardReset";
-export { processStarboardPayout } from "./starboardPayouts";
+// ── Starboard period reset/payout — functions/src/starboardReset.ts and
+// starboardPayouts.ts exist on disk but are NOT YET COMMITTED (see the
+// Phase D.6/D.7 deployment-readiness audit); these exports are removed for
+// now so the predeploy build isn't blocked on an unresolved import. Re-add
+// once that feature batch is reviewed and committed on its own. ────────────
 export { processRefund, resolveRefundReconciliation, reconcileRefundStatuses } from "./refunds";
 export { searchPaymentOrders, getPaymentDetail } from "./refundSearch";
 
