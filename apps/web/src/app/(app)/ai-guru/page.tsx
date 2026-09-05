@@ -4,7 +4,17 @@
 // Exact mirror of mobile app/(drawer)/(tabs)/ai-guru.tsx
 // Hero section: pulse ring + avatar + tagline
 // 2-column grid of feature cards with gradients, exactly matching MENU_CARD_DEFS
-// Feature visibility controlled by FeatureFlagsContext.aiGuru()
+// Feature visibility controlled by FeatureFlagsContext.aiGuruFeature()
+//
+// FIX (production crash, 2026-09-05): this used to destructure `aiGuru`
+// from useFeatureFlags(), which only exists on the not-yet-shipped
+// shared-logic refactor (currently held in git stash, un-QA'd). The
+// context actually deployed exposes `aiGuruFeature` — `aiGuru` was
+// `undefined`, and calling it below threw a TypeError on every render of
+// this page, which is what produced the "Application error: a
+// client-side exception has occurred" crash. Revert to the real API;
+// re-adopt `aiGuru` (and its new flag-key set) only alongside that
+// refactor's own release, once it's been through QA.
 // "Powered by Gemini AI" footer
 //
 // FEATURE (full i18n rebuild): this page used to import its own bespoke
@@ -100,7 +110,7 @@ function FeatureCard({ def, t }: { def: typeof MENU_CARD_DEFS[number]; t: (key: 
 
 // ─── Main ─────────────────────────────────────────────────────
 export default function AiGuruPage() {
-  const { aiGuru } = useFeatureFlags();
+  const { aiGuruFeature } = useFeatureFlags();
   const { studentProfile } = useStudentProfile();
 
   // Subscription state — was entirely untracked on this page before (see
@@ -121,7 +131,14 @@ export default function AiGuruPage() {
   const { languageCode, languageName } = useLanguage();
   const { colors, isDarkMode } = useTheme();
 
-  const visibleCards = MENU_CARD_DEFS.filter((def) => aiGuru(def.flagKey));
+  // Cast: MENU_CARD_DEFS' flagKey strings (photo_solve, exam_simulator, ...)
+  // are the new refactor's flag-key set, not the deployed AiGuruFlags shape
+  // (photoSolveEnabled, ...) — same key mismatch noted above. aiGuruFeature
+  // does a plain object lookup with `?? true`, so an unrecognized key can
+  // never throw; it just fails open (card shown), matching every other
+  // feature-flag check elsewhere in this app today (homeSection/drawerItem
+  // have the identical pre-refactor-vs-new-caller key mismatch).
+  const visibleCards = MENU_CARD_DEFS.filter((def) => aiGuruFeature(def.flagKey as any));
 
   const hour = new Date().getHours();
 
