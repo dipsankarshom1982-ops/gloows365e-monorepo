@@ -10,8 +10,8 @@
  * Also added vite.config optimization (see vite.config.ts output).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processStarboardPayout = exports.resetStarboardPeriods = exports.onContestParticipantWrite = exports.getContestLesson = exports.removeAdmin = exports.getUserSubscriptionHistory = exports.createCoupon = exports.createComboPlan = exports.createAdmin = exports.approveContent = exports.recordAdEvent = exports.getAds = exports.claimAdReward = exports.aggregateAdAnalytics = exports.reconcileAiGuruCreditOrders = exports.aiGuruCreditPaymentSuccess = exports.aiGuruCreateCreditOrder = exports.aiGuruPaymentSuccess = exports.aiGuruCreateSubscription = exports.aiGuruCheckoutPage = exports.voiceTutorAnswer = exports.generateExam = exports.evaluateExam = exports.photoSolve = exports.restartEducationAdvisor = exports.askAiGuruQuestion = exports.getPersonalizedDashboard = exports.dailyStreakQuizReminder = exports.applyForAmbassadorProgram = exports.submitDailyStreakQuizAnswer = exports.getTodaysStreakQuizQuestion = exports.submitVidyastarContestQuiz = exports.deleteContest = exports.joinVidyastarContest = exports.claimSkillBattleReward = exports.creditWatchReward = exports.creditSignupBonus = exports.getVCoinBalance = exports.claimVCoinReward = exports.getReelsFeed = exports.getHomeFeed = exports.getLeaderboard = exports.seekhoUpdateRevisionQueue = exports.seekhoOnChapterComplete = exports.seekhoGetDailyStudyPlan = exports.seekhoDailyRevisionReminder = exports.seekhoCreateSubscription = exports.vidyaguruChat = exports.discoverTrending = exports.discoverSearch = void 0;
-exports.followUp = exports.generateLesson = exports.onPostCreated = exports.updateSkillboard = exports.ensureStudentId = exports.adminEraseStudent = exports.eraseMyAccount = exports.exportMyData = exports.getReferralLeaderboard = exports.applyReferral = exports.markConversationRead = exports.sendTutorMessage = exports.replyToTutorReview = exports.hideTutorReview = exports.submitTutorReview = exports.reconcilePayoutStatuses = exports.updatePayoutConfig = exports.markPayoutPaid = exports.reviewPayoutRequest = exports.cancelPayoutRequest = exports.requestPayout = exports.saveTutorPayoutDetails = exports.tickInstantHelp = exports.endInstantHelpSession = exports.cancelInstantHelpRequest = exports.respondToInstantHelpRequest = exports.requestInstantHelp = exports.setInstantHelpOnlineStatus = exports.reconcileTutorCreditOrders = exports.tutorCreditPaymentSuccess = exports.createTutorCreditOrder = exports.syncTutorServiceMarketplace = exports.deleteService = exports.updateService = exports.createService = exports.tickBookingReminders = exports.tickBookingCompletion = exports.cancelBooking = exports.respondToBooking = exports.requestBooking = exports.syncTutorMarketplaceProfile = exports.submitTutorOnboarding = exports.reviewTutorVerification = exports.submitTutorVerification = exports.registerTutorAccount = exports.getPaymentDetail = exports.searchPaymentOrders = exports.reconcileRefundStatuses = exports.resolveRefundReconciliation = exports.processRefund = void 0;
+exports.reconcileRefundStatuses = exports.resolveRefundReconciliation = exports.processRefund = exports.onContestParticipantWrite = exports.getContestLesson = exports.removeAdmin = exports.getUserSubscriptionHistory = exports.createCoupon = exports.createComboPlan = exports.createAdmin = exports.approveContent = exports.recordAdEvent = exports.getAds = exports.claimAdReward = exports.aggregateAdAnalytics = exports.aiGuruPaymentSuccess = exports.aiGuruCreateSubscription = exports.aiGuruCheckoutPage = exports.voiceTutorAnswer = exports.generateExam = exports.evaluateExam = exports.photoSolve = exports.restartEducationAdvisor = exports.askAiGuruQuestion = exports.getPersonalizedDashboard = exports.dailyStreakQuizReminder = exports.applyForAmbassadorProgram = exports.submitDailyStreakQuizAnswer = exports.getTodaysStreakQuizQuestion = exports.autoFinalizeEndedContests = exports.finalizeContestRanking = exports.submitVidyastarContestQuiz = exports.deleteContest = exports.joinVidyastarContest = exports.claimSkillBattleReward = exports.creditWatchReward = exports.creditSignupBonus = exports.getVCoinBalance = exports.claimVCoinReward = exports.getReelsFeed = exports.getHomeFeed = exports.getLeaderboard = exports.seekhoUpdateRevisionQueue = exports.seekhoOnChapterComplete = exports.seekhoGetDailyStudyPlan = exports.seekhoDailyRevisionReminder = exports.seekhoCreateSubscription = exports.vidyaguruChat = exports.discoverTrending = exports.discoverSearch = void 0;
+exports.followUp = exports.generateLesson = exports.onPostCreated = exports.updateSkillboard = exports.ensureStudentId = exports.adminEraseStudent = exports.eraseMyAccount = exports.exportMyData = exports.getReferralLeaderboard = exports.applyReferral = exports.markConversationRead = exports.sendTutorMessage = exports.replyToTutorReview = exports.hideTutorReview = exports.submitTutorReview = exports.reconcilePayoutStatuses = exports.updatePayoutConfig = exports.markPayoutPaid = exports.reviewPayoutRequest = exports.cancelPayoutRequest = exports.requestPayout = exports.saveTutorPayoutDetails = exports.tickInstantHelp = exports.endInstantHelpSession = exports.cancelInstantHelpRequest = exports.respondToInstantHelpRequest = exports.requestInstantHelp = exports.setInstantHelpOnlineStatus = exports.reconcileTutorCreditOrders = exports.tutorCreditPaymentSuccess = exports.createTutorCreditOrder = exports.syncTutorServiceMarketplace = exports.deleteService = exports.updateService = exports.createService = exports.createBookingPaymentOrder = exports.tickBookingReminders = exports.tickBookingCompletion = exports.cancelBooking = exports.respondToBooking = exports.requestBooking = exports.syncTutorMarketplaceProfile = exports.reviewTutorOnboarding = exports.submitTutorOnboarding = exports.reviewTutorVerification = exports.submitTutorVerification = exports.registerTutorAccount = exports.razorpayWebhook = exports.getPaymentDetail = exports.searchPaymentOrders = void 0;
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const functionsV1 = require("firebase-functions/v1");
@@ -57,6 +57,9 @@ Object.defineProperty(exports, "joinVidyastarContest", { enumerable: true, get: 
 Object.defineProperty(exports, "deleteContest", { enumerable: true, get: function () { return vidyastarContest_1.deleteContest; } });
 var submitVidyastarContestQuiz_1 = require("./submitVidyastarContestQuiz");
 Object.defineProperty(exports, "submitVidyastarContestQuiz", { enumerable: true, get: function () { return submitVidyastarContestQuiz_1.submitVidyastarContestQuiz; } });
+var contestLeaderboard_1 = require("./contestLeaderboard");
+Object.defineProperty(exports, "finalizeContestRanking", { enumerable: true, get: function () { return contestLeaderboard_1.finalizeContestRanking; } });
+Object.defineProperty(exports, "autoFinalizeEndedContests", { enumerable: true, get: function () { return contestLeaderboard_1.autoFinalizeEndedContests; } });
 // ── Daily Streak Quiz ──────────────────────────────────────────────────────
 var dailyStreakQuiz_1 = require("./dailyStreakQuiz");
 Object.defineProperty(exports, "getTodaysStreakQuizQuestion", { enumerable: true, get: function () { return dailyStreakQuiz_1.getTodaysStreakQuizQuestion; } });
@@ -86,12 +89,11 @@ var aiGuruSubscription_1 = require("./aiGuruSubscription");
 Object.defineProperty(exports, "aiGuruCheckoutPage", { enumerable: true, get: function () { return aiGuruSubscription_1.aiGuruCheckoutPage; } });
 Object.defineProperty(exports, "aiGuruCreateSubscription", { enumerable: true, get: function () { return aiGuruSubscription_1.aiGuruCreateSubscription; } });
 Object.defineProperty(exports, "aiGuruPaymentSuccess", { enumerable: true, get: function () { return aiGuruSubscription_1.aiGuruPaymentSuccess; } });
-// ── AI Guru Credits — pay-as-you-go (Razorpay), coexists with the
-// subscription above (see aiGuruCredits.ts) ────────────────────────────────────
-var aiGuruCredits_1 = require("./aiGuruCredits");
-Object.defineProperty(exports, "aiGuruCreateCreditOrder", { enumerable: true, get: function () { return aiGuruCredits_1.aiGuruCreateCreditOrder; } });
-Object.defineProperty(exports, "aiGuruCreditPaymentSuccess", { enumerable: true, get: function () { return aiGuruCredits_1.aiGuruCreditPaymentSuccess; } });
-Object.defineProperty(exports, "reconcileAiGuruCreditOrders", { enumerable: true, get: function () { return aiGuruCredits_1.reconcileAiGuruCreditOrders; } });
+// ── AI Guru Credits — pay-as-you-go (Razorpay) — functions/src/aiGuruCredits.ts
+// exists on disk but is NOT YET COMMITTED (see the Phase D.6/D.7 deployment-
+// readiness audit); this export is removed for now so the predeploy build
+// isn't blocked on an unresolved import. Re-add once that feature batch is
+// reviewed and committed on its own. ─────────────────────────────────────────
 // ── Unified Ads System ─────────────────────────────────────────────────────────
 var ads_1 = require("./ads");
 Object.defineProperty(exports, "aggregateAdAnalytics", { enumerable: true, get: function () { return ads_1.aggregateAdAnalytics; } });
@@ -112,11 +114,11 @@ Object.defineProperty(exports, "getContestLesson", { enumerable: true, get: func
 // ── VidyaStar Board Aggregation ───────────────────────────────────────────────
 var vidyastarBoard_1 = require("./vidyastarBoard");
 Object.defineProperty(exports, "onContestParticipantWrite", { enumerable: true, get: function () { return vidyastarBoard_1.onContestParticipantWrite; } });
-// ── Starboard period reset (daily/weekly/monthly/yearly rollover) ─────────────
-var starboardReset_1 = require("./starboardReset");
-Object.defineProperty(exports, "resetStarboardPeriods", { enumerable: true, get: function () { return starboardReset_1.resetStarboardPeriods; } });
-var starboardPayouts_1 = require("./starboardPayouts");
-Object.defineProperty(exports, "processStarboardPayout", { enumerable: true, get: function () { return starboardPayouts_1.processStarboardPayout; } });
+// ── Starboard period reset/payout — functions/src/starboardReset.ts and
+// starboardPayouts.ts exist on disk but are NOT YET COMMITTED (see the
+// Phase D.6/D.7 deployment-readiness audit); these exports are removed for
+// now so the predeploy build isn't blocked on an unresolved import. Re-add
+// once that feature batch is reviewed and committed on its own. ────────────
 var refunds_1 = require("./refunds");
 Object.defineProperty(exports, "processRefund", { enumerable: true, get: function () { return refunds_1.processRefund; } });
 Object.defineProperty(exports, "resolveRefundReconciliation", { enumerable: true, get: function () { return refunds_1.resolveRefundReconciliation; } });
@@ -124,12 +126,18 @@ Object.defineProperty(exports, "reconcileRefundStatuses", { enumerable: true, ge
 var refundSearch_1 = require("./refundSearch");
 Object.defineProperty(exports, "searchPaymentOrders", { enumerable: true, get: function () { return refundSearch_1.searchPaymentOrders; } });
 Object.defineProperty(exports, "getPaymentDetail", { enumerable: true, get: function () { return refundSearch_1.getPaymentDetail; } });
+// ── Financial domain — Phase B: shared Razorpay webhook (verify + record
+// only this phase; does not yet drive confirmation for any existing flow
+// or any future booking payment — see razorpayWebhook.ts's header) ────────
+var razorpayWebhook_1 = require("./razorpayWebhook");
+Object.defineProperty(exports, "razorpayWebhook", { enumerable: true, get: function () { return razorpayWebhook_1.razorpayWebhook; } });
 // ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
 var tutorAccounts_1 = require("./tutorAccounts");
 Object.defineProperty(exports, "registerTutorAccount", { enumerable: true, get: function () { return tutorAccounts_1.registerTutorAccount; } });
 Object.defineProperty(exports, "submitTutorVerification", { enumerable: true, get: function () { return tutorAccounts_1.submitTutorVerification; } });
 Object.defineProperty(exports, "reviewTutorVerification", { enumerable: true, get: function () { return tutorAccounts_1.reviewTutorVerification; } });
 Object.defineProperty(exports, "submitTutorOnboarding", { enumerable: true, get: function () { return tutorAccounts_1.submitTutorOnboarding; } });
+Object.defineProperty(exports, "reviewTutorOnboarding", { enumerable: true, get: function () { return tutorAccounts_1.reviewTutorOnboarding; } });
 // ── ShikshaHub — public tutor marketplace mirror ────────────────────────────────
 var tutorMarketplace_1 = require("./tutorMarketplace");
 Object.defineProperty(exports, "syncTutorMarketplaceProfile", { enumerable: true, get: function () { return tutorMarketplace_1.syncTutorMarketplaceProfile; } });
@@ -140,6 +148,12 @@ Object.defineProperty(exports, "respondToBooking", { enumerable: true, get: func
 Object.defineProperty(exports, "cancelBooking", { enumerable: true, get: function () { return tutorBooking_1.cancelBooking; } });
 Object.defineProperty(exports, "tickBookingCompletion", { enumerable: true, get: function () { return tutorBooking_1.tickBookingCompletion; } });
 Object.defineProperty(exports, "tickBookingReminders", { enumerable: true, get: function () { return tutorBooking_1.tickBookingReminders; } });
+// ── Financial domain — Phase C+D: booking payment order creation. The
+// matching confirmation logic (confirmBookingPaymentFromWebhook) is called
+// from razorpayWebhook.ts, not exported as its own callable — the webhook
+// is the only path that confirms a booking payment. ──────────────────────
+var bookingPayment_1 = require("./bookingPayment");
+Object.defineProperty(exports, "createBookingPaymentOrder", { enumerable: true, get: function () { return bookingPayment_1.createBookingPaymentOrder; } });
 // ── ShikshaHub — Phase 3 tutor services (multi-service, online/offline,
 // one-time/short-term/long-term, instant-help config-only) ─────────────────────
 var tutorServices_1 = require("./tutorServices");

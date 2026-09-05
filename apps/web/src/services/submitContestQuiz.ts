@@ -24,16 +24,20 @@ export interface QuizAnswer {
   timeTakenSeconds?: number;
 }
 
+// VidyaStar Phase 2: no `rank` in the response anymore — see
+// functions/src/submitVidyastarContestQuiz.ts's header comment. Rank is
+// resolved separately (lib/contestLeaderboard.ts) by whichever screen
+// needs it, never returned by the submission itself.
 const submitVidyastarContestQuizCF = httpsCallable<
   { contestId: string; answers: QuizAnswer[] },
-  { score: number; rank: number }
+  { score: number }
 >(functions, "submitVidyastarContestQuiz");
 
 export async function submitContestQuiz(
   contestId: string,
   _userId: string,
   answers: QuizAnswer[]
-): Promise<{ score: number; rank: number }> {
+): Promise<{ score: number }> {
   const { data } = await submitVidyastarContestQuizCF({ contestId, answers });
   return data;
 }

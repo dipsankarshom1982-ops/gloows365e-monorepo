@@ -8,7 +8,12 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { auth, db } from "@/lib/firebase";
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
+import {
+  fetchFinalizedLeaderboardPage,
+  fetchLeaderboardPage,
+  fetchMyLiveRank,
+} from "@/lib/contestLeaderboard";
 
 type LeaderRow = { userId: string; name: string; score: number; rank: number };
 
@@ -80,27 +85,41 @@ function ContestResultContent() {
   useEffect(() => {
     if (!contestId || !userId) return;
     (async () => {
-      const [contestSnap, participantSnap, mySnap] = await Promise.all([
+      const [contestSnap, mySnap] = await Promise.all([
         getDoc(doc(db, "contests", contestId)),
-        getDocs(collection(db, "contests", contestId, "participant")),
         getDoc(doc(db, "contests", contestId, "participant", userId)),
       ]);
 
       let periodKey: string | undefined;
+      let finalized = false;
       if (contestSnap.exists()) {
         const data = { id: contestSnap.id, ...contestSnap.data() } as any;
         setContest(data);
         periodKey = data.periodKey;
+        finalized = data.leaderboardFinalized === true;
         const end = parseDate(data.endTime ?? data.endDate);
         setIsEnded(!!(end && end < new Date()));
       }
 
+      // Rank resolution mirrors contest/leaderboard/page.tsx's three-way
+      // branch: authoritative finalRank once finalized, legacy `rank` for
+      // historical (pre-Phase-2) contests, otherwise a live count-
+      // aggregation estimate — never derived from page membership.
       let rank: number | null = null;
       if (mySnap.exists()) {
         const d = mySnap.data();
-        setScore(d.score ?? parseInt(scoreParam ?? "0", 10));
+        const myScore = d.score ?? parseInt(scoreParam ?? "0", 10);
+        setScore(myScore);
         setTotal(d.answers?.length ?? parseInt(totalParam ?? "0", 10));
-        rank = d.rank ?? null;
+        if (typeof d.finalRank === "number") {
+          rank = d.finalRank;
+        } else if (typeof d.rank === "number") {
+          rank = d.rank;
+        } else if (d.completed) {
+          try {
+            rank = await fetchMyLiveRank(contestId, myScore, d.correctAnswers ?? 0);
+          } catch { /* live estimate is non-critical */ }
+        }
         setMyRank(rank);
       }
 
@@ -115,28 +134,21 @@ function ContestResultContent() {
         } catch { /* prize teaser is non-critical */ }
       }
 
-      const rows = participantSnap.docs
-        .filter((d) => d.data().completed)
-        .map((d) => ({
-          userId: d.data().userId as string,
-          score: d.data().score ?? 0,
-          rank: d.data().rank ?? 999,
-          name: "Student",
+      // Top-10 preview — a single bounded page (ordered query), not a
+      // full-collection read. `name` comes straight off the participant
+      // doc — no more per-row students/{uid} fetch (denied by
+      // firestore.rules for every row but the viewer's own anyway).
+      const page = finalized
+        ? await fetchFinalizedLeaderboardPage(contestId, null, 10)
+        : await fetchLeaderboardPage(contestId, null, 10);
+      setLeaderboard(
+        page.rows.map((r, i) => ({
+          userId: r.userId,
+          name: r.name,
+          score: r.score,
+          rank: (finalized ? r.finalRank : r.rank) ?? i + 1,
         }))
-        .sort((a, b) => a.rank - b.rank)
-        .slice(0, 10);
-
-      const named: LeaderRow[] = await Promise.all(
-        rows.map(async (r) => {
-          try {
-            const snap = await getDoc(doc(db, "students", r.userId));
-            return { ...r, name: snap.exists() ? (snap.data()?.name ?? "Student") : "Student" };
-          } catch {
-            return r;
-          }
-        })
       );
-      setLeaderboard(named);
       setLoading(false);
     })();
   }, [contestId, userId, scoreParam, totalParam]);

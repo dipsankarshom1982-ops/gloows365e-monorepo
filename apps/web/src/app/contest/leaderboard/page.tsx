@@ -1,22 +1,34 @@
 "use client";
 
 // PATH: apps/web/src/app/contest/leaderboard/page.tsx
-// Mirrors mobile app/contest/leaderboard.tsx — full ranked list, live vs
-// final badge, top-3 medals, refresh button instead of pull-to-refresh.
+// Mirrors mobile app/contest/leaderboard.tsx.
+//
+// VidyaStar Phase 2 — rewritten to use a bounded, ordered, paginated
+// Firestore query (lib/contestLeaderboard.ts) instead of reading every
+// participant and sorting client-side by a batch-rewritten `rank` field.
+// See that file and functions/src/contestLeaderboard.ts for the full
+// architecture.
+//
+// UX change this necessitates: the old screen force-pinned "You" to the
+// very first row of page 1 regardless of actual rank — with real cursor
+// pagination that's no longer possible (it would either duplicate a real
+// entry or desync the "Load More" cursor). Instead, "Your Position" is now
+// a dedicated, always-visible card above the list; the list itself shows
+// the real, unmodified page-by-page order, and highlights your own row
+// wherever it naturally falls once you've loaded that far.
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { auth, db } from "@/lib/firebase";
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
-
-// NOTE: `name` must be read straight off the participant doc, not fetched
-// separately from students/{uid} — firestore.rules locks students/{uid}
-// reads to that student's own uid, so a per-row fetch of another
-// participant's doc is always denied and silently falls back to "Student"
-// for everyone but the viewer. joinVidyastarContest (Admin SDK) already
-// denormalizes name onto the participant doc at join time for exactly
-// this reason — see functions/src/vidyastarContest.ts.
+import { doc, getDoc, QueryDocumentSnapshot } from "firebase/firestore";
+import {
+  fetchFinalizedLeaderboardPage,
+  fetchLeaderboardPage,
+  fetchMyLiveRank,
+  LEADERBOARD_PAGE_SIZE,
+  type LeaderboardRow,
+} from "@/lib/contestLeaderboard";
 
 function parseDate(t: any): Date | null {
   if (!t) return null;
@@ -26,9 +38,12 @@ function parseDate(t: any): Date | null {
   return null;
 }
 
-type Row = { userId: string; name: string; score: number; timeBonus: number; rank: number };
-
 const MEDAL = ["🥇", "🥈", "🥉"];
+
+type MyPositionState =
+  | { kind: "not_participated" }
+  | { kind: "pending" }
+  | { kind: "ranked"; rank: number; isFinal: boolean; score: number };
 
 function ContestLeaderboardContent() {
   const searchParams = useSearchParams();
@@ -36,48 +51,62 @@ function ContestLeaderboardContent() {
   const router = useRouter();
   const userId = auth.currentUser?.uid;
 
-  const [contest, setContest] = useState<any>(null);
-  const [rows, setRows] = useState<Row[]>([]);
-  const [isEnded, setIsEnded] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [contest, setContest]         = useState<any>(null);
+  const [rows, setRows]               = useState<LeaderboardRow[]>([]);
+  const [cursor, setCursor]           = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore]         = useState(false);
+  const [isEnded, setIsEnded]         = useState(false);
+  const [isFinalized, setIsFinalized] = useState(false);
+  const [myPosition, setMyPosition]   = useState<MyPositionState>({ kind: "pending" });
+  const [loading, setLoading]         = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing]   = useState(false);
 
   const load = useCallback(async () => {
     if (!contestId) return;
 
-    const [contestSnap, participantSnap] = await Promise.all([
+    const [contestSnap, mySnap] = await Promise.all([
       getDoc(doc(db, "contests", contestId)),
-      getDocs(collection(db, "contests", contestId, "participant")),
+      userId ? getDoc(doc(db, "contests", contestId, "participant", userId)) : Promise.resolve(null),
     ]);
 
+    let finalized = false;
     if (contestSnap.exists()) {
       const data = { id: contestSnap.id, ...contestSnap.data() } as any;
       setContest(data);
       const end = parseDate(data.endTime ?? data.endDate);
       setIsEnded(!!(end && end < new Date()));
+      finalized = data.leaderboardFinalized === true;
+      setIsFinalized(finalized);
     }
 
-    const completed = participantSnap.docs
-      .filter((d) => d.data().completed)
-      .map((d) => ({
-        userId:    d.data().userId as string,
-        name:      d.data().name      ?? "Student",
-        score:     d.data().score     ?? 0,
-        timeBonus: d.data().timeBonus ?? 0,
-        rank:      d.data().rank      ?? 999,
-      }))
-      .sort((a, b) => a.rank - b.rank);
+    const page = finalized
+      ? await fetchFinalizedLeaderboardPage(contestId)
+      : await fetchLeaderboardPage(contestId);
+    setRows(page.rows);
+    setCursor(page.cursor);
+    setHasMore(page.hasMore);
 
-    // The viewing student's own row always leads the list — regardless of
-    // their actual rank — followed by everyone else in rank order (mirrors
-    // mobile's contest/leaderboard.tsx fix). Still capped at 50 rows total
-    // (self + up to 49 others) to match the previous "top 50" limit.
-    const uid = auth.currentUser?.uid;
-    const selfRow = completed.find((r) => r.userId === uid);
-    const others  = completed.filter((r) => r.userId !== uid).slice(0, selfRow ? 49 : 50);
-
-    setRows(selfRow ? [selfRow, ...others] : others);
-  }, [contestId]);
+    if (!mySnap || !mySnap.exists()) {
+      setMyPosition({ kind: "not_participated" });
+    } else {
+      const my = mySnap.data();
+      if (!my.completed) {
+        setMyPosition({ kind: "pending" });
+      } else if (typeof my.finalRank === "number") {
+        setMyPosition({ kind: "ranked", rank: my.finalRank, isFinal: true, score: my.score ?? 0 });
+      } else if (typeof my.rank === "number") {
+        setMyPosition({ kind: "ranked", rank: my.rank, isFinal: !!finalized, score: my.score ?? 0 });
+      } else {
+        try {
+          const liveRank = await fetchMyLiveRank(contestId, my.score ?? 0, my.correctAnswers ?? 0);
+          setMyPosition({ kind: "ranked", rank: liveRank, isFinal: false, score: my.score ?? 0 });
+        } catch {
+          setMyPosition({ kind: "ranked", rank: 0, isFinal: false, score: my.score ?? 0 });
+        }
+      }
+    }
+  }, [contestId, userId]);
 
   useEffect(() => {
     load().finally(() => setLoading(false));
@@ -87,6 +116,21 @@ function ContestLeaderboardContent() {
     setRefreshing(true);
     await load();
     setRefreshing(false);
+  };
+
+  const loadMore = async () => {
+    if (!contestId || !hasMore || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = isFinalized
+        ? await fetchFinalizedLeaderboardPage(contestId, cursor)
+        : await fetchLeaderboardPage(contestId, cursor);
+      setRows((prev) => [...prev, ...page.rows]);
+      setCursor(page.cursor);
+      setHasMore(page.hasMore);
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   if (loading) {
@@ -110,8 +154,10 @@ function ContestLeaderboardContent() {
           <span style={{ color: "#f1f5f9", fontSize: 15, fontWeight: 800, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>
             {contest?.title ?? "Leaderboard"}
           </span>
-          {isEnded ? (
+          {isFinalized ? (
             <span style={{ background: "rgba(251,191,36,0.15)", borderRadius: 10, padding: "4px 10px", color: "#fbbf24", fontSize: 11, fontWeight: 800 }}>🏆 Final Results</span>
+          ) : isEnded ? (
+            <span style={{ background: "rgba(148,163,184,0.15)", borderRadius: 10, padding: "4px 10px", color: "#cbd5e1", fontSize: 11, fontWeight: 800 }}>⏳ Finalizing…</span>
           ) : (
             <span style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(239,68,68,0.15)", borderRadius: 10, padding: "4px 10px" }}>
               <span style={{ width: 7, height: 7, borderRadius: 4, background: "#ef4444" }} />
@@ -125,11 +171,32 @@ function ContestLeaderboardContent() {
       </div>
 
       <div style={{ padding: 16, maxWidth: 480, margin: "0 auto" }}>
-        {/* Live disclaimer */}
-        {!isEnded && (
+        {/* Your Position — always resolved independently of the loaded
+            page, never shows a false "not ranked" just because you're
+            outside it. */}
+        {myPosition.kind === "ranked" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#1e1b4b", borderRadius: 16, padding: 14, marginBottom: 16, border: "1px solid rgba(99,102,241,0.33)" }}>
+            <span style={{ fontSize: 20 }}>👤</span>
+            <span style={{ color: "#a5b4fc", fontSize: 13, fontWeight: 700, flex: 1 }}>Your Position</span>
+            <span style={{ color: "#fbbf24", fontSize: 20, fontWeight: 900 }}>{myPosition.rank > 0 ? `#${myPosition.rank}` : "—"}</span>
+            <span style={{ color: "#94a3b8", fontSize: 12, fontWeight: 700 }}>{myPosition.score} pts</span>
+            {!myPosition.isFinal && <span style={{ color: "#818cf8", fontSize: 10, fontWeight: 700 }}>Live estimate</span>}
+          </div>
+        )}
+        {myPosition.kind === "pending" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#1e293b", borderRadius: 16, padding: 12, marginBottom: 16 }}>
+            <span>⏳</span>
+            <span style={{ color: "#94a3b8", fontSize: 13, fontWeight: 600 }}>Complete the quiz to see your position</span>
+          </div>
+        )}
+
+        {/* Live/finalizing disclaimer */}
+        {!isFinalized && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#1e293b", borderRadius: 12, padding: 12, marginBottom: 16 }}>
             <span style={{ color: "#94a3b8", fontSize: 14 }}>ℹ️</span>
-            <span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.5 }}>Rankings update as more students complete the quiz</span>
+            <span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.5 }}>
+              {isEnded ? "Final ranks are being calculated — check back shortly." : "Rankings update as more students complete the quiz"}
+            </span>
           </div>
         )}
 
@@ -142,13 +209,10 @@ function ContestLeaderboardContent() {
           </div>
         )}
 
-        {/* Rows — "You" is always first (see load()'s selfRow pinning
-            above); medal/gold styling below keys off each row's actual
-            rank, not its position in the list, so a pinned "You" row
-            outside the top 3 doesn't get shown as if ranked #1. */}
-        {rows.map((row) => {
+        {rows.map((row, index) => {
           const isMe = row.userId === userId;
-          const isRankOne = row.rank === 1;
+          const rank = (isFinalized ? row.finalRank : row.rank) ?? index + 1;
+          const isRankOne = rank === 1;
           const rowBg = isMe ? "#1e1b4b" : isRankOne ? "#1c1506" : "#1e293b";
           const rowBorder = isMe ? "#6366f1" : isRankOne ? "rgba(245,158,11,0.33)" : "#334155";
           return (
@@ -157,8 +221,8 @@ function ContestLeaderboardContent() {
               borderRadius: 16, padding: 14, marginBottom: 10,
               border: `1px solid ${rowBorder}`,
             }}>
-              <span style={{ width: 36, fontSize: 20, textAlign: "center", fontWeight: 800, color: row.rank === 1 ? "#fbbf24" : row.rank === 2 ? "#94a3b8" : row.rank === 3 ? "#d97706" : "#94a3b8" }}>
-                {row.rank <= 3 ? MEDAL[row.rank - 1] : `#${row.rank}`}
+              <span style={{ width: 36, fontSize: 20, textAlign: "center", fontWeight: 800, color: rank === 1 ? "#fbbf24" : rank === 2 ? "#94a3b8" : rank === 3 ? "#d97706" : "#94a3b8" }}>
+                {rank <= 3 ? MEDAL[rank - 1] : `#${rank}`}
               </span>
               <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
                 <span style={{ color: isMe ? "#818cf8" : "#cbd5e1", fontSize: 15, fontWeight: isMe ? 900 : 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -173,6 +237,21 @@ function ContestLeaderboardContent() {
             </div>
           );
         })}
+
+        {hasMore && (
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", justifyContent: "center",
+              padding: "14px", marginTop: 4, background: "#1e293b", borderRadius: 14,
+              border: "1px solid #334155", color: "#a5b4fc", fontSize: 14, fontWeight: 800,
+              cursor: loadingMore ? "default" : "pointer",
+            }}
+          >
+            {loadingMore ? "Loading…" : `Load More (${LEADERBOARD_PAGE_SIZE} more)`}
+          </button>
+        )}
       </div>
     </div>
   );

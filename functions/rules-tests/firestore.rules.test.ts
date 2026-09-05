@@ -556,6 +556,24 @@ describe("contests/{id}/participant/{uid} — score/rank/result forgery preventi
     await assertFails(db.doc(`contests/${contestId}/participant/${uid}`).update({ score: 999999, completed: true, rank: 1 }));
   });
 
+  // VidyaStar Phase 2 — Test 12 (security). finalRank is the new
+  // permanent-rank field written only by functions/src/
+  // contestLeaderboard.ts's finalizeContest() via the Admin SDK. The
+  // participant subcollection's blanket `allow update: if false` already
+  // covers this generically (any field, not just finalRank) — this test
+  // documents that guarantee explicitly for the new field by name, rather
+  // than relying on the reader to infer it from the more general test
+  // above.
+  test("a student CANNOT write finalRank directly, even alone with no other fields", async () => {
+    await seed(async (db) => {
+      await db.doc(`contests/${contestId}/participant/${uid}`).set({
+        userId: uid, contestId, score: 80, completed: true,
+      });
+    });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`contests/${contestId}/participant/${uid}`).update({ finalRank: 1 }));
+  });
+
   test("a student CAN still read participant docs (per-contest leaderboard needs this)", async () => {
     await seed(async (db) => {
       await db.doc(`contests/${contestId}/participant/${uid}`).set({ userId: uid, contestId, score: 40 });

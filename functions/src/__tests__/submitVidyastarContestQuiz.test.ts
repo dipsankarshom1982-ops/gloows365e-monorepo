@@ -80,7 +80,12 @@ describe("submitVidyastarContestQuiz — Test 1: normal submission, server-verif
     // 1 correct answer * 10 points + time bonus for that one correct
     // answer (5s taken -> floor(5*(30-5)/25) = 5) = 15.
     expect(result.score).toBe(15);
-    expect(result.rank).toBe(1);
+    // VidyaStar Phase 2: rank is no longer part of this function's
+    // response at all (the O(n) per-submission rank rewrite this phase
+    // removed used to compute it here) — see contestRankingPolicy.test.ts
+    // and contestLeaderboard.finalize.test.ts for where ranking is now
+    // tested.
+    expect((result as any).rank).toBeUndefined();
 
     const participant = fakeDb.peek(`contests/${CONTEST_ID}/participant/${UID}`);
     expect(participant?.completed).toBe(true);

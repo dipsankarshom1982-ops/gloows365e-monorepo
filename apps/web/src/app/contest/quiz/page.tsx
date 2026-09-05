@@ -176,8 +176,13 @@ function ContestQuizContent() {
     if (!userId || !contestId) return;
     setSubmitting(true);
     try {
-      const { score, rank } = await submitContestQuiz(contestId, userId, finalAnswers);
-      router.replace(`/contest/result?contestId=${contestId}&score=${score}&total=${questions.length}&rank=${rank}`);
+      // VidyaStar Phase 2: the submit callable no longer computes/returns
+      // rank at all (that was the O(n) per-submission rank-rewrite this
+      // phase removed) — result/page.tsx resolves rank itself (finalRank
+      // once the contest is finalized, legacy rank for historical
+      // contests, or a live estimate otherwise). See lib/contestLeaderboard.ts.
+      const { score } = await submitContestQuiz(contestId, userId, finalAnswers);
+      router.replace(`/contest/result?contestId=${contestId}&score=${score}&total=${questions.length}`);
     } catch {
       router.replace(`/contest/result?contestId=${contestId}&score=0&total=${questions.length}`);
     }

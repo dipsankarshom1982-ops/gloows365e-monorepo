@@ -44,14 +44,26 @@
 //      loser to retry, re-read completed:true, and return the *existing*
 //      verified result instead of grading/rewarding again.
 //
-// Explicitly OUT of scope for this phase (tracked separately, not security-
-// critical): the per-contest rank recalculation below a contest with ~500+
-// completed participants can hit Firestore's 500-write batch ceiling. It's
-// unchanged in structure from before — still best-effort, still after the
-// reward-critical transaction — because it only affects a *display* number
-// (contests/{id}/participant.rank), never score, V-Coins, or Starboard
-// points, which are now fully guaranteed correct regardless of this batch's
-// outcome. See the VidyaStar audit's Section 4 Issue #2 / Section 13 P1.
+// VidyaStar Phase 2 — Leaderboard Scalability & Ranking Integrity
+// ─────────────────────────────────────────────────────────────────────────
+// This function used to follow the reward transaction with a full,
+// unbounded read of every contest participant, an in-memory sort, and a
+// batch rewrite of EVERY participant's `rank` field — O(n) reads and
+// writes on every single submission, and a hard failure (Firestore's
+// 500-write batch limit) on any contest with more than ~499 completed
+// participants. That block is gone. This function now writes ONLY the
+// submitter's own participant doc — O(1) writes related to that student's
+// result, regardless of contest size. No `rank` is computed or returned
+// here at all anymore.
+//
+// Ranking is now handled entirely outside the submission path:
+//   - While a contest is active (or ended but not yet finalized), the
+//     leaderboard/result screens query contests/{id}/participant directly
+//     with an ordered, paginated Firestore query — no rank field needed.
+//   - Once a contest ends, functions/src/contestLeaderboard.ts's
+//     finalizeContest() computes and persists a permanent `finalRank`,
+//     once, via a chunked, idempotent backend process — see that file's
+//     header comment for the full design.
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
@@ -136,7 +148,6 @@ export const submitVidyastarContestQuiz = functionsV1
         return {
           alreadySubmitted: true,
           score: participantSnap.data()?.score ?? 0,
-          rank:  participantSnap.data()?.rank  ?? 0,
         };
       }
 
@@ -322,37 +333,10 @@ export const submitVidyastarContestQuiz = functionsV1
     });
 
     if (result.alreadySubmitted) {
-      console.log(`⚠️ VidyaStar quiz already submitted (idempotent return): user=${uid} contest=${contestId} score=${result.score} rank=${result.rank}`);
-      return { score: result.score, rank: result.rank };
+      console.log(`⚠️ VidyaStar quiz already submitted (idempotent return): user=${uid} contest=${contestId} score=${result.score}`);
+      return { score: result.score };
     }
 
-    // ── Best-effort per-contest rank recalculation (display-only, not
-    // reward-critical — see header comment for the known scalability
-    // ceiling this inherits unchanged from before). ──
-    let myRank = 0;
-    try {
-      const allSnap = await db.collection(`contests/${contestId}/participant`).get();
-      const participants = allSnap.docs.map((d) => {
-        const pd = d.data();
-        return {
-          id: d.id,
-          ref: d.ref,
-          score: d.id === uid ? result.score : (pd.score ?? 0),
-          completedAt: d.id === uid ? new Date() : ((pd.quizCompletedAt?.toDate?.() as Date | undefined) ?? new Date(0)),
-        };
-      });
-      participants.sort((a, b) =>
-        b.score !== a.score ? b.score - a.score : a.completedAt.getTime() - b.completedAt.getTime()
-      );
-      myRank = participants.findIndex((p) => p.id === uid) + 1;
-
-      const rankBatch = db.batch();
-      participants.forEach((p, i) => rankBatch.update(p.ref, { rank: i + 1 }));
-      await rankBatch.commit();
-    } catch (e) {
-      console.warn(`Rank recalculation failed for contest=${contestId}:`, e);
-    }
-
-    console.log(`✅ VidyaStar quiz submitted: user=${uid} contest=${contestId} score=${result.score} rank=${myRank} vCoinsAwarded=${result.vCoinsAwarded}`);
-    return { score: result.score, rank: myRank };
+    console.log(`✅ VidyaStar quiz submitted: user=${uid} contest=${contestId} score=${result.score} vCoinsAwarded=${result.vCoinsAwarded}`);
+    return { score: result.score };
   });

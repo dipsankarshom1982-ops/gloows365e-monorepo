@@ -22,7 +22,7 @@
 // below) mirrors mobile's pattern so verifying the parent's phone never
 // disturbs the student's already-signed-in session.
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getApps, initializeApp } from "firebase/app";
 import {
@@ -188,9 +188,25 @@ export default function RegisterPage() {
   // already told us their language once, no need to ask again here.
   // Falls back to DEFAULT_LANGUAGE ("English") if nothing was stored
   // (e.g. registration reached directly, skipping welcome).
-  const [preferredLanguage, setPreferredLanguage] = useState(
-    () => getStoredLanguage() ?? DEFAULT_LANGUAGE
-  );
+  //
+  // BUGFIX (hydration mismatch on the language chip buttons): this used to
+  // read getStoredLanguage() straight in the useState initializer. That
+  // initializer runs during React's client hydration render too (not just
+  // real client-side renders), and this page is statically prerendered
+  // (next.config.ts output: "export") — so the server-rendered HTML always
+  // has DEFAULT_LANGUAGE selected, while the client's first render could
+  // already see a different value from localStorage, giving the selected
+  // chip a different border/background color than the server markup and
+  // tripping a React hydration warning. Starting from the deterministic
+  // default and applying the stored value in an effect (below, after
+  // mount) keeps server and client markup identical for hydration, then
+  // upgrades to the stored preference a tick later — imperceptible to the
+  // user, same eventual pre-fill behavior.
+  const [preferredLanguage, setPreferredLanguage] = useState(DEFAULT_LANGUAGE);
+  useEffect(() => {
+    const stored = getStoredLanguage();
+    if (stored) setPreferredLanguage(stored);
+  }, []);
   const [dob,               setDob]               = useState("");
   const [interests,         setInterests]         = useState<string[]>([]);
   const [customInterest,    setCustomInterest]    = useState("");
@@ -213,6 +229,18 @@ export default function RegisterPage() {
   const [parentalConsent,      setParentalConsent]    = useState(false);
   const recaptchaContainerRef = useRef<HTMLDivElement>(null);
   const recaptchaVerifierRef  = useRef<RecaptchaVerifier | null>(null);
+
+  // Cleanup on unmount (navigation away, hot reload, etc.) — clear() only
+  // tears down the existing widget/token, it never creates a new one, so
+  // this can't re-trigger initialization during teardown. Runs once; reads
+  // the ref via its current value at unmount time rather than depending on
+  // it, since ref identity never changes across renders.
+  useEffect(() => {
+    return () => {
+      try { recaptchaVerifierRef.current?.clear(); } catch { /* ignore */ }
+      recaptchaVerifierRef.current = null;
+    };
+  }, []);
 
   const fetchLocation = async (pin: string) => {
     if (pin.length !== 6) return;
@@ -245,6 +273,11 @@ export default function RegisterPage() {
 
   // ── Parent phone OTP ────────────────────────────────────────────────────
   const handleSendOtp = async () => {
+    // Defensive guard against concurrent sendVerificationCode calls (e.g. a
+    // second click landing before the disabled-button re-render commits) —
+    // the button's disabled={sendingOtp} covers the normal case, this
+    // covers the race.
+    if (sendingOtp) return;
     if (!/^[6-9]\d{9}$/.test(phone)) {
       setOtpError("Enter a valid 10-digit parent phone number first");
       return;
@@ -268,7 +301,10 @@ export default function RegisterPage() {
       setOtpSent(true);
     } catch (err: unknown) {
       const e = err as { code?: string; message?: string };
-      console.error("handleSendOtp failed:", e?.code, e?.message);
+      // Log the full error object (safe — Firebase Auth errors never carry
+      // secrets/tokens, just a code + message) so the actual cause is
+      // visible in the console rather than just the user-facing summary.
+      console.error("handleSendOtp failed:", e);
       const code = e?.code ?? "";
       if (code === "auth/invalid-phone-number") {
         setOtpError("Invalid phone number");
@@ -283,8 +319,22 @@ export default function RegisterPage() {
       }
       // A failed attempt can leave the invisible widget in a state that
       // won't retry cleanly — drop it so the next tap builds a fresh one.
+      //
+      // BUGFIX (confirmed live): RecaptchaVerifier.clear() does NOT
+      // reliably empty the container div synchronously — retrying after
+      // any failed send (reproduced here with the reCAPTCHA-Enterprise-
+      // fallback / invalid-app-credential failure, but not specific to it)
+      // had `new RecaptchaVerifier(...)` on the same container throw
+      // "reCAPTCHA has already been rendered in this element", a raw Error
+      // with no `.code`, which fell through to the generic message and
+      // left the widget permanently broken until a full page reload —
+      // exactly the "leave the registration page in a broken state" case
+      // this flow needs to avoid. Wiping the container's DOM ourselves
+      // guarantees the next RecaptchaVerifier renders into a truly empty
+      // element regardless of clear()'s internal timing.
       try { recaptchaVerifierRef.current?.clear(); } catch { /* ignore */ }
       recaptchaVerifierRef.current = null;
+      if (recaptchaContainerRef.current) recaptchaContainerRef.current.innerHTML = "";
     } finally {
       setSendingOtp(false);
     }

@@ -28,10 +28,7 @@
     },
     {
       "target": "web",
-      "public": "apps/web/.next",
-      "frameworksBackend": {
-        "region": "us-central1"
-      },
+      "public": "apps/web/out",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
     },
     {

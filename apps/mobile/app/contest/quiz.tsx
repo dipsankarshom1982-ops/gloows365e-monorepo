@@ -177,14 +177,19 @@ export default function ContestQuizScreen() {
     if (!userId || !contestId) return;
     setSubmitting(true);
     try {
-      const { score, rank } = await submitContestQuiz(
+      // VidyaStar Phase 2: the submit callable no longer computes/returns
+      // rank at all (that was the O(n) per-submission rank-rewrite this
+      // phase removed) — result.tsx resolves rank itself (finalRank once
+      // the contest is finalized, legacy rank for historical contests, or
+      // a live estimate otherwise). See lib/contestLeaderboard.ts.
+      const { score } = await submitContestQuiz(
         contestId as string,
         userId,
         finalAnswers
       );
       router.replace({
         pathname: "/contest/result",
-        params: { contestId, score: String(score), total: String(questions.length), rank: String(rank) },
+        params: { contestId, score: String(score), total: String(questions.length) },
       });
     } catch (e) {
       console.error("Quiz submit error:", e);

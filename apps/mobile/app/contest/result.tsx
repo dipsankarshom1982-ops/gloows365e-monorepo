@@ -1,13 +1,13 @@
 import { auth, db } from "@/lib/firebase";
+import {
+  fetchFinalizedLeaderboardPage,
+  fetchLeaderboardPage,
+  fetchMyLiveRank,
+} from "@/lib/contestLeaderboard";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-} from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -20,6 +20,19 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 type LeaderRow = { userId: string; name: string; score: number; rank: number };
+
+// Prizes live only in VidyaStar Config (vidyastarConfig/{periodKey}.prizeRows)
+// — Create Contest's old free-text Prize field was removed since it
+// duplicated this. The winner's prize is the row covering their final rank.
+type PrizeType = "gift_voucher" | "physical" | "vcoin";
+interface PrizeRow { rankMin: number; rankMax: number; prizeType: PrizeType; prizeValue: string; medalEmoji: string; badge: string; }
+
+function formatPrize(row: PrizeRow): string {
+  return row.prizeType === "vcoin" ? `${row.prizeValue} V-Coins` : row.prizeValue;
+}
+function prizeForRank(rows: PrizeRow[] | undefined, rank: number): PrizeRow | null {
+  return rows?.find((r) => rank >= r.rankMin && rank <= r.rankMax) ?? null;
+}
 
 function parseDate(t: any): Date | null {
   if (!t) return null;
@@ -72,6 +85,7 @@ export default function ContestResultScreen() {
   const [score, setScore]               = useState(parseInt(scoreParam ?? "0", 10));
   const [total, setTotal]               = useState(parseInt(totalParam ?? "0", 10));
   const [myRank, setMyRank]             = useState<number | null>(null);
+  const [prize, setPrize]               = useState<PrizeRow | null>(null);
   const [leaderboard, setLeaderboard]   = useState<LeaderRow[]>([]);
   const [isEnded, setIsEnded]           = useState(false);
   const [loading, setLoading]           = useState(true);
@@ -79,52 +93,74 @@ export default function ContestResultScreen() {
   useEffect(() => {
     if (!contestId || !userId) return;
     (async () => {
-      const [contestSnap, participantSnap, mySnap] = await Promise.all([
+      const [contestSnap, mySnap] = await Promise.all([
         getDoc(doc(db, "contests", contestId as string)),
-        getDocs(collection(db, "contests", contestId as string, "participant")),
         getDoc(doc(db, "contests", contestId as string, "participant", userId)),
       ]);
 
+      let periodKey: string | undefined;
+      let finalized = false;
       if (contestSnap.exists()) {
         const data = { id: contestSnap.id, ...contestSnap.data() } as any;
         setContest(data);
+        periodKey = data.periodKey;
+        finalized = data.leaderboardFinalized === true;
 
         const end = parseDate(data.endTime ?? data.endDate);
         setIsEnded(!!(end && end < new Date()));
       }
 
-      // Use stored score from participant doc if available
+      // Use stored score from participant doc if available. Rank
+      // resolution mirrors contest/leaderboard.tsx's three-way branch:
+      // authoritative finalRank once finalized, legacy `rank` for
+      // historical (pre-Phase-2) contests, otherwise a live count-
+      // aggregation estimate — never derived from page membership, so a
+      // student outside any loaded preview is never shown as "not ranked".
+      let rank: number | null = null;
       if (mySnap.exists()) {
         const d = mySnap.data();
-        setScore(d.score ?? parseInt(scoreParam ?? "0", 10));
+        const myScore = d.score ?? parseInt(scoreParam ?? "0", 10);
+        setScore(myScore);
         setTotal(d.answers?.length ?? parseInt(totalParam ?? "0", 10));
-        setMyRank(d.rank ?? null);
+        if (typeof d.finalRank === "number") {
+          rank = d.finalRank;
+        } else if (typeof d.rank === "number") {
+          rank = d.rank;
+        } else if (d.completed) {
+          try {
+            rank = await fetchMyLiveRank(contestId as string, myScore, d.correctAnswers ?? 0);
+          } catch { /* live estimate is non-critical */ }
+        }
+        setMyRank(rank);
       }
 
-      // Build leaderboard sorted by score DESC, then rank ASC
-      const rows = participantSnap.docs
-        .filter((d) => d.data().completed)
-        .map((d) => ({
-          userId: d.data().userId as string,
-          score:  d.data().score  ?? 0,
-          rank:   d.data().rank   ?? 999,
-          name:   "Student",
-        }))
-        .sort((a, b) => a.rank - b.rank)
-        .slice(0, 10);
-
-      // Fetch names in parallel
-      const named: LeaderRow[] = await Promise.all(
-        rows.map(async (r) => {
-          try {
-            const snap = await getDoc(doc(db, "students", r.userId));
-            return { ...r, name: snap.exists() ? (snap.data()?.name ?? "Student") : "Student" };
-          } catch {
-            return r;
+      // Best-effort — a failure here (rules, network) must never block the
+      // score/leaderboard below from rendering.
+      if (periodKey && rank !== null) {
+        try {
+          const configSnap = await getDoc(doc(db, "vidyastarConfig", periodKey));
+          if (configSnap.exists()) {
+            setPrize(prizeForRank(configSnap.data().prizeRows as PrizeRow[], rank));
           }
-        })
+        } catch { /* prize teaser is non-critical */ }
+      }
+
+      // Top-10 preview — a single bounded page (ordered query), not a
+      // full-collection read. `name` comes straight off the participant
+      // doc (denormalized at join/submit time) — no more per-row
+      // students/{uid} fetch, which used to be denied by firestore.rules
+      // for every row but the viewer's own anyway.
+      const page = finalized
+        ? await fetchFinalizedLeaderboardPage(contestId as string, null, 10)
+        : await fetchLeaderboardPage(contestId as string, null, 10);
+      setLeaderboard(
+        page.rows.map((r, i) => ({
+          userId: r.userId,
+          name: r.name,
+          score: r.score,
+          rank: (finalized ? r.finalRank : r.rank) ?? i + 1,
+        }))
       );
-      setLeaderboard(named);
       setLoading(false);
     })();
   }, [contestId, userId]);
@@ -195,8 +231,8 @@ export default function ContestResultScreen() {
           </View>
         )}
 
-        {/* Contest ended — show prize pool */}
-        {isEnded && !!contest?.prizePool && (
+        {/* Contest ended — show prize (voucher/physical — never cash) */}
+        {isEnded && !!prize && (
           <LinearGradient
             colors={["#92400e", "#d97706", "#fbbf24"]}
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
@@ -204,8 +240,8 @@ export default function ContestResultScreen() {
           >
             <Ionicons name="trophy" size={24} color="#fff" />
             <View style={{ flex: 1 }}>
-              <Text style={S.prizeLabel}>Prize Pool</Text>
-              <Text style={S.prizeValue}>₹{contest.prizePool}</Text>
+              <Text style={S.prizeLabel}>Prize</Text>
+              <Text style={S.prizeValue}>{formatPrize(prize)}</Text>
             </View>
             <Text style={S.prizeNote}>Winners announced by admin</Text>
           </LinearGradient>
@@ -237,12 +273,14 @@ export default function ContestResultScreen() {
           {/* Leaderboard — always visible after quiz */}
           <TouchableOpacity
             style={S.leaderBtn}
-            onPress={() => router.push({ pathname: "/contest/leaderboard", params: { contestId } })}
+            onPress={() => isEnded
+              ? router.push("/starboard" as any)
+              : router.push({ pathname: "/contest/leaderboard", params: { contestId } })}
             activeOpacity={0.85}
           >
             <Ionicons name="podium-outline" size={18} color="#a5b4fc" />
             <Text style={S.leaderBtnText}>
-              {isEnded ? "View Final Leaderboard" : "View Live Standings"}
+              {isEnded ? "View Leaderboard" : "View Live Standings"}
             </Text>
             <Ionicons name="chevron-forward" size={16} color="#a5b4fc" />
           </TouchableOpacity>
