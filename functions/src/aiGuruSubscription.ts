@@ -54,7 +54,15 @@ async function resolvePlanPrice(planId: string, cycle: "monthly" | "annual") {
 export const aiGuruCreateSubscription = functionsV1
   .runWith({
     timeoutSeconds: 60,
-    memory: "128MB",
+    // 256MB — order creation itself worked fine at 128MB in Task 7's
+    // staging E2E test, but aiGuruPaymentSuccess (same Admin SDK + axios +
+    // crypto footprint, see its comment below) OOM-crashed on EVERY
+    // invocation there ("Memory limit of 128 MiB exceeded with 133 MiB
+    // used") — not just a cold start, every real subscription payment
+    // would fail to activate. Bumped this one preemptively too, matching
+    // tutorCredits.ts's precedent of fixing every function sharing that
+    // footprint, not only the one observed crashing.
+    memory: "256MB",
     secrets: ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"],
   })
   .https.onCall(async (data: RequestPayload, context) => {
@@ -319,7 +327,10 @@ window.onload = function(){ setTimeout(openRzp, 500); };
 export const aiGuruPaymentSuccess = onRequest(
   {
     timeoutSeconds: 30,
-    memory: "128MiB",
+    // 256MiB — see aiGuruCreateSubscription's comment above: this exact
+    // function OOM-crashed on every invocation during Task 7's staging
+    // E2E test at 128MiB (133 MiB actually used).
+    memory: "256MiB",
     secrets: ["RAZORPAY_KEY_SECRET"],
   },
   async (req, res) => {
