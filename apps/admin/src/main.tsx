@@ -2,9 +2,10 @@
 
 import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Layout from "./components/Layout";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { getRequiredPermissionForPath } from "./lib/routePermissions";
 import "./index.css";
 
 const Dashboard            = lazy(() => import("./pages/Dashboard"));
@@ -108,8 +109,31 @@ function SuperAdminOnly({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Moderator Authorization audit, Phase 4 — the route-level counterpart to
+// Layout.tsx's nav filtering. Rendered instead of navigating away: an
+// explicit in-place message, never a <Navigate>, specifically so this can
+// never become a redirect loop (an unauthorized landing page bouncing to
+// another page the caller also lacks permission for) — the same choice
+// SuperAdminOnly above already made for the exact same reason.
+function PermissionDenied({ requiredPermission }: { requiredPermission: string }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center p-8">
+      <div className="text-center max-w-sm">
+        <div className="text-5xl mb-4">🔒</div>
+        <h1 className="text-xl font-bold text-white mb-2">Access Denied</h1>
+        <p className="text-slate-400 text-sm">
+          You don't have permission to view this section
+          {import.meta.env.DEV ? ` (requires "${requiredPermission}")` : ""}.
+          Contact a super admin if you believe this is a mistake.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ProtectedRoutes() {
-  const { user, loading, isAdmin, isSuperAdmin } = useAuth();
+  const { user, loading, isAdmin, isSuperAdmin, permissions, can } = useAuth();
+  const { pathname } = useLocation();
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
@@ -144,6 +168,39 @@ function ProtectedRoutes() {
         </div>
       </div>
     );
+  }
+
+  // Moderator Authorization audit, Phase 4 — closes the direct-URL bypass:
+  // until now, ANY authenticated admin/moderator passing the check above
+  // could reach any route's page component by typing its URL, regardless
+  // of what Layout.tsx's sidebar chose to hide from them (that filtering
+  // was nav-only — it never touched what actually rendered here). This
+  // check runs once, centrally, for whatever route is about to render,
+  // using the exact same NAV_GROUPS-derived permission a hidden sidebar
+  // link already implies (see lib/routePermissions.ts).
+  //
+  // Fails closed on every ambiguous input: getRequiredPermissionForPath
+  // returning a permission key that `can()` doesn't grant denies access;
+  // a malformed `permissions` value (not an array — defensive here since
+  // AuthContext already normalizes it, but never trusted a second time)
+  // also denies rather than risking `can()`'s underlying
+  // permissions.includes() behaving unexpectedly on a non-array. A
+  // superAdmin bypass is explicit and centralized right here (one `||
+  // isSuperAdmin`), rather than relying only on hasPermission()'s own
+  // internal short-circuit — this guarantees a superAdmin can never be
+  // denied by this check for any reason, including a malformed
+  // `permissions` value, without needing that guarantee to depend on
+  // lib/permissions.ts's implementation staying exactly as it is today.
+  //
+  // No <Navigate> is issued on failure — PermissionDenied renders in
+  // place, exactly like SuperAdminOnly above, so this can never chain
+  // into a redirect loop.
+  const requiredPermission = getRequiredPermissionForPath(pathname);
+  if (requiredPermission && !isSuperAdmin) {
+    const permissionsAreUsable = Array.isArray(permissions);
+    if (!permissionsAreUsable || !can(requiredPermission)) {
+      return <PermissionDenied requiredPermission={requiredPermission} />;
+    }
   }
 
   return (
