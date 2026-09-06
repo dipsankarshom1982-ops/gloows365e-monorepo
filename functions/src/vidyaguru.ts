@@ -4,6 +4,7 @@ import axios from "axios";
 import { callGeminiText, callGeminiWithAudio } from "./gemini";
 import { checkVidyaGuruLimit, incrementVidyaGuruUsage } from "./usageCheck";
 import { refundAiGuruCredit } from "./aiGuruCreditDebit";
+import { resolveStudentLanguage, getDetectOrFallbackInstruction } from "./aiLanguage";
 
 const db = admin.firestore();
 
@@ -81,22 +82,22 @@ async function synthesizeSpeech(text: string, language: string): Promise<string>
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
+// FIX (production, 2026-09-06): this used to default the ambiguous/mixed
+// case straight to English, ignoring the student's actual saved language
+// preference entirely (no server-side lookup existed here at all). Now
+// falls back to the student's real preference — see functions/src/
+// aiLanguage.ts's header comment for the full context, shared with every
+// other Ask AI Guru feature.
 function buildSystemPrompt(
   studentName: string,
-  classLevel: string | number
+  classLevel: string | number,
+  preferredLanguage: string
 ): string {
-  const langInstruction = `Automatically detect the language the student is using — from their typed message or spoken audio — and always reply in that SAME language. Examples:
-- Student writes in Hindi → reply in Hindi
-- Student speaks in Bengali → reply in Bengali
-- Student uses Hinglish (Hindi+English mix) → match their style
-- Student uses Tamil, Telugu, Gujarati, Kannada, Malayalam, Marathi, Punjabi, Assamese, Odia, or any other Indian language → reply in that language
-- If language is unclear or mixed → default to clear, friendly English`;
-
   return `You are VidyaGuru AI — a warm, caring AI teacher and personal mentor for students.
 
 Student: ${studentName}, Class ${classLevel}
 
-Language rule (CRITICAL): ${langInstruction}
+${getDetectOrFallbackInstruction(preferredLanguage)}
 
 Your personality:
 - Warm, encouraging, patient, and genuinely caring
@@ -220,7 +221,8 @@ export const vidyaguruChat = onRequest(
         classLevel  = "8",
       } = req.body;
 
-      const systemPrompt = buildSystemPrompt(studentName, classLevel);
+      const preferredLanguage = await resolveStudentLanguage(uid, db);
+      const systemPrompt = buildSystemPrompt(studentName, classLevel, preferredLanguage);
       let answer         = "";
       let transcribedText: string | undefined;
 

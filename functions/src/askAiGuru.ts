@@ -5,6 +5,7 @@ import { getRedis, RK, TTL } from "./redish";
 import { checkAskGuruLimit, incrementAskGuruUsage } from "./usageCheck";
 import { refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { callGeminiText } from "./gemini";
+import { resolveStudentLanguage, getDetectOrFallbackInstruction } from "./aiLanguage";
 
 const db = admin.firestore();
 const FREE_ASK_GURU_DAILY = 5;
@@ -26,14 +27,21 @@ async function verifyAuthToken(req: any): Promise<string> {
 // Mode-aware prompt builder
 // mode: "doubt" | "explain" | "notes" | "exam" | "summarize" | "tip" | "language"
 //
-// FEATURE (answer in chosen app language): a question written in a clearly
-// identifiable Indian language still gets answered in that same language
-// (unchanged) — but a question written in English, or one whose language
-// can't be confidently identified, now falls back to the student's chosen
-// app language (students/{uid}.preferredLanguage, looked up server-side —
-// see caller) instead of always defaulting to English. The explicit choice
-// only kicks in for that fallback case; it never overrides a question
-// clearly written in some other language.
+// FIX (production, 2026-09-06 — "Prepare for Exam" not consistently
+// answering in Hindi): the language rule below used to fold the fallback
+// case ("English/ambiguous question → use the student's preferredLanguage")
+// into the same bullet list as the language-detection rules — a conditional
+// instruction an LLM follows far less reliably than a direct, unconditional
+// one. That's exactly the failure mode this task reported: "exam" mode's
+// own sample prompt ("Help me prepare for the Chapter 3 Science exam") is
+// itself English, so a Hindi-preference student typing something similar
+// hit that fallback branch on every request — and it just wasn't
+// consistently obeyed. getDetectOrFallbackInstruction() (functions/src/
+// aiLanguage.ts) keeps the same detect-the-question's-language behavior for
+// genuinely non-English input, but makes the fallback sentence the
+// strongest, most explicit part of the instruction instead of a buried
+// bullet. See that file's header comment for the full architecture this is
+// now shared across every Ask AI Guru feature.
 function buildPrompt(
   question: string,
   classLevel: string | number,
@@ -43,21 +51,7 @@ function buildPrompt(
 ): string {
   const base = `You are an expert AI tutor for Indian school students (${board}, Class ${classLevel}).
 
-CRITICAL LANGUAGE RULE: Detect the language of the student's question and respond in the EXACT SAME language.
-- Bengali question → Bengali answer
-- Hindi question → Hindi answer
-- Tamil question → Tamil answer
-- Telugu question → Telugu answer
-- Marathi question → Marathi answer
-- Gujarati question → Gujarati answer
-- Assamese question → Assamese answer
-- Odia question → Odia answer
-- Malayalam question → Malayalam answer
-- Kannada question → Kannada answer
-- Punjabi question → Punjabi answer
-- Urdu question → Urdu answer
-- English question, or a language you can't confidently identify → respond in ${preferredLanguage}, the student's chosen app language
-Do NOT translate. Write naturally in the answer language as a real teacher would.
+${getDetectOrFallbackInstruction(preferredLanguage)}
 Do NOT start with "Sure," "Great question!" or "Of course!" — go directly to the content.
 Do NOT use markdown symbols like **, ##, or bullet points — plain text only.`;
 
@@ -131,15 +125,10 @@ export const askAiGuruQuestion = onRequest(
     // Looked up server-side (not trusted from the client) so the fallback
     // language for English/ambiguous questions always matches whatever the
     // student actually has set in Settings → Language, even if their local
-    // client state is stale. Defaults to English, same as the language
-    // picker's own fallback (see settings/language/page.tsx).
-    let preferredLanguage = "English";
-    try {
-      const studentSnap = await db.collection("students").doc(uid).get();
-      preferredLanguage = (studentSnap.data()?.preferredLanguage as string) || "English";
-    } catch (err: any) {
-      console.warn("[AskAiGuru] Could not read preferredLanguage, defaulting to English:", err?.message);
-    }
+    // client state is stale. See functions/src/aiLanguage.ts for the shared
+    // priority order (request → saved preference → English default) used
+    // by every Ask AI Guru feature.
+    const preferredLanguage = await resolveStudentLanguage(uid, db);
 
     // Usage check — pays with an AI Guru credit once the free daily limit
     // is exceeded (unless already premium, which bypasses this entirely).
