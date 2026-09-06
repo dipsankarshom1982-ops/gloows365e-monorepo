@@ -38,10 +38,22 @@ export const createAdmin = onCall(async (request) => {
   }
 
   // Set custom claims
+  // FIX (launch audit, Task 6) — moderator used to get {} (no claims at
+  // all). Every admin-gated route/rule in this codebase checks the single
+  // coarse `admin` claim — there's no separate `moderator` claim anywhere
+  // in firestore.rules or apps/admin/src/main.tsx's ProtectedRoutes — so a
+  // moderator with no claims couldn't pass that gate and could never log
+  // in at all. Granted the same base `admin: true` claim as the "admin"
+  // role; what actually distinguishes a moderator is the narrower
+  // `permissions` array already correctly set below (["read"]), which
+  // filters what they see in the sidebar (lib/permissions.ts's
+  // hasPermission). See this function's/Admins.tsx's related comments for
+  // the follow-up this doesn't cover: that permissions array isn't
+  // enforced at the route or Firestore-rules layer, only the nav — a
+  // moderator can still reach any page by URL or write via devtools.
   const claims =
     role === "superAdmin" ? { admin: true, superAdmin: true } :
-    role === "admin"      ? { admin: true } :
-                            {};
+    /* admin | moderator */ { admin: true };
 
   await auth.setCustomUserClaims(uid, claims);
 
@@ -83,9 +95,24 @@ export const removeAdmin = onCall(async (request) => {
   if (uid === request.auth.uid) throw new HttpsError("invalid-argument", "You cannot remove yourself.");
 
   await admin.auth().setCustomUserClaims(uid, {});
+  // FIX (launch audit, Task 6) — clearing claims alone doesn't touch an
+  // already-issued ID token: the Firebase client SDK caches it for up to
+  // ~1hr and only fetches a fresh (now claim-less) one on its own refresh
+  // cycle. revokeRefreshTokens forces that refresh to fail outright, so a
+  // removed admin can't silently keep minting fresh tokens with the old
+  // claims baked in — they're forced to sign in again, at which point
+  // there's nothing left to grant them. This is the platform's actual
+  // ceiling on "how fast can access be cut off": the *current* cached ID
+  // token, if one is still live, remains valid for the rest of its natural
+  // lifetime (Firestore rules evaluate claims from the token itself, not a
+  // live revocation check) — there's no faster path without server-side
+  // token verification on every read, which this codebase's rules
+  // deliberately avoid for cost/latency reasons (see firestore.rules'
+  // "no get() calls" convention).
+  await admin.auth().revokeRefreshTokens(uid);
   await admin.firestore().doc(`admins/${uid}`).update({ isActive: false, role: "removed" });
 
-  console.log(`✅ Admin removed: uid=${uid}`);
+  console.log(`✅ Admin removed (claims cleared, refresh tokens revoked): uid=${uid}`);
   return { uid };
 });
 

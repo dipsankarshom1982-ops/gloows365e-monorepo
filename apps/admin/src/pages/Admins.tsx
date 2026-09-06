@@ -11,7 +11,10 @@ interface Admin {
   uid: string;
   email: string;
   name: string;
-  role: "superAdmin" | "admin" | "moderator";
+  // "removed" — what removeAdmin sets server-side; a real, permanent
+  // (from this screen) state now that removing actually revokes access,
+  // not just a display-only "Inactive" toggle. See removeAdminAccess below.
+  role: "superAdmin" | "admin" | "moderator" | "removed";
   permissions: string[];
   isActive: boolean;
 }
@@ -20,12 +23,15 @@ const ROLE_STYLES: Record<string, string> = {
   superAdmin: "bg-amber-500/20 text-amber-300",
   admin:      "bg-indigo-500/20 text-indigo-300",
   moderator:  "bg-slate-700 text-slate-300",
+  removed:    "bg-red-500/10 text-red-400",
 };
 
 const createAdminFn = httpsCallable<
   { email: string; name: string; role: string },
   { uid: string; email: string }
 >(functions, "createAdmin");
+
+const removeAdminFn = httpsCallable<{ uid: string }, { uid: string }>(functions, "removeAdmin");
 
 export default function Admins() {
   const { user, isSuperAdmin } = useAuth();
@@ -49,10 +55,35 @@ export default function Admins() {
     });
   }, []);
 
-  const toggleActive = async (uid: string, current: boolean) => {
+  // FIX (launch audit, Task 6) — this used to be a reversible toggle that
+  // just flipped admins/{uid}.isActive in Firestore. Nothing anywhere ever
+  // read that field to gate access (AuthContext.tsx derives isAdmin/
+  // isSuperAdmin from Firebase custom claims only, never isActive), so a
+  // "deactivated" admin kept 100% of their real access — the toggle only
+  // changed what this one table displayed. Now calls the removeAdmin
+  // Cloud Function, which actually clears the custom claim and revokes
+  // refresh tokens (see that function's comment for the token-lifetime
+  // caveat). That makes this a one-way action, matching what removeAdmin
+  // actually does server-side (role becomes "removed", not reversible in
+  // place) — re-inviting the same email via "Onboard Admin" below
+  // re-creates their access from scratch (createAdmin already handles an
+  // existing Auth user idempotently).
+  const [removingUid, setRemovingUid] = useState<string | null>(null);
+
+  const removeAdminAccess = async (a: Admin) => {
     if (!isSuperAdmin) return;
-    await updateDoc(doc(db, "admins", uid), { isActive: !current });
-    setAdmins((prev) => prev.map((a) => a.uid === uid ? { ...a, isActive: !current } : a));
+    if (!window.confirm(`Remove admin access for ${a.name} (${a.email})? This revokes their access immediately and cannot be undone from here — re-invite them via "Onboard Admin" to restore it.`)) {
+      return;
+    }
+    setRemovingUid(a.uid);
+    try {
+      await removeAdminFn({ uid: a.uid });
+      setAdmins((prev) => prev.map((x) => x.uid === a.uid ? { ...x, isActive: false, role: "removed" as Admin["role"] } : x));
+    } catch (e: any) {
+      alert(e.message ?? "Failed to remove admin.");
+    } finally {
+      setRemovingUid(null);
+    }
   };
 
   const handleAdd = async () => {
@@ -219,7 +250,7 @@ export default function Admins() {
                   </td>
                   <td className="p-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      {isSuperAdmin && a.role !== "superAdmin" && (
+                      {isSuperAdmin && a.role !== "superAdmin" && a.role !== "removed" && (
                         <button
                           onClick={() => openPermissions(a)}
                           className="text-xs font-bold px-3 py-1.5 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 rounded-lg transition-colors"
@@ -227,17 +258,17 @@ export default function Admins() {
                           🔑 Permissions
                         </button>
                       )}
-                      {isSuperAdmin && a.uid !== user?.uid && (
+                      {isSuperAdmin && a.uid !== user?.uid && a.role !== "removed" && (
                         <button
-                          onClick={() => toggleActive(a.uid, a.isActive)}
-                          className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors ${
-                            a.isActive
-                              ? "bg-green-500/20 text-green-400 hover:bg-red-500/20 hover:text-red-400"
-                              : "bg-red-500/20 text-red-400 hover:bg-green-500/20 hover:text-green-400"
-                          }`}
+                          onClick={() => removeAdminAccess(a)}
+                          disabled={removingUid === a.uid}
+                          className="text-xs font-bold px-3 py-1.5 rounded-lg transition-colors bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50"
                         >
-                          {a.isActive ? "Active" : "Inactive"}
+                          {removingUid === a.uid ? "Removing…" : "🗑️ Remove"}
                         </button>
+                      )}
+                      {a.role === "removed" && (
+                        <span className="text-red-400 text-xs italic">Access removed</span>
                       )}
                       {a.uid === user?.uid && (
                         <span className="text-slate-500 text-xs italic">You</span>
