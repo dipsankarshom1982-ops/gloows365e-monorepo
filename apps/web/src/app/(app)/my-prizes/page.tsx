@@ -136,6 +136,8 @@ export default function MyPrizesPage() {
 
   const [prizes, setPrizes]   = useState<PrizeClaim[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   const [claiming, setClaiming] = useState<PrizeClaim | null>(null);
   const [name, setName]         = useState("");
@@ -147,14 +149,27 @@ export default function MyPrizesPage() {
 
   useEffect(() => {
     if (!uid) { setLoading(false); return; }
+    setLoading(true);
+    setLoadError(null);
     const db = getFirestore();
     const q = query(collection(db, "prizeClaims"), where("uid", "==", uid), orderBy("wonAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
       setPrizes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as PrizeClaim)));
       setLoading(false);
-    }, () => setLoading(false));
+      setLoadError(null);
+    }, (err) => {
+      // Firestore doesn't auto-retry a failed listener (e.g. a missing
+      // index, or a transient permission hiccup) — it just stops. Surface
+      // this instead of silently falling through to the empty state,
+      // which used to be indistinguishable from "you really have zero
+      // prizes" and hid a real production bug (missing composite index on
+      // prizeClaims uid+wonAt) for who knows how long.
+      console.warn("my-prizes: prizeClaims listener failed:", err);
+      setLoading(false);
+      setLoadError("Couldn't load your prizes. Please check your connection and try again.");
+    });
     return () => unsub();
-  }, [uid]);
+  }, [uid, reloadTick]);
 
   const openClaim = (prize: PrizeClaim) => {
     setClaiming(prize);
@@ -241,10 +256,21 @@ export default function MyPrizesPage() {
 
       {loading ? (
         <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>Loading…</div>
+      ) : loadError ? (
+        <div style={{ textAlign: "center", padding: "60px 30px" }}>
+          <div style={{ fontSize: 48, marginBottom: 10 }}>⚠️</div>
+          <p style={{ color: "var(--text-muted)", fontSize: 14, marginBottom: 16 }}>{loadError}</p>
+          <button
+            onClick={() => setReloadTick((n) => n + 1)}
+            style={{ padding: "10px 24px", borderRadius: 12, background: "#6366f1", border: "none", color: "#fff", fontWeight: 800, fontSize: 13, cursor: "pointer" }}
+          >
+            Retry
+          </button>
+        </div>
       ) : prizes.length === 0 ? (
         <div style={{ textAlign: "center", padding: "60px 30px" }}>
           <div style={{ fontSize: 48, marginBottom: 10 }}>🎁</div>
-          <p style={{ color: "var(--text-muted)", fontSize: 14 }}>No prizes yet — climb the Starboard leaderboard to start winning!</p>
+          <p style={{ color: "var(--text-muted)", fontSize: 14 }}>You haven&apos;t won a prize yet. Keep participating and you could be our next winner!</p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "8px 20px" }}>

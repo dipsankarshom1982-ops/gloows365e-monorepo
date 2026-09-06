@@ -173,6 +173,8 @@ export default function MyPrizesScreen() {
 
   const [prizes, setPrizes]   = useState<PrizeClaim[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   const [claiming, setClaiming] = useState<PrizeClaim | null>(null);
   const [name, setName]         = useState("");
@@ -183,13 +185,26 @@ export default function MyPrizesScreen() {
 
   useEffect(() => {
     if (!uid) { setLoading(false); return; }
+    setLoading(true);
+    setLoadError(null);
     const q = query(collection(db, "prizeClaims"), where("uid", "==", uid), orderBy("wonAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
       setPrizes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as PrizeClaim)));
       setLoading(false);
-    }, () => setLoading(false));
+      setLoadError(null);
+    }, (err) => {
+      // Firestore doesn't auto-retry a failed listener (e.g. a missing
+      // index, or a transient permission hiccup) — it just stops. Surface
+      // this instead of silently falling through to the empty state,
+      // which used to be indistinguishable from "you really have zero
+      // prizes" and hid a real production bug (missing composite index on
+      // prizeClaims uid+wonAt) for who knows how long.
+      console.warn("my-prizes: prizeClaims listener failed:", err);
+      setLoading(false);
+      setLoadError("Couldn't load your prizes. Please check your connection and try again.");
+    });
     return () => unsub();
-  }, [uid]);
+  }, [uid, reloadTick]);
 
   const openClaim = (prize: PrizeClaim) => {
     setClaiming(prize);
@@ -264,11 +279,23 @@ export default function MyPrizesScreen() {
 
         {loading ? (
           <ActivityIndicator style={{ marginTop: 40 }} color={colors.accent} />
+        ) : loadError ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyIcon}>⚠️</Text>
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{loadError}</Text>
+            <TouchableOpacity
+              style={[styles.claimBtn, { backgroundColor: colors.accent, marginTop: 16, paddingHorizontal: 24 }]}
+              onPress={() => setReloadTick((n) => n + 1)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.claimBtnText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
         ) : prizes.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyIcon}>🎁</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              No prizes yet — climb the Starboard leaderboard to start winning!
+              You haven't won a prize yet. Keep participating and you could be our next winner!
             </Text>
           </View>
         ) : (

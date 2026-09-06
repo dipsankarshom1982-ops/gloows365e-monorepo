@@ -638,3 +638,113 @@ describe("contests/{id}.banners — not client-writable", () => {
     await assertSucceeds(db.doc(`contests/${contestId}`).update({ joinedCount: 1, updatedAt: new Date() }));
   });
 });
+
+// ─── prizeClaims/{claimId} — My Prizes / claim-flow regression ─────────────
+// Added alongside the fix for the missing prizeClaims(uid,wonAt) composite
+// index that was silently breaking My Prizes for every student (the
+// listener errored and the UI fell through to the "no prizes" empty
+// state — see apps/mobile/app/my-prizes.tsx and apps/web's mirror). The
+// rules themselves were already correct; this just gives them the same
+// regression coverage every other sensitive collection in this file has,
+// so a future change here fails a test instead of shipping quietly.
+describe("prizeClaims/{claimId} — ownership, claim transition, duplicate-claim prevention", () => {
+  const winnerUid = "student_winner";
+  const otherUid  = "student_other";
+  const claimId   = "monthly_2026-09_student_winner";
+
+  async function seedUnclaimed() {
+    await seed(async (db) => {
+      await db.doc(`prizeClaims/${claimId}`).set({
+        uid: winnerUid,
+        prizeType: "physical",
+        prizeValue: "Wireless Earbuds",
+        medalEmoji: "🥇",
+        rank: 1,
+        periodType: "monthly",
+        periodKey: "monthly_2026-09",
+        payoutLabel: "September Starboard Prizes",
+        status: "unclaimed",
+        wonAt: new Date(),
+      });
+    });
+  }
+
+  test("the winner CAN read their own prize", async () => {
+    await seedUnclaimed();
+    const db = testEnv.authenticatedContext(winnerUid).firestore();
+    await assertSucceeds(db.doc(`prizeClaims/${claimId}`).get());
+  });
+
+  test("a different student CANNOT read someone else's prize (Test 6: access denied)", async () => {
+    await seedUnclaimed();
+    const db = testEnv.authenticatedContext(otherUid).firestore();
+    await assertFails(db.doc(`prizeClaims/${claimId}`).get());
+  });
+
+  test("a student CANNOT create their own prizeClaims doc (admin-only creation)", async () => {
+    const db = testEnv.authenticatedContext(winnerUid).firestore();
+    await assertFails(db.doc(`prizeClaims/self_awarded`).set({
+      uid: winnerUid, prizeType: "physical", prizeValue: "Free Phone",
+      rank: 1, periodType: "monthly", periodKey: "monthly_2026-09", status: "unclaimed",
+    }));
+  });
+
+  test("the winner CAN submit a claim (unclaimed → claimed, claimInfo + status only)", async () => {
+    await seedUnclaimed();
+    const db = testEnv.authenticatedContext(winnerUid).firestore();
+    await assertSucceeds(db.doc(`prizeClaims/${claimId}`).update({
+      status: "claimed",
+      claimInfo: { name: "Winner Name", address: "123 Main St", whatsapp: "9876543210", email: "winner@example.com" },
+    }));
+  });
+
+  test("a different student CANNOT claim someone else's prize", async () => {
+    await seedUnclaimed();
+    const db = testEnv.authenticatedContext(otherUid).firestore();
+    await assertFails(db.doc(`prizeClaims/${claimId}`).update({
+      status: "claimed",
+      claimInfo: { name: "Impostor", address: "Nowhere", whatsapp: "9999999999", email: "x@example.com" },
+    }));
+  });
+
+  test("Test 4: the SAME student CANNOT claim an already-claimed prize again (duplicate prevented)", async () => {
+    await seed(async (db) => {
+      await db.doc(`prizeClaims/${claimId}`).set({
+        uid: winnerUid, prizeType: "physical", prizeValue: "Wireless Earbuds",
+        rank: 1, periodType: "monthly", periodKey: "monthly_2026-09", status: "claimed",
+        claimInfo: { name: "Winner Name", address: "123 Main St", whatsapp: "9876543210", email: "winner@example.com" },
+        wonAt: new Date(),
+      });
+    });
+    const db = testEnv.authenticatedContext(winnerUid).firestore();
+    await assertFails(db.doc(`prizeClaims/${claimId}`).update({
+      status: "claimed",
+      claimInfo: { name: "Winner Name", address: "A different address now", whatsapp: "9876543210", email: "winner@example.com" },
+    }));
+  });
+
+  test("a student CANNOT skip straight to a later status (e.g. \"delivered\")", async () => {
+    await seedUnclaimed();
+    const db = testEnv.authenticatedContext(winnerUid).firestore();
+    await assertFails(db.doc(`prizeClaims/${claimId}`).update({
+      status: "delivered",
+      claimInfo: { name: "Winner Name", address: "123 Main St", whatsapp: "9876543210", email: "winner@example.com" },
+    }));
+  });
+
+  test("a student CANNOT touch fields outside claimInfo/status (e.g. forge prizeValue or rank)", async () => {
+    await seedUnclaimed();
+    const db = testEnv.authenticatedContext(winnerUid).firestore();
+    await assertFails(db.doc(`prizeClaims/${claimId}`).update({
+      status: "claimed",
+      prizeValue: "Free Car",
+      claimInfo: { name: "Winner Name", address: "123 Main St", whatsapp: "9876543210", email: "winner@example.com" },
+    }));
+  });
+
+  test("a student CANNOT delete their own prize claim", async () => {
+    await seedUnclaimed();
+    const db = testEnv.authenticatedContext(winnerUid).firestore();
+    await assertFails(db.doc(`prizeClaims/${claimId}`).delete());
+  });
+});

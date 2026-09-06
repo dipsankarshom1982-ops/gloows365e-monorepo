@@ -610,6 +610,25 @@
       "density": "SPARSE_ALL"
     },
     {
+      "collectionGroup": "prizeClaims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "wonAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
       "collectionGroup": "restartSuccessStories",
       "queryScope": "COLLECTION",
       "fields": [
