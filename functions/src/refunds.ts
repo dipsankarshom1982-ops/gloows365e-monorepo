@@ -2,8 +2,10 @@
 // Admin-controlled refund + reconciliation system (launch audit, Phase 1
 // Task 7). Covers the four currently-live inbound payment flows: AI Guru
 // subscriptions, AI Guru credit packs, Seekho subscriptions, tutor credit
-// packs — functions365's subscription flow is deliberately excluded
-// (separate, currently out of scope — see the launch audit).
+// packs. (At the time this was written, a separate legacy "Gloows365"
+// product's own subscription flow was deliberately excluded as
+// out-of-scope; that product has since been removed from this monorepo
+// entirely — see the 2026-09-06 legacy-cleanup commit.)
 //
 // One `processRefund` callable handles all four flows via a `flow`
 // parameter rather than four near-identical functions, because the shape

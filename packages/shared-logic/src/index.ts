@@ -1,7 +1,11 @@
 // packages/shared-logic/src/index.ts
 // Central barrel export for @gloows/shared-logic — shared hooks, context
-// providers, Firebase bootstrap, and types used across web365, mobile365,
-// and admin365.
+// providers, Firebase bootstrap, and types used across the Gloows365E
+// Student App (apps/mobile, apps/web) and Tutor App (apps/tutor,
+// apps/tutor-mobile). (The doc comment here used to name web365/mobile365/
+// admin365 — the separate legacy "Gloows365" product removed from this
+// monorepo on 2026-09-06; this package was never actually a dependency of
+// theirs.)
 //
 // RESTORED — this file was accidentally overwritten with the contents of
 // the separate @gloows/shared-types package (pure TS interfaces, no

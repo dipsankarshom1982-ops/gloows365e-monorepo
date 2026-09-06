@@ -1,5 +1,18 @@
 {
   "projects": {
-    "default": "gloows-03b6sz"
-  }
+    "default":    "gloows-03b6sz",
+    "gloows365":  "gloows-03b6sz",
+    "production": "gloows-03b6sz",
+    "staging":    "gloows-03b6sz-staging"
+  },
+  "targets": {
+    "gloows-03b6sz": {
+      "hosting": {
+        "website": ["gloows365e-website"],
+        "web":     ["gloows365e-app"],
+        "admin":   ["gloows365e-admin"]
+      }
+    }
+  },
+  "etags": {}
 }
