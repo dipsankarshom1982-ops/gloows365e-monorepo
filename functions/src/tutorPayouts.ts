@@ -351,10 +351,18 @@ export const reviewPayoutRequest = functionsV1
     data: { requestId?: string; action?: "approve" | "reject"; note?: string },
     context
   ) => {
-    if (!context.auth?.token?.admin) {
-      throw new functionsV1.https.HttpsError("permission-denied", "Admins only");
-    }
-    const adminUid = context.auth.uid;
+    // SECURITY FIX (Moderator Authorization audit, Phase 3): approving a
+    // payout request is the gate that lets markPayoutPaid (already
+    // restricted to admin/superAdmin — Phase 2) proceed, and rejecting one
+    // releases a real financial hold back onto the tutor's balance — both
+    // are admin/superAdmin-tier actions, not moderator ones. Read access
+    // to the payout queue is unaffected (firestore.rules' payoutRequests
+    // read rule already allows any `admin` claim holder, moderators
+    // included — "may view" stays true; only this approve/reject action
+    // is restricted). Direct extension of Phase 2's boundary using the
+    // same shared helper.
+    requireAdminRole(context.auth, ["admin", "superAdmin"]);
+    const adminUid = context.auth!.uid;
     const { requestId, action, note } = data ?? {};
     if (!requestId || typeof requestId !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "requestId is required");

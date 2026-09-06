@@ -704,9 +704,27 @@ service cloud.firestore {
     }
 
     // 👑 ADMINS
+    // SECURITY FIX (Moderator Authorization audit, Phase 3): write used to
+    // be `if request.auth.token.superAdmin == true` — a document-level
+    // rule that doesn't look at WHAT is written, only who's calling. Every
+    // legitimate write to this collection (createAdmin, removeAdmin, and
+    // now updateAdminPermissions — functions/src/adminManagement.ts) has
+    // always gone through the Admin SDK server-side, which bypasses these
+    // rules entirely regardless of what `allow write` says; a full-repo
+    // grep confirms Admins.tsx's now-removed `updateDoc(doc(db,"admins",
+    // uid),{permissions:editPerms})` was the ONLY client-side write this
+    // collection ever had. With that gone, the old rule was pure exploit
+    // surface: a superAdmin's own client could still write any field —
+    // including permissions, role, or another superAdmin's doc — bypassing
+    // updateAdminPermissions' allowlist and target-role checks entirely.
+    // Closed the same way this ruleset already closes every other
+    // Admin-SDK-only collection (see e.g. payoutRequests below):
+    // `allow write: if false`. Read is UNCHANGED — every admin/moderator
+    // (token.admin==true) still reads this collection, needed for
+    // Admins.tsx's table and AuthContext.tsx's own-permissions fetch.
     match /admins/{uid} {
       allow read:  if request.auth.token.admin == true;
-      allow write: if request.auth.token.superAdmin == true;
+      allow write: if false;
     }
 
     // 🐛 CRASH REPORTS — written by app, read by admin only

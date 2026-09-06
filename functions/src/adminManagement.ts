@@ -1,10 +1,54 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import axios from "axios";
+import { requireAdminRole } from "./authz";
 
 const FIREBASE_API_KEY = "AIzaSyCpS6KjmnGAD5vCuB_swM2SWRd6-nhoiys";
 
 type Role = "superAdmin" | "admin" | "moderator";
+
+// ── Moderator Authorization audit, Phase 3 — the single authoritative
+// allowlist of admin-panel permission keys. This is the SERVER's copy —
+// the one that actually matters as a security boundary, since
+// updateAdminPermissions below is the only path that writes
+// admins/{uid}.permissions.
+//
+// NOT a shared import from apps/admin/src/lib/permissions.ts's
+// ALL_PERMISSIONS (the frontend's own list, used for nav rendering and the
+// permissions-drawer checkboxes): that package lives in a separate Vite/
+// React app, and the one workspace package that could plausibly bridge
+// them (packages/shared-logic) declares a `react`/`firebase` (client SDK)
+// peer dependency and isn't consumed by either app today — pulling a
+// Cloud Functions backend through it would mean taking on unrelated
+// bundler/dependency work this security-only commit deliberately doesn't
+// do (see this commit's message). This list is therefore a manually kept
+// duplicate: every key below was copied verbatim from
+// apps/admin/src/lib/permissions.ts's ALL_PERMISSIONS at the time of this
+// commit, and it — not the frontend's list — is what an actual submitted
+// permission is validated against. Follow-up: extract these keys into a
+// small Node-safe shared module (or a `react`-free package) consumed by
+// both, so this duplication stops being possible to drift silently.
+//
+// Deliberately EXCLUDES "all" — that string is a wildcard createAdmin
+// seeds only for the superAdmin role (see hasPermission() in
+// apps/admin/src/lib/permissions.ts, which treats it as "everything").
+// Since updateAdminPermissions below refuses to ever target a superAdmin
+// account, "all" has no legitimate use here — allowing it would let a
+// caller hand an ordinary admin/moderator target unbounded nav-visibility
+// parity through this one string, which is exactly the kind of permission
+// injection this callable exists to prevent.
+const ADMIN_PERMISSION_KEYS = new Set([
+  "dashboard", "platform-analytics", "user-activity-analytics",
+  "ads", "analytics",
+  "banners", "short-reels", "seekho-videos", "knowledge-videos", "stories", "partners",
+  "courses", "practice",
+  "contests", "prize-deliveries", "quizzes", "daily-streak-quiz", "skill-battles", "learnfun", "badges",
+  "modules", "subscription-plans", "coupons", "vcoin-rules",
+  "feedback-features", "feedback",
+  "students", "subscriptions", "refunds", "payments", "ai-usage",
+  "data-rights", "grievances",
+  "tutor-verifications", "tutor-payouts", "tutor-reviews", "payout-settings", "shikshahub-analytics",
+]);
 
 export const createAdmin = onCall(async (request) => {
   if (!request.auth?.token?.superAdmin) {
@@ -114,6 +158,113 @@ export const removeAdmin = onCall(async (request) => {
 
   console.log(`✅ Admin removed (claims cleared, refresh tokens revoked): uid=${uid}`);
   return { uid };
+});
+
+
+// ── updateAdminPermissions (Moderator Authorization audit, Phase 3) ─────────────
+// Replaces Admins.tsx's old direct `updateDoc(doc(db,"admins",uid),
+// {permissions: editPerms})` — a plain client Firestore write, previously
+// gated only by firestore.rules' `admins/{uid}` write rule
+// (`request.auth.token.superAdmin == true`). That rule checks nothing
+// about WHAT is being written — a superAdmin's own client could write any
+// field, any value, on any admins/{uid} doc, including another
+// superAdmin's. This callable is now the only path that ever writes the
+// `permissions` field; the underlying Firestore rule is unchanged (a
+// superAdmin claim is still required to reach here at all — see the
+// Firestore Rules note below on why the document-level client write is
+// deliberately left as-is rather than being closed off in this commit).
+//
+// Authorization policy (verified against, not invented on top of, the
+// EXISTING behavior before writing this): only a superAdmin has ever been
+// able to reach this feature — Admins.tsx's "🔑 Permissions" button is
+// rendered only under `isSuperAdmin`, and the Firestore write rule already
+// requires the `superAdmin` claim. There is no existing UI path, comment,
+// or rule suggesting a plain admin should ever manage another account's
+// permissions (moderator's or otherwise) — so this callable preserves
+// that exact, already-real policy rather than inventing a new
+// admin-manages-moderators tier. If the product later wants that, it's a
+// deliberate policy decision for a separate change, not something to
+// slip in here.
+export const updateAdminPermissions = onCall(async (request) => {
+  // superAdmin only — matches the existing UI gate and Firestore rule
+  // exactly (see header comment above). Also rejects every unauthorized
+  // caller shape in one check: unauthenticated, student, tutor, moderator,
+  // and an ordinary (non-super) admin all fail here — none of them have
+  // ever had this ability, so none of this is a new restriction.
+  requireAdminRole(request.auth, ["superAdmin"]);
+  const callerUid = request.auth!.uid;
+
+  const { targetUid, permissions } = (request.data ?? {}) as { targetUid?: unknown; permissions?: unknown };
+
+  if (!targetUid || typeof targetUid !== "string") {
+    throw new HttpsError("invalid-argument", "targetUid is required.");
+  }
+  if (!Array.isArray(permissions)) {
+    throw new HttpsError("invalid-argument", "permissions must be an array.");
+  }
+
+  // Validate every entry against the single authoritative allowlist above
+  // — reject unknown keys and non-string/malformed values outright, and
+  // de-duplicate (rather than reject) repeats, since a duplicate entry
+  // carries no different meaning than the same key once. This is the ONLY
+  // shape of write this callable can ever produce: no other field of
+  // admins/{uid} is ever touched, and request.data is never spread or
+  // written wholesale — see requirement note on "arbitrary field
+  // modification" in this commit's description.
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const p of permissions) {
+    if (typeof p !== "string") {
+      throw new HttpsError("invalid-argument", `Invalid permission value: ${JSON.stringify(p)} — must be a string.`);
+    }
+    if (!ADMIN_PERMISSION_KEYS.has(p)) {
+      throw new HttpsError("invalid-argument", `Unknown permission: "${p}".`);
+    }
+    if (!seen.has(p)) {
+      seen.add(p);
+      normalized.push(p);
+    }
+  }
+
+  const targetRef = admin.firestore().doc(`admins/${targetUid}`);
+  const targetSnap = await targetRef.get();
+  if (!targetSnap.exists) {
+    throw new HttpsError("not-found", "Target admin record not found.");
+  }
+  const target = targetSnap.data()!;
+
+  // No one — not even another superAdmin, not even the account itself —
+  // edits a superAdmin's permissions through this callable. A superAdmin
+  // is superAdmin via the Firebase custom claim alone (hasPermission()
+  // short-circuits to true for isSuperAdmin regardless of this array), so
+  // there is nothing legitimate this array could ever change for one, and
+  // this is exactly the boundary the existing UI already draws (the
+  // Permissions button is hidden for superAdmin targets) — now actually
+  // enforced server-side instead of only hidden client-side.
+  if (target.role === "superAdmin") {
+    throw new HttpsError(
+      "permission-denied",
+      "A superAdmin's permissions cannot be modified — they always have full access via their Firebase claim."
+    );
+  }
+  // A de-provisioned account (removeAdmin sets role:"removed") has no
+  // claim left to gate anything with — editing its permissions list would
+  // be meaningless and could create a misleading Firestore record.
+  if (target.role === "removed") {
+    throw new HttpsError(
+      "failed-precondition",
+      "This admin's access has been removed. Re-invite them via Onboard Admin to restore access before editing permissions."
+    );
+  }
+
+  await targetRef.update({
+    permissions: normalized,
+    permissionsUpdatedBy: callerUid,
+    permissionsUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log(`✅ updateAdminPermissions: uid=${targetUid} -> [${normalized.join(", ")}] by=${callerUid}`);
+  return { targetUid, permissions: normalized };
 });
 
 

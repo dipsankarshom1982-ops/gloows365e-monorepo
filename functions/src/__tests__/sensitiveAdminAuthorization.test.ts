@@ -8,6 +8,15 @@
 // are covered instead in refunds.test.ts, which already had full business-
 // logic coverage to extend.
 //
+// Phase 3 adds reviewPayoutRequest (tutorPayouts.ts) to this same file —
+// same "no prior coverage, authorization-boundary-only" situation as the
+// four above. See that commit's message/report for why it was included
+// (Option A: direct extension of Phase 2's financial authorization
+// boundary — approving/rejecting a payout request gates markPayoutPaid
+// and releases a real financial hold, so it's admin/superAdmin-tier, not
+// moderator-tier; read access to the queue is untouched, so "moderator
+// may view" stays true).
+//
 // Scope is deliberately narrow: this commit's ONLY behavioral change to
 // these four functions is the authorization check at the top (bare
 // `.token.admin` -> requireAdminRole(["admin","superAdmin"])) — no
@@ -53,6 +62,37 @@ const MODERATOR  = { auth: { uid: "mod_1", token: { admin: true, adminRole: "mod
 const ADMIN      = { auth: { uid: "admin_1", token: { admin: true } } };               // legacy, not yet backfilled
 const SUPERADMIN = { auth: { uid: "super_1", token: { admin: true, superAdmin: true } } }; // legacy, not yet backfilled
 const UNKNOWN_ROLE = { auth: { uid: "weird_1", token: { adminRole: "owner" } } };
+
+describe("reviewPayoutRequest — role authorization boundary", () => {
+  const call = (context: unknown) =>
+    require("../tutorPayouts").reviewPayoutRequest.run({ requestId: "req_1", action: "approve" }, context);
+
+  test("unauthenticated caller is rejected", async () => {
+    await expect(call(UNAUTHENTICATED)).rejects.toMatchObject({ code: "unauthenticated" });
+  });
+  test("student is rejected", async () => {
+    await expect(call(STUDENT)).rejects.toMatchObject({ code: "permission-denied" });
+  });
+  test("tutor is rejected", async () => {
+    await expect(call(TUTOR)).rejects.toMatchObject({ code: "permission-denied" });
+  });
+  test("moderator is rejected — approval gates markPayoutPaid and rejection releases a real financial hold", async () => {
+    await expect(call(MODERATOR)).rejects.toMatchObject({ code: "permission-denied" });
+  });
+  test("unknown role is rejected", async () => {
+    await expect(call(UNKNOWN_ROLE)).rejects.toMatchObject({ code: "permission-denied" });
+  });
+  test("admin is allowed — reaches real business logic and succeeds end to end", async () => {
+    fakeDb.seed("payoutRequests/req_1", { tutorUid: "tutor_1", status: "pending", requestedAmount: 500 });
+    const result = await call(ADMIN);
+    expect(result).toEqual({ status: "approved" });
+  });
+  test("superAdmin is allowed — succeeds end to end", async () => {
+    fakeDb.seed("payoutRequests/req_1", { tutorUid: "tutor_1", status: "pending", requestedAmount: 500 });
+    const result = await call(SUPERADMIN);
+    expect(result).toEqual({ status: "approved" });
+  });
+});
 
 describe("markPayoutPaid — role authorization boundary", () => {
   beforeEach(() => {

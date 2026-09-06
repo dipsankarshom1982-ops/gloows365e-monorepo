@@ -94,7 +94,7 @@ export { aiGuruCheckoutPage, aiGuruCreateSubscription, aiGuruPaymentSuccess } fr
 export { aggregateAdAnalytics, claimAdReward, getAds, recordAdEvent } from "./ads";
 
 // ── Admin Management ───────────────────────────────────────────────────────────
-export { approveContent, createAdmin, createComboPlan, createCoupon, getUserSubscriptionHistory, removeAdmin } from "./adminManagement";
+export { approveContent, createAdmin, createComboPlan, createCoupon, getUserSubscriptionHistory, removeAdmin, updateAdminPermissions } from "./adminManagement";
 
 // ── Moderator Authorization — Phase 1 role/claim foundation (additive,
 // superAdmin-triggered only; see functions/src/adminRoles.ts) ──────────────────

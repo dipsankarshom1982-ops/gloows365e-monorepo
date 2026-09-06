@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
@@ -33,6 +33,20 @@ const createAdminFn = httpsCallable<
 
 const removeAdminFn = httpsCallable<{ uid: string }, { uid: string }>(functions, "removeAdmin");
 
+// Moderator Authorization audit, Phase 3 — replaces the old direct
+// `updateDoc(doc(db,"admins",uid), {permissions})` client write. The
+// server (updateAdminPermissions) is now the sole place that validates and
+// writes this field; see that function's comments for the full
+// authorization/validation story. The returned `permissions` is the
+// server's own normalized (de-duplicated, allowlist-checked) result, not
+// an echo of whatever was sent — savePermissions below displays that,
+// not the locally-edited draft, so the UI never shows a state the server
+// didn't actually confirm.
+const updateAdminPermissionsFn = httpsCallable<
+  { targetUid: string; permissions: string[] },
+  { targetUid: string; permissions: string[] }
+>(functions, "updateAdminPermissions");
+
 export default function Admins() {
   const { user, isSuperAdmin } = useAuth();
   const [admins, setAdmins]     = useState<Admin[]>([]);
@@ -47,6 +61,7 @@ export default function Admins() {
   const [permTarget, setPermTarget]     = useState<Admin | null>(null);
   const [editPerms, setEditPerms]       = useState<string[]>([]);
   const [savingPerms, setSavingPerms]   = useState(false);
+  const [permError, setPermError]       = useState("");
 
   useEffect(() => {
     getDocs(collection(db, "admins")).then((snap) => {
@@ -108,6 +123,7 @@ export default function Admins() {
   const openPermissions = (a: Admin) => {
     setPermTarget(a);
     setEditPerms(a.permissions ?? []);
+    setPermError("");
   };
 
   const togglePerm = (key: string) => {
@@ -119,14 +135,28 @@ export default function Admins() {
   const selectAll = () => setEditPerms(ALL_PERMISSIONS.map((p) => p.key));
   const clearAll  = () => setEditPerms([]);
 
+  // Moderator Authorization audit, Phase 3 — goes through
+  // updateAdminPermissions (server validates the allowlist, target
+  // existence, and target role) instead of writing Firestore directly.
+  // On failure, the drawer stays open with the error shown and nothing
+  // locally is changed — no optimistic success before the server confirms.
+  // On success, the admin list is updated from the callable's OWN
+  // returned `permissions`, not the local `editPerms` draft, so what's
+  // displayed is exactly what the server actually wrote.
   const savePermissions = async () => {
     if (!permTarget) return;
     setSavingPerms(true);
+    setPermError("");
     try {
-      await updateDoc(doc(db, "admins", permTarget.uid), { permissions: editPerms });
-      setAdmins((prev) => prev.map((a) => a.uid === permTarget.uid ? { ...a, permissions: editPerms } : a));
+      const result = await updateAdminPermissionsFn({ targetUid: permTarget.uid, permissions: editPerms });
+      const { targetUid, permissions } = result.data;
+      setAdmins((prev) => prev.map((a) => a.uid === targetUid ? { ...a, permissions } : a));
       setPermTarget(null);
-    } finally { setSavingPerms(false); }
+    } catch (e: any) {
+      setPermError(e?.message ?? "Failed to save permissions. Please try again.");
+    } finally {
+      setSavingPerms(false);
+    }
   };
 
   return (
@@ -322,6 +352,11 @@ export default function Admins() {
             ))}
 
             {/* Save */}
+            {permError && (
+              <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                {permError}
+              </div>
+            )}
             <div className="pt-2 border-t border-slate-800 flex gap-3">
               <button
                 onClick={savePermissions}
