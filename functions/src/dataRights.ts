@@ -12,6 +12,7 @@
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { requireAdminRole } from "./authz";
 
 const db = admin.firestore();
 
@@ -217,9 +218,11 @@ export const exportMyData = functionsV1
 export const adminEraseStudent = functionsV1
   .runWith({ timeoutSeconds: 120, memory: "256MB" })
   .https.onCall(async (data: { uid?: string }, context) => {
-    if (!context.auth?.token?.admin) {
-      throw new functionsV1.https.HttpsError("permission-denied", "Admins only.");
-    }
+    // SECURITY FIX (Moderator Authorization audit, Phase 2 / commit 3):
+    // irreversible cascading deletion of a student's data — moderators
+    // must be rejected. Authorization happens here, before the audit-log
+    // write and every deletion step below.
+    requireAdminRole(context.auth, ["admin", "superAdmin"]);
     const uid = data?.uid;
     if (!uid) {
       throw new functionsV1.https.HttpsError("invalid-argument", "uid is required.");
@@ -229,7 +232,7 @@ export const adminEraseStudent = functionsV1
     await logRef.set({
       uid,
       type: "admin_erase",
-      requestedBy: context.auth.uid,
+      requestedBy: context.auth!.uid,
       requestedAt: admin.firestore.FieldValue.serverTimestamp(),
       status: "processing",
     });

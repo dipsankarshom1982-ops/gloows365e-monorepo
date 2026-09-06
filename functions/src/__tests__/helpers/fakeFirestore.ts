@@ -296,6 +296,19 @@ export class FakeFirestore {
     return fn(tx);
   }
 
+  // Test stand-in for the real Admin SDK's db.recursiveDelete(ref) — used
+  // by vidyastarContest.ts's deleteContest to wipe a contest doc and its
+  // entire participant subcollection atomically. Deletes the doc itself
+  // plus every stored path nested under it (anything starting with
+  // `${path}/`), which is exactly what "recursive" means for this flat
+  // path -> data Map; no subcollection-shaped traversal needed.
+  async recursiveDelete(ref: FakeDocRef): Promise<void> {
+    const prefix = `${ref.path}/`;
+    for (const key of [...this.store.keys()]) {
+      if (key === ref.path || key.startsWith(prefix)) this.store.delete(key);
+    }
+  }
+
   reset() {
     this.store.clear();
   }

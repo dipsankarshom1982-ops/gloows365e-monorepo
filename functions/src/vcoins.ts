@@ -8,6 +8,7 @@
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { getRedis, todayIST, TTL, RK } from "./redish";
+import { requireAdminRole } from "./authz";
 
 const db = admin.firestore();
 
@@ -507,9 +508,11 @@ export const claimSkillBattleReward = functionsV1
 export const manualResetAnnualVCoins = functionsV1
   .runWith({ timeoutSeconds: 540, memory: "512MB" })
   .https.onCall(async (_data, context) => {
-    if (!context.auth?.token?.admin) {
-      throw new functionsV1.https.HttpsError("permission-denied", "Admin only");
-    }
+    // SECURITY FIX (Moderator Authorization audit, Phase 2 / commit 3):
+    // resets every user's annual VCoin balance platform-wide — moderators
+    // must be rejected. Authorization happens here, before any Firestore
+    // read/write below.
+    requireAdminRole(context.auth, ["admin", "superAdmin"]);
 
     const year      = currentYearIST();
     const yearField = `vCoinsYear_${year}`;

@@ -49,6 +49,7 @@
 import axios from "axios";
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { requireAdminRole } from "./authz";
 
 const db = admin.firestore();
 
@@ -226,10 +227,14 @@ export const processRefund = functionsV1
     data: { flow?: Flow; razorpayPaymentId?: string; reason?: string },
     context
   ) => {
-    if (!context.auth?.token?.admin) {
-      throw new functionsV1.https.HttpsError("permission-denied", "Admins only");
-    }
-    const adminUid = context.auth.uid;
+    // SECURITY FIX (Moderator Authorization audit, Phase 2 / commit 3):
+    // money-moving — must reject a moderator even though moderators
+    // currently carry the same `admin: true` claim as a real admin (see
+    // functions/src/authz.ts's header for why). Uses the shared helper
+    // rather than a bare `.token.admin` check so this stays consistent
+    // with every other function migrated in this same commit.
+    requireAdminRole(context.auth, ["admin", "superAdmin"]);
+    const adminUid = context.auth!.uid;
     const { flow, razorpayPaymentId, reason } = data ?? {};
 
     if (!flow || !(flow in FLOW_CONFIG)) {
@@ -386,10 +391,11 @@ export const resolveRefundReconciliation = functionsV1
     data: { refundId?: string; resolution?: "confirmed_refunded" | "not_actually_refunded"; note?: string },
     context
   ) => {
-    if (!context.auth?.token?.admin) {
-      throw new functionsV1.https.HttpsError("permission-denied", "Admins only");
-    }
-    const adminUid = context.auth.uid;
+    // SECURITY FIX (Moderator Authorization audit, Phase 2 / commit 3):
+    // same money-moving class as processRefund above — see that check's
+    // comment.
+    requireAdminRole(context.auth, ["admin", "superAdmin"]);
+    const adminUid = context.auth!.uid;
     const { refundId, resolution, note } = data ?? {};
     if (!refundId) throw new functionsV1.https.HttpsError("invalid-argument", "refundId is required");
     if (resolution !== "confirmed_refunded" && resolution !== "not_actually_refunded") {

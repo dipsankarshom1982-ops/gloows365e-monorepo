@@ -26,6 +26,14 @@ firestore.Timestamp = {
   fromMillis: (ms: number) => FakeTimestamp.fromMillis(ms),
   fromDate: (d: Date) => FakeTimestamp.fromDate(d),
 };
+// Only ever used as an orderBy() field token (e.g. vcoins.ts's
+// manualResetAnnualVCoins paginates by document id) — FakeFirestore's
+// orderBy just records whatever field name it's given and sorts by it, so
+// a stand-in string is sufficient; no doc-id-specific sort behavior is
+// implemented or needed by anything that currently uses this.
+firestore.FieldPath = {
+  documentId: () => "__name__",
+};
 
 // Minimal in-memory Auth-user directory for tests exercising
 // refundSearch.ts's email→uid resolution and uid→email display lookup —

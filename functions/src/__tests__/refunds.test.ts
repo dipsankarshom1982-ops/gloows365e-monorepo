@@ -43,6 +43,107 @@ function seedAiGuruOrder(overrides: Partial<Record<string, unknown>> = {}) {
   });
 }
 
+// Moderator Authorization audit, Phase 2 / commit 3 — processRefund and
+// resolveRefundReconciliation now go through the shared requireAdminRole
+// helper (functions/src/authz.ts) instead of a bare `.token.admin` check.
+// This section exercises the actual protected callables (not just the
+// helper in isolation) against every caller shape the audit's test matrix
+// requires. The pre-existing describe blocks below (using ADMIN_CONTEXT,
+// unchanged) are the regression guard that legacy admin:true callers keep
+// working exactly as before — see "full test suite" results in this
+// commit's message.
+describe("processRefund — role authorization boundary", () => {
+  const call = (context: unknown) =>
+    require("../refunds").processRefund.run(
+      { flow: "aiGuruSubscription", razorpayPaymentId: "pay_1", reason: "test" }, context
+    );
+
+  test("unauthenticated caller is rejected", async () => {
+    await expect(call({ auth: undefined })).rejects.toMatchObject({ code: "unauthenticated" });
+  });
+
+  test("student (authenticated, no privileged claim) is rejected", async () => {
+    await expect(call({ auth: { uid: "student_1", token: {} } })).rejects.toMatchObject({ code: "permission-denied" });
+  });
+
+  test("tutor (role:'TUTOR' claim only) is rejected", async () => {
+    await expect(call({ auth: { uid: "tutor_1", token: { role: "TUTOR" } } })).rejects.toMatchObject({ code: "permission-denied" });
+  });
+
+  test("moderator (adminRole:'moderator') is rejected — the actual vulnerability this commit closes", async () => {
+    await expect(call({ auth: { uid: "mod_1", token: { admin: true, adminRole: "moderator" } } }))
+      .rejects.toMatchObject({ code: "permission-denied" });
+  });
+
+  test("unknown/malformed adminRole with no legacy boolean is rejected (fails closed)", async () => {
+    await expect(call({ auth: { uid: "weird_1", token: { adminRole: "owner" } } })).rejects.toMatchObject({ code: "permission-denied" });
+  });
+
+  test("a not-yet-backfilled legacy admin (admin:true, no adminRole) is still allowed through to business logic", async () => {
+    seedAiGuruOrder();
+    fakeDb.seed("subscriptions/student_1", { status: "active", razorpayOrderId: "order_1" });
+    mockedAxios.post.mockResolvedValueOnce({ data: { id: "rfnd_x", status: "processed" } });
+    const result = await call({ auth: { uid: "admin_1", token: { admin: true } } });
+    expect(result.success).toBe(true);
+  });
+
+  test("a legacy superAdmin (superAdmin:true, no adminRole) is allowed through to business logic", async () => {
+    seedAiGuruOrder();
+    fakeDb.seed("subscriptions/student_1", { status: "active", razorpayOrderId: "order_1" });
+    mockedAxios.post.mockResolvedValueOnce({ data: { id: "rfnd_y", status: "processed" } });
+    const result = await call({ auth: { uid: "super_1", token: { admin: true, superAdmin: true } } });
+    expect(result.success).toBe(true);
+  });
+
+  test("an already-backfilled admin (adminRole:'admin' claim) is allowed through", async () => {
+    seedAiGuruOrder();
+    fakeDb.seed("subscriptions/student_1", { status: "active", razorpayOrderId: "order_1" });
+    mockedAxios.post.mockResolvedValueOnce({ data: { id: "rfnd_z", status: "processed" } });
+    const result = await call({ auth: { uid: "admin_2", token: { adminRole: "admin" } } });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("resolveRefundReconciliation — role authorization boundary", () => {
+  const call = (context: unknown) =>
+    require("../refunds").resolveRefundReconciliation.run(
+      { refundId: "aiGuruSubscription_pay_1", resolution: "not_actually_refunded" }, context
+    );
+
+  test("unauthenticated caller is rejected", async () => {
+    await expect(call({ auth: undefined })).rejects.toMatchObject({ code: "unauthenticated" });
+  });
+
+  test("student is rejected", async () => {
+    await expect(call({ auth: { uid: "student_1", token: {} } })).rejects.toMatchObject({ code: "permission-denied" });
+  });
+
+  test("tutor is rejected", async () => {
+    await expect(call({ auth: { uid: "tutor_1", token: { role: "TUTOR" } } })).rejects.toMatchObject({ code: "permission-denied" });
+  });
+
+  test("moderator (adminRole:'moderator') is rejected", async () => {
+    await expect(call({ auth: { uid: "mod_1", token: { admin: true, adminRole: "moderator" } } }))
+      .rejects.toMatchObject({ code: "permission-denied" });
+  });
+
+  test("unknown role is rejected", async () => {
+    await expect(call({ auth: { uid: "weird_1", token: { adminRole: "owner" } } })).rejects.toMatchObject({ code: "permission-denied" });
+  });
+
+  test("legacy admin is allowed through to business logic", async () => {
+    fakeDb.seed("refunds/aiGuruSubscription_pay_1", { status: "needs_reconciliation" });
+    const result = await call({ auth: { uid: "admin_1", token: { admin: true } } });
+    expect(result.status).toBe("failed");
+  });
+
+  test("superAdmin is allowed through to business logic", async () => {
+    fakeDb.seed("refunds/aiGuruSubscription_pay_1", { status: "needs_reconciliation" });
+    const result = await call({ auth: { uid: "super_1", token: { admin: true, superAdmin: true } } });
+    expect(result.status).toBe("failed");
+  });
+});
+
 describe("processRefund — permission + validation", () => {
   test("rejects a non-admin caller", async () => {
     const { processRefund } = require("../refunds");

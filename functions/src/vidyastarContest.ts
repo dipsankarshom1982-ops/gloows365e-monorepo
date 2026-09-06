@@ -19,6 +19,7 @@
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { requireAdminRole } from "./authz";
 
 const db = admin.firestore();
 
@@ -141,9 +142,11 @@ export const joinVidyastarContest = functionsV1
 export const deleteContest = functionsV1
   .runWith({ timeoutSeconds: 60, memory: "256MB" })
   .https.onCall(async (data: { contestId: string }, context) => {
-    if (!context.auth?.token?.admin) {
-      throw new functionsV1.https.HttpsError("permission-denied", "Admin access required");
-    }
+    // SECURITY FIX (Moderator Authorization audit, Phase 2 / commit 3):
+    // destructive, irreversible data deletion (recursiveDelete) —
+    // moderators must be rejected. Authorization happens here, before any
+    // Firestore read/delete below.
+    requireAdminRole(context.auth, ["admin", "superAdmin"]);
 
     const contestId = (data?.contestId ?? "").trim();
     if (!contestId) {
@@ -158,6 +161,6 @@ export const deleteContest = functionsV1
 
     await db.recursiveDelete(contestRef);
 
-    console.log(`🗑️ Contest deleted: id=${contestId} by=${context.auth.uid}`);
+    console.log(`🗑️ Contest deleted: id=${contestId} by=${context.auth!.uid}`);
     return { success: true };
   });

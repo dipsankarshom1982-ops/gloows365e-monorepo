@@ -51,6 +51,7 @@ import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { notifyTutor } from "./shikshahubNotify";
 import { createRazorpayXPayout, fetchRazorpayXPayoutStatus, RazorpayXError, type RazorpayXFundAccount } from "./razorpayXClient";
+import { requireAdminRole } from "./authz";
 
 const db = admin.firestore();
 
@@ -440,10 +441,11 @@ export const markPayoutPaid = functionsV1
     secrets: ["RAZORPAYX_KEY_ID", "RAZORPAYX_KEY_SECRET", "RAZORPAYX_ACCOUNT_NUMBER"],
   })
   .https.onCall(async (data: { requestId?: string; note?: string }, context) => {
-    if (!context.auth?.token?.admin) {
-      throw new functionsV1.https.HttpsError("permission-denied", "Admins only");
-    }
-    const adminUid = context.auth.uid;
+    // SECURITY FIX (Moderator Authorization audit, Phase 2 / commit 3):
+    // moves real money via RazorpayX — moderators must be rejected. See
+    // functions/src/authz.ts's header for the shared helper's trust model.
+    requireAdminRole(context.auth, ["admin", "superAdmin"]);
+    const adminUid = context.auth!.uid;
     const { requestId, note } = data ?? {};
     if (!requestId || typeof requestId !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "requestId is required");
