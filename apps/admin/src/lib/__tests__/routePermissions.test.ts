@@ -44,6 +44,7 @@
 
 import { resolveRouteAccess, isRouteAllowed, RouteAccessRule } from "../routePermissions";
 import { hasPermission } from "../permissions";
+import { NAV_GROUPS } from "../navigation";
 
 // Self-contained assertion helper (no @types/node / node:assert — this
 // app has no Node type dependency today, and none is worth adding just
@@ -195,6 +196,52 @@ test("REQUIRED: an unauthorized attempt on one route followed by landing on anot
   const moderatorPerms = ["students"];
   assert.equal(isRouteAllowed("/refunds", false, moderatorPerms), false);
   assert.equal(isRouteAllowed("/students", false, moderatorPerms), true);
+});
+
+console.log("Commit 6 final validation — exhaustive per-route matrix (every real route in the app, not a sample)");
+
+// Every path/permKey pair actually declared in lib/navigation.ts's
+// NAV_GROUPS, flattened — this is the app's REAL route table, not a
+// hand-picked subset, so this section proves the matrix holds for every
+// registered route, not just the handful spot-checked above.
+const ALL_REAL_ROUTES = NAV_GROUPS.flatMap((g) => g.items.map((i) => ({ path: i.path, permKey: i.permKey })));
+
+test(`every one of the ${ALL_REAL_ROUTES.length} real routes: admin WITH its exact permission is allowed, WITHOUT it is denied`, () => {
+  for (const { path, permKey } of ALL_REAL_ROUTES) {
+    const withPerm = isRouteAllowed(path, false, [permKey]);
+    const withoutPerm = isRouteAllowed(path, false, ["some-other-unrelated-key"]);
+    // "admins", "refunds", "payments" are hardcoded superAdmin-only in
+    // hasPermission regardless of the array — those three correctly stay
+    // denied even "with" the matching key present; every other route
+    // must be allowed when the caller holds its exact key.
+    const hardcodedSuperAdminOnly = permKey === "admins" || permKey === "refunds" || permKey === "payments";
+    assert.equal(withPerm, !hardcodedSuperAdminOnly, `path=${path} permKey=${permKey} (with permission)`);
+    assert.equal(withoutPerm, false, `path=${path} permKey=${permKey} (without permission)`);
+  }
+});
+
+test(`every one of the ${ALL_REAL_ROUTES.length} real routes: superAdmin is allowed regardless of permKey`, () => {
+  for (const { path } of ALL_REAL_ROUTES) {
+    assert.equal(isRouteAllowed(path, true, []), true, `path=${path}`);
+  }
+});
+
+console.log("Direct URL bypass — hidden nav item does not change route accessibility");
+
+test("REQUIRED: /admins (hidden from a moderator's nav — hasPermission hardcodes it superAdmin-only) is STILL denied via direct URL, not just hidden from the sidebar", () => {
+  // The route guard's decision does not consult Layout.tsx / what's
+  // rendered in the sidebar at all — it calls the identical
+  // isRouteAllowed/hasPermission path independently. A moderator with
+  // even "admins" explicitly (and illegitimately) present in their array
+  // is still denied, because hasPermission hardcodes this key regardless
+  // of array content — proving the denial isn't merely "nav didn't show
+  // it," it's an independent, unbypassable-by-array-content check.
+  assert.equal(isRouteAllowed("/admins", false, ["admins", "all"]), false);
+});
+
+test("REQUIRED: /payments — same hidden-nav-does-not-equal-authorization proof, plus this route is additionally SuperAdminOnly-wrapped in main.tsx (defense in depth)", () => {
+  assert.equal(isRouteAllowed("/payments", false, ["payments", "all"]), false);
+  assert.equal(isRouteAllowed("/payments", true, []), true);
 });
 
 console.log(`\n${passed} assertions passed.`);

@@ -61,6 +61,25 @@ describe("computeAdminRoleBackfill (per-account decision, still pure)", () => {
     expect(nextClaims).toEqual({ admin: true, superAdmin: true, adminRole: "superAdmin" });
   });
 
+  test("REQUIRED (Commit 6 final validation): an existing UNRELATED custom claim survives the backfill untouched", () => {
+    // setCustomUserClaims() overwrites the ENTIRE claims object — the
+    // whole point of computeAdminRoleBackfill spreading existingClaims
+    // first is that anything this codebase (or a future feature) has put
+    // on the token that has nothing to do with admin/moderator status
+    // must come through unchanged. "tutorRoleLegacyMigration" here stands
+    // in for any such unrelated claim.
+    const { nextClaims } = computeAdminRoleBackfill(
+      "admin_1", "admin",
+      { admin: true, someUnrelatedFeatureFlag: true, tutorRoleLegacyMigration: "v2" }
+    );
+    expect(nextClaims).toEqual({
+      admin: true,
+      someUnrelatedFeatureFlag: true,
+      tutorRoleLegacyMigration: "v2",
+      adminRole: "admin",
+    });
+  });
+
   test("never accidentally grants admin/superAdmin: an account with NO existing admin claim stays claim-less except adminRole", () => {
     // Pathological input (shouldn't occur in practice — an admins/{uid}
     // doc with no matching claims at all) — the point is the function

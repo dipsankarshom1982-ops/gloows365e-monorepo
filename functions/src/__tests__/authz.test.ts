@@ -37,6 +37,34 @@ describe("resolvePrivilegedRole", () => {
     expect(resolvePrivilegedRole(authWith({ adminRole: "owner", admin: true }))).toBe("admin");
   });
 
+  // Moderator Authorization audit, Commit 6 (final validation) — explicit
+  // conflicting-claim and malformed-type coverage the earlier phases
+  // implied but never asserted directly.
+  test("REQUIRED: an explicit adminRole claim wins even when it conflicts with a legacy boolean on the SAME token", () => {
+    // A backfilled moderator still carries their original admin:true
+    // claim (backfillAdminRoleClaims is additive — see adminRoles.ts) —
+    // the explicit adminRole must still win, resolving "moderator," not
+    // the more-privileged-looking legacy boolean sitting alongside it.
+    expect(resolvePrivilegedRole(authWith({ adminRole: "moderator", admin: true }))).toBe("moderator");
+    // Same for a backfilled plain admin who also happens to carry the
+    // (extremely unlikely, but not impossible) superAdmin boolean stale
+    // from some other path — adminRole still wins outright.
+    expect(resolvePrivilegedRole(authWith({ adminRole: "admin", admin: true, superAdmin: true }))).toBe("admin");
+  });
+
+  test("malformed adminRole VALUES (wrong type, not just wrong string) never resolve to a privileged role and fail safely to legacy/null", () => {
+    expect(resolvePrivilegedRole(authWith({ adminRole: true, admin: true }))).toBe("admin");
+    expect(resolvePrivilegedRole(authWith({ adminRole: {}, admin: true }))).toBe("admin");
+    expect(resolvePrivilegedRole(authWith({ adminRole: null, admin: true }))).toBe("admin");
+    expect(resolvePrivilegedRole(authWith({ adminRole: 1, admin: true }))).toBe("admin");
+    expect(resolvePrivilegedRole(authWith({ adminRole: ["moderator"], admin: true }))).toBe("admin");
+    // With no legacy boolean to fall back to either, all of these resolve
+    // to null — never silently privileged.
+    expect(resolvePrivilegedRole(authWith({ adminRole: true }))).toBeNull();
+    expect(resolvePrivilegedRole(authWith({ adminRole: {} }))).toBeNull();
+    expect(resolvePrivilegedRole(authWith({ adminRole: null }))).toBeNull();
+  });
+
   describe("legacy fallback (no adminRole claim present — pre-backfill account)", () => {
     test("superAdmin:true resolves to 'superAdmin' — this boolean has always been unambiguous", () => {
       expect(resolvePrivilegedRole(authWith({ admin: true, superAdmin: true }))).toBe("superAdmin");
