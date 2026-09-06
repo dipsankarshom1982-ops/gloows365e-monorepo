@@ -32,12 +32,12 @@ firestore.Timestamp = {
 // real firebase-admin's Auth API, just backed by a plain Map instead of a
 // live project. seedAuthUser()/resetAuthUsers() are test-only helpers, not
 // part of the real Admin SDK surface.
-interface FakeAuthUser { uid: string; email: string }
+interface FakeAuthUser { uid: string; email: string; customClaims?: Record<string, unknown> }
 const authUsers = new Map<string, FakeAuthUser>(); // keyed by uid
 const authUsersByEmail = new Map<string, FakeAuthUser>();
 
-export function seedAuthUser(uid: string, email: string) {
-  const u = { uid, email };
+export function seedAuthUser(uid: string, email: string, customClaims?: Record<string, unknown>) {
+  const u: FakeAuthUser = { uid, email, ...(customClaims ? { customClaims } : {}) };
   authUsers.set(uid, u);
   authUsersByEmail.set(email, u);
 }
@@ -57,6 +57,14 @@ function auth() {
       const u = authUsersByEmail.get(email);
       if (!u) throw Object.assign(new Error("no user"), { code: "auth/user-not-found" });
       return u;
+    },
+    // Test-only stand-in for the real Admin SDK's setCustomUserClaims —
+    // mutates the same in-memory record getUser() reads back, so a test
+    // can assert on the post-call claims via a follow-up getUser().
+    async setCustomUserClaims(uid: string, claims: Record<string, unknown> | null) {
+      const u = authUsers.get(uid);
+      if (!u) throw Object.assign(new Error("no user"), { code: "auth/user-not-found" });
+      u.customClaims = claims ?? {};
     },
   };
 }

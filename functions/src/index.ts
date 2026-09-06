@@ -96,6 +96,10 @@ export { aggregateAdAnalytics, claimAdReward, getAds, recordAdEvent } from "./ad
 // ── Admin Management ───────────────────────────────────────────────────────────
 export { approveContent, createAdmin, createComboPlan, createCoupon, getUserSubscriptionHistory, removeAdmin } from "./adminManagement";
 
+// ── Moderator Authorization — Phase 1 role/claim foundation (additive,
+// superAdmin-triggered only; see functions/src/adminRoles.ts) ──────────────────
+export { backfillAdminRoleClaims } from "./adminRoles";
+
 // ── Contest Lesson Generation (lazy, per student language) ─────────────────────
 export { getContestLesson } from "./contestLesson";
 
