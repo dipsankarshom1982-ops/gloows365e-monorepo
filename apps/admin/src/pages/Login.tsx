@@ -16,9 +16,39 @@ export default function Login() {
     setLoading(true); setError("");
     try {
       await login(email, password);
+
+      // Verify the signed-in user actually has an admin claim.
+      // Without this check, any Firebase Auth account in this project
+      // could reach the admin panel — ProtectedRoutes is the backstop
+      // but we should also block at the login step for a clean UX.
+      const { getAuth, getIdTokenResult } = await import("firebase/auth");
+      const currentUser = getAuth().currentUser;
+      if (currentUser) {
+        const token = await getIdTokenResult(currentUser, /* forceRefresh */ true);
+        const isAdminClaim   = token.claims["admin"]      === true;
+        const isSuperAdmin   = token.claims["superAdmin"] === true;
+        if (!isAdminClaim && !isSuperAdmin) {
+          // Sign them back out immediately — they have a valid Firebase Auth
+          // account but no admin custom claim.
+          const { signOut } = await import("firebase/auth");
+          await signOut(getAuth());
+          setError("Your account does not have admin access. Contact a super admin.");
+          return;
+        }
+      }
+
       navigate("/");
-    } catch {
-      setError("Invalid email or password. Admin access only.");
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code ?? "";
+      if (code === "auth/invalid-credential" || code === "auth/wrong-password") {
+        setError("Invalid email or password.");
+      } else if (code === "auth/user-not-found") {
+        setError("No account found with this email.");
+      } else if (code === "auth/too-many-requests") {
+        setError("Too many attempts. Please try again later.");
+      } else {
+        setError("Sign-in failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
