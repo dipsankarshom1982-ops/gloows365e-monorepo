@@ -5,7 +5,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Layout from "./components/Layout";
 import { AuthProvider, useAuth } from "./context/AuthContext";
-import { getRequiredPermissionForPath } from "./lib/routePermissions";
+import { resolveRouteAccess, isRouteAllowed } from "./lib/routePermissions";
 import "./index.css";
 
 const Dashboard            = lazy(() => import("./pages/Dashboard"));
@@ -115,16 +115,29 @@ function SuperAdminOnly({ children }: { children: React.ReactNode }) {
 // never become a redirect loop (an unauthorized landing page bouncing to
 // another page the caller also lacks permission for) — the same choice
 // SuperAdminOnly above already made for the exact same reason.
-function PermissionDenied({ requiredPermission }: { requiredPermission: string }) {
+//
+// `requiredPermission: null` covers the fail-closed default-deny case
+// (lib/routePermissions.ts's resolveRouteAccess found no registered rule
+// at all for this path — an unrecognized route, whether a real page a
+// developer forgot to register or a URL that doesn't correspond to any
+// page) — worded slightly differently from the "you lack this specific
+// permission" case so a developer hitting this during development can
+// tell the two apart (dev-mode detail only; production shows the same
+// generic message either way, never leaking which permission a route
+// requires to someone who isn't going to be granted it anyway).
+function PermissionDenied({ requiredPermission }: { requiredPermission: string | null }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
       <div className="text-center max-w-sm">
         <div className="text-5xl mb-4">🔒</div>
         <h1 className="text-xl font-bold text-white mb-2">Access Denied</h1>
         <p className="text-slate-400 text-sm">
-          You don't have permission to view this section
-          {import.meta.env.DEV ? ` (requires "${requiredPermission}")` : ""}.
-          Contact a super admin if you believe this is a mistake.
+          {requiredPermission === null
+            ? "This page isn't available."
+            : "You don't have permission to view this section."}
+          {import.meta.env.DEV && requiredPermission !== null ? ` (requires "${requiredPermission}")` : ""}
+          {import.meta.env.DEV && requiredPermission === null ? " (dev: no registered route-access rule for this path)" : ""}
+          {" "}Contact a super admin if you believe this is a mistake.
         </p>
       </div>
     </div>
@@ -132,7 +145,7 @@ function PermissionDenied({ requiredPermission }: { requiredPermission: string }
 }
 
 function ProtectedRoutes() {
-  const { user, loading, isAdmin, isSuperAdmin, permissions, can } = useAuth();
+  const { user, loading, isAdmin, isSuperAdmin, permissions } = useAuth();
   const { pathname } = useLocation();
 
   if (loading) return (
@@ -176,31 +189,28 @@ function ProtectedRoutes() {
   // of what Layout.tsx's sidebar chose to hide from them (that filtering
   // was nav-only — it never touched what actually rendered here). This
   // check runs once, centrally, for whatever route is about to render,
-  // using the exact same NAV_GROUPS-derived permission a hidden sidebar
-  // link already implies (see lib/routePermissions.ts).
+  // using the exact same NAV_GROUPS-derived rule a hidden sidebar link
+  // already implies (see lib/routePermissions.ts).
   //
-  // Fails closed on every ambiguous input: getRequiredPermissionForPath
-  // returning a permission key that `can()` doesn't grant denies access;
-  // a malformed `permissions` value (not an array — defensive here since
-  // AuthContext already normalizes it, but never trusted a second time)
-  // also denies rather than risking `can()`'s underlying
-  // permissions.includes() behaving unexpectedly on a non-array. A
-  // superAdmin bypass is explicit and centralized right here (one `||
-  // isSuperAdmin`), rather than relying only on hasPermission()'s own
-  // internal short-circuit — this guarantees a superAdmin can never be
-  // denied by this check for any reason, including a malformed
-  // `permissions` value, without needing that guarantee to depend on
-  // lib/permissions.ts's implementation staying exactly as it is today.
+  // FAIL-CLOSED DEFAULT (Phase 4 corrective follow-up): isRouteAllowed
+  // returns false, unconditionally (superAdmin included), for any path
+  // with no registered rule at all — there is no "unmatched path falls
+  // through and renders anyway" case anymore. A route must be explicitly
+  // registered in lib/routePermissions.ts before it can ever render, full
+  // stop. This is the actual fix for the gap this task exists to close —
+  // a future `<Route>` added to the table below without a matching rule
+  // is now INACCESSIBLE, not unguarded. isRouteAllowed is the single,
+  // tested, pure decision function (lib/routePermissions.ts) — called
+  // directly here rather than re-implemented inline, so there is no
+  // separate copy of this logic that could drift from what its tests
+  // actually exercise.
   //
-  // No <Navigate> is issued on failure — PermissionDenied renders in
+  // No <Navigate> is issued on denial — PermissionDenied renders in
   // place, exactly like SuperAdminOnly above, so this can never chain
   // into a redirect loop.
-  const requiredPermission = getRequiredPermissionForPath(pathname);
-  if (requiredPermission && !isSuperAdmin) {
-    const permissionsAreUsable = Array.isArray(permissions);
-    if (!permissionsAreUsable || !can(requiredPermission)) {
-      return <PermissionDenied requiredPermission={requiredPermission} />;
-    }
+  if (!isRouteAllowed(pathname, isSuperAdmin, permissions)) {
+    const access = resolveRouteAccess(pathname);
+    return <PermissionDenied requiredPermission={access?.kind === "permission" ? access.permKey ?? null : null} />;
   }
 
   return (
