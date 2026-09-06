@@ -10,15 +10,25 @@ import { LoadingState } from "@/components/ui";
 import InstantHelpBar from "@/components/InstantHelpBar";
 
 export default function AppGroupLayout() {
-  const { user, authLoading } = useTutorProfile();
+  const { user, authLoading, tutorProfile, profileLoading } = useTutorProfile();
 
   useEffect(() => {
     if (!authLoading && !user) {
       router.replace("/login");
+      return;
     }
-  }, [authLoading, user]);
+    // SECURITY FIX (launch audit, tutor self-verification hole) — mirrors
+    // apps/tutor/src/components/AuthGuard.tsx's fix exactly: this used to
+    // check sign-in only, so any authenticated account could open the
+    // tutor app. tutorProfile comes from TutorProfileContext's own
+    // tutors/{uid} listener; once profileLoading settles, null means no
+    // tutor doc exists for this account.
+    if (!authLoading && user && !profileLoading && !tutorProfile) {
+      router.replace("/login");
+    }
+  }, [authLoading, user, profileLoading, tutorProfile]);
 
-  if (authLoading) {
+  if (authLoading || (user && profileLoading)) {
     return (
       <View style={{ flex: 1, backgroundColor: semantic.background, alignItems: "center", justifyContent: "center" }}>
         <Text style={{ fontSize: 28, fontWeight: "900", color: semantic.textPrimary }}>Gloows Tutor</Text>
@@ -27,7 +37,7 @@ export default function AppGroupLayout() {
     );
   }
 
-  if (!user) return null;
+  if (!user || !tutorProfile) return null;
 
   return (
     <View style={{ flex: 1 }}>
