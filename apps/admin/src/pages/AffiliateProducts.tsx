@@ -31,9 +31,12 @@ interface Product {
   badge:        string;       // "Bestseller", "New", "Recommended", etc.
   isActive:     boolean;
   isFeatured:   boolean;
+  homeOrder?:   number;  // controls ordering + the 20-item home cap
   rating:       number;
   reviewCount:  number;
   createdAt:    any;
+  views?:       number;  // incremented when a student opens the product detail page
+  clicks?:      number;  // incremented when a student taps "Buy Now" (real affiliate click-through)
 }
 
 const PLATFORMS: { value: Platform; label: string; color: string; icon: string }[] = [
@@ -55,6 +58,10 @@ const CATEGORIES: { value: Category; label: string; emoji: string }[] = [
 const CLASSES = ["6", "7", "8", "9", "10", "11", "12", "all"];
 const BADGES  = ["", "Bestseller", "New Arrival", "Recommended", "Most Popular", "Editor's Pick", "Budget Pick", "Premium"];
 
+// Home page only ever shows this many flash cards (mobile GloStorePreviewSection /
+// web GloStorePreviewSection both query top MAX_HOME_FEATURED isFeatured items).
+const MAX_HOME_FEATURED = 20;
+
 const EMPTY: Omit<Product, "id" | "createdAt"> = {
   title: "", description: "", imageUrl: "",
   originalPrice: 0, salePrice: 0,
@@ -75,6 +82,7 @@ export default function AffiliateProducts() {
   const [search,      setSearch]      = useState("");
   const [filterCat,   setFilterCat]   = useState<string>("all");
   const [filterPlat,  setFilterPlat]  = useState<string>("all");
+  const [sortBy,      setSortBy]      = useState<"newest" | "clicks" | "views">("newest");
   const formRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
@@ -155,20 +163,44 @@ export default function AffiliateProducts() {
     setProducts((p) => p.filter((x) => x.id !== id));
   };
 
+  const featuredCount = products.filter((p) => p.isFeatured).length;
+
   const toggleField = async (id: string, field: "isActive" | "isFeatured", cur: boolean) => {
-    await updateDoc(doc(db, "affiliateProducts", id), { [field]: !cur });
-    setProducts((p) => p.map((x) => x.id === id ? { ...x, [field]: !cur } : x));
+    // Turning ON "Featured" is what puts a product into the home flash-card
+    // strip — cap it at MAX_HOME_FEATURED so admins can't silently overload
+    // the home page (mobile/web GloStorePreviewSection both limit(20) too,
+    // but blocking it here gives clear feedback instead of a silent drop).
+    if (field === "isFeatured" && !cur && featuredCount >= MAX_HOME_FEATURED) {
+      alert(
+        `You already have ${MAX_HOME_FEATURED} products featured on the home page.\n` +
+        `Un-feature one first, or reorder from the Featured list.`
+      );
+      return;
+    }
+    const patch: Record<string, any> =
+      field === "isFeatured" && !cur ? { isFeatured: true, homeOrder: Date.now() } : { [field]: !cur };
+    await updateDoc(doc(db, "affiliateProducts", id), patch);
+    setProducts((p) => p.map((x) => x.id === id ? { ...x, ...patch } : x));
   };
 
   const discount = (orig: number, sale: number) =>
     orig > 0 && sale < orig ? Math.round(((orig - sale) / orig) * 100) : 0;
 
-  const filtered = products.filter((p) => {
-    if (filterCat  !== "all" && p.category  !== filterCat)  return false;
-    if (filterPlat !== "all" && p.platform  !== filterPlat) return false;
-    if (search && !p.title.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  const filtered = products
+    .filter((p) => {
+      if (filterCat  !== "all" && p.category  !== filterCat)  return false;
+      if (filterPlat !== "all" && p.platform  !== filterPlat) return false;
+      if (search && !p.title.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === "clicks") return (b.clicks ?? 0) - (a.clicks ?? 0);
+      if (sortBy === "views")  return (b.views ?? 0) - (a.views ?? 0);
+      return 0; // "newest" — products is already createdAt desc from the query
+    });
+
+  const totalViews  = products.reduce((sum, p) => sum + (p.views ?? 0), 0);
+  const totalClicks = products.reduce((sum, p) => sum + (p.clicks ?? 0), 0);
 
   const platformMeta = (plat: Platform) => PLATFORMS.find((p) => p.value === plat)!;
   const categoryMeta = (cat: Category)  => CATEGORIES.find((c) => c.value === cat)!;
@@ -180,7 +212,7 @@ export default function AffiliateProducts() {
         <div>
           <h1 className="text-3xl font-black text-white">🛒 Affiliate Products</h1>
           <p className="text-slate-400 text-sm mt-1">
-            Add Amazon & Flipkart books and educational items. Students see "Buy Now" cards. You earn affiliate commission.
+            Add Amazon & Flipkart books and educational items. Featured products appear as flash cards on the student home page and inside GloStore (max {MAX_HOME_FEATURED} on home at once). Students tap "Buy Now" — you earn affiliate commission.
           </p>
         </div>
         <button
@@ -192,12 +224,14 @@ export default function AffiliateProducts() {
       </div>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
         {[
           { label: "Total Products", value: products.length,                   icon: "📦", color: "text-indigo-400" },
           { label: "Active",         value: products.filter((p) => p.isActive).length,  icon: "✅", color: "text-emerald-400" },
-          { label: "Featured",       value: products.filter((p) => p.isFeatured).length,icon: "⭐", color: "text-amber-400" },
+          { label: "Featured",       value: `${featuredCount}/${MAX_HOME_FEATURED}`,icon: "⭐", color: "text-amber-400" },
           { label: "Amazon",         value: products.filter((p) => p.platform === "amazon").length, icon: "🛒", color: "text-orange-400" },
+          { label: "Total Views",    value: totalViews,  icon: "👁", color: "text-sky-400" },
+          { label: "Total Clicks",   value: totalClicks, icon: "👆", color: "text-pink-400" },
         ].map((s) => (
           <div key={s.label} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
             <p className="text-slate-400 text-xs mb-1">{s.icon} {s.label}</p>
@@ -226,6 +260,14 @@ export default function AffiliateProducts() {
         >
           <option value="all">All Platforms</option>
           {PLATFORMS.map((p) => <option key={p.value} value={p.value}>{p.icon} {p.label}</option>)}
+        </select>
+        <select
+          value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+          className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white text-sm"
+        >
+          <option value="newest">Sort: Newest</option>
+          <option value="clicks">Sort: Most Clicked</option>
+          <option value="views">Sort: Most Viewed</option>
         </select>
         <span className="text-slate-500 text-sm ml-auto">{filtered.length} product{filtered.length !== 1 ? "s" : ""}</span>
       </div>
@@ -333,10 +375,10 @@ export default function AffiliateProducts() {
                 <div>
                   <label className="text-slate-300 text-sm font-bold mb-1.5 block">Product Image</label>
                   <MediaUpload
-                    type="image"
+                    mode="image"
                     value={form.imageUrl}
                     storagePath="affiliate-products"
-                    onUpload={(url) => set("imageUrl", url)}
+                    onChange={(url) => set("imageUrl", url)}
                   />
                 </div>
 
@@ -531,6 +573,16 @@ export default function AffiliateProducts() {
                     )}
                   </div>
 
+                  {/* Analytics — views (detail page opened) vs clicks
+                      (Buy Now tapped, i.e. real affiliate click-through) */}
+                  <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                    <span>👁 {p.views ?? 0} views</span>
+                    <span>👆 {p.clicks ?? 0} clicks</span>
+                    {!!(p.views && p.clicks) && (
+                      <span className="text-slate-500">({Math.round((p.clicks / p.views) * 100)}% CTR)</span>
+                    )}
+                  </div>
+
                   {/* URL preview */}
                   <p className="text-slate-500 text-[10px] truncate">{p.affiliateUrl}</p>
 
@@ -546,11 +598,17 @@ export default function AffiliateProducts() {
                     </button>
                     <button
                       onClick={() => toggleField(p.id, "isFeatured", p.isFeatured)}
+                      disabled={!p.isFeatured && featuredCount >= MAX_HOME_FEATURED}
+                      title={!p.isFeatured && featuredCount >= MAX_HOME_FEATURED ? `Home is full (${MAX_HOME_FEATURED}/${MAX_HOME_FEATURED}) — un-feature another product first` : undefined}
                       className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                        p.isFeatured ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+                        p.isFeatured
+                          ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+                          : featuredCount >= MAX_HOME_FEATURED
+                            ? "bg-slate-800 text-slate-600 cursor-not-allowed"
+                            : "bg-slate-800 text-slate-400 hover:bg-slate-700"
                       }`}
                     >
-                      {p.isFeatured ? "⭐ Featured" : "☆ Feature"}
+                      {p.isFeatured ? "⭐ Featured" : featuredCount >= MAX_HOME_FEATURED ? "🔒 Home Full" : "☆ Feature"}
                     </button>
                     <button onClick={() => openEdit(p)} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">✏️</button>
                     <button onClick={() => handleDelete(p.id)} className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors">🗑️</button>
