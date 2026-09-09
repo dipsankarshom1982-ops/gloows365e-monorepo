@@ -14,10 +14,10 @@
 // aiGuruCreditPaymentSuccess already follows.
 
 import axios from "axios";
-import * as crypto from "crypto";
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { onRequest } from "firebase-functions/v2/https";
+import { verifyRazorpayCheckoutSignature } from "./financial/checkoutSignature";
 
 const db = admin.firestore();
 
@@ -134,12 +134,7 @@ export const tutorCreditPaymentSuccess = onRequest(
       }
 
       const keySecret = process.env["RAZORPAY_KEY_SECRET"] ?? "";
-      const expectedSig = crypto
-        .createHmac("sha256", keySecret)
-        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-        .digest("hex");
-
-      if (expectedSig !== razorpay_signature) {
+      if (!verifyRazorpayCheckoutSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature, keySecret)) {
         res.status(400).json({ error: "Invalid signature" });
         return;
       }

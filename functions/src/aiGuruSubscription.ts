@@ -1,5 +1,5 @@
 import axios from "axios";
-import * as crypto from "crypto";
+import { verifyRazorpayCheckoutSignature } from "./financial/checkoutSignature";
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { onRequest } from "firebase-functions/v2/https";
@@ -77,12 +77,7 @@ export const aiGuruCreateSubscription = functionsV1
     if (isVerifyPayload(data)) {
       const { razorpayPaymentId, razorpayOrderId, razorpaySignature } = data;
 
-      const expectedSig = crypto
-        .createHmac("sha256", keySecret)
-        .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-        .digest("hex");
-
-      if (expectedSig !== razorpaySignature) {
+      if (!verifyRazorpayCheckoutSignature(razorpayOrderId, razorpayPaymentId, razorpaySignature, keySecret)) {
         throw new functionsV1.https.HttpsError("permission-denied", "Payment verification failed");
       }
 
@@ -350,12 +345,7 @@ export const aiGuruPaymentSuccess = onRequest(
       const keySecret = process.env["RAZORPAY_KEY_SECRET"] ?? "";
 
       // Verify signature
-      const expectedSig = crypto
-        .createHmac("sha256", keySecret)
-        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-        .digest("hex");
-
-      if (expectedSig !== razorpay_signature) {
+      if (!verifyRazorpayCheckoutSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature, keySecret)) {
         res.status(400).json({ error: "Invalid signature" });
         return;
       }

@@ -1,9 +1,9 @@
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import * as crypto from "crypto";
 import axios from "axios";
 import { getRedis, todayIST, TTL, RK } from "./redish";
+import { verifyRazorpayCheckoutSignature } from "./financial/checkoutSignature";
 
 const db = admin.firestore();
 
@@ -228,12 +228,7 @@ export const seekhoCreateSubscription = functionsV1
     if ("razorpayPaymentId" in data) {
       const { razorpayPaymentId, razorpayOrderId, razorpaySignature } = data;
 
-      const expectedSig = crypto
-        .createHmac("sha256", keySecret)
-        .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-        .digest("hex");
-
-      if (expectedSig !== razorpaySignature) {
+      if (!verifyRazorpayCheckoutSignature(razorpayOrderId, razorpayPaymentId, razorpaySignature, keySecret)) {
         throw new functionsV1.https.HttpsError("permission-denied", "Payment verification failed");
       }
 

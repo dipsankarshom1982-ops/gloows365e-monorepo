@@ -8,7 +8,7 @@
 
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStudentProfile } from "@gloows/shared-logic";
 
 interface RazorpayOptions {
@@ -21,6 +21,7 @@ interface RazorpayOptions {
   prefill: { name?: string; email?: string; contact?: string };
   theme: { color: string };
   handler: (response: any) => void;
+  modal?: { ondismiss?: () => void };
 }
 
 declare global {
@@ -38,10 +39,16 @@ interface Props {
   description?: string;
   onSuccess: (paymentId: string, orderId: string, signature: string) => void;
   onError?: (error: string) => void;
+  /** Called when the user closes the checkout modal without completing or
+   *  failing a payment — distinct from onError, which Razorpay only fires
+   *  for an actual payment.failed event. Optional: callers that already
+   *  treat "no update yet" as fine (e.g. the order stays valid to retry)
+   *  can leave this unset. */
+  onDismiss?: () => void;
   children?: React.ReactNode;
 }
 
-export function RazorpayCheckout({ orderId, amount, description, onSuccess, onError, children }: Props) {
+export function RazorpayCheckout({ orderId, amount, description, onSuccess, onError, onDismiss, children }: Props) {
   // Load Razorpay script
   useEffect(() => {
     if (window.Razorpay) return;
@@ -54,7 +61,17 @@ export function RazorpayCheckout({ orderId, amount, description, onSuccess, onEr
 
   const { studentProfile, user } = useStudentProfile();
 
+  // Guards duplicate clicks — e.g. a fast double-click before the SDK has
+  // responded to the first .open() — from stacking a second modal/order.
+  // Cleared on payment.failed, on modal dismiss, and once the success
+  // handler hands off to the caller (whose own onSuccess is responsible
+  // for its own follow-up loading state, e.g. SubscriptionScreen's
+  // pollForActivation).
+  const [isOpening, setIsOpening] = useState(false);
+  const isOpeningRef = useRef(false);
+
   const openCheckout = () => {
+    if (isOpeningRef.current) return;
     if (!window.Razorpay) {
       onError?.("Payment gateway not loaded. Please try again.");
       return;
@@ -64,28 +81,54 @@ export function RazorpayCheckout({ orderId, amount, description, onSuccess, onEr
       onError?.("Payment isn't configured yet. Please contact support.");
       return;
     }
-    const rzp = new window.Razorpay({
-      key:         keyId,
-      amount,
-      currency:    "INR",
-      name:        "Gloows365E",
-      description: description ?? "Subscription",
-      order_id:    orderId,
-      prefill: {
-        name:    studentProfile?.name,
-        email:   user?.email ?? undefined,
-        contact: studentProfile?.phone,
-      },
-      theme: { color: "#6366f1" },
-      handler: (response) => {
-        onSuccess(
-          response.razorpay_payment_id,
-          response.razorpay_order_id,
-          response.razorpay_signature
-        );
-      },
-    });
+
+    isOpeningRef.current = true;
+    setIsOpening(true);
+
+    let rzp;
+    try {
+      rzp = new window.Razorpay({
+        key:         keyId,
+        amount,
+        currency:    "INR",
+        name:        "Gloows365E",
+        description: description ?? "Subscription",
+        order_id:    orderId,
+        prefill: {
+          name:    studentProfile?.name,
+          email:   user?.email ?? undefined,
+          contact: studentProfile?.phone,
+        },
+        theme: { color: "#6366f1" },
+        handler: (response) => {
+          isOpeningRef.current = false;
+          setIsOpening(false);
+          onSuccess(
+            response.razorpay_payment_id,
+            response.razorpay_order_id,
+            response.razorpay_signature
+          );
+        },
+        modal: {
+          // Fires when the user closes the modal without paying — never
+          // fired alongside payment.failed or handler, so this and those
+          // two are mutually exclusive per checkout attempt.
+          ondismiss: () => {
+            isOpeningRef.current = false;
+            setIsOpening(false);
+            onDismiss?.();
+          },
+        },
+      });
+    } catch (e: any) {
+      isOpeningRef.current = false;
+      setIsOpening(false);
+      onError?.(e?.message ?? "Could not open the payment window. Please try again.");
+      return;
+    }
     rzp.on("payment.failed", (response) => {
+      isOpeningRef.current = false;
+      setIsOpening(false);
       onError?.(response.error?.description ?? "Payment failed. Please try again.");
     });
     rzp.open();
@@ -94,7 +137,8 @@ export function RazorpayCheckout({ orderId, amount, description, onSuccess, onEr
   return (
     <button
       onClick={openCheckout}
-      className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-3 rounded-xl transition-colors w-full"
+      disabled={isOpening}
+      className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-3 rounded-xl transition-colors w-full disabled:opacity-50 disabled:cursor-default"
     >
       {children ?? "Pay Now"}
     </button>
