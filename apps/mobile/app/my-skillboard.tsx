@@ -38,7 +38,7 @@ import { formatVCoins } from "@/utils/formatVCoins";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import type { DocumentData, QueryDocumentSnapshot } from "firebase/firestore";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View,
 } from "react-native";
@@ -117,7 +117,10 @@ export default function MySkillBoardScreen() {
     }
   };
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  // Phase 2D-8 polish: useFocusEffect alone covers both "initial mount"
+  // (a freshly pushed screen is immediately focused) and "returned to this
+  // screen" — a separate plain useEffect(loadAll) here used to duplicate
+  // the same call on every first load (brief §23: "duplicate API calls").
   useFocusEffect(useCallback(() => { loadAll(); }, [loadAll]));
 
   const onRefresh = () => { setRefreshing(true); loadAll().finally(() => setRefreshing(false)); };
@@ -244,7 +247,7 @@ export default function MySkillBoardScreen() {
                     >
                       <View style={{ flex: 1 }}>
                         <Text style={styles.historyTitle} numberOfLines={1}>{h.battleTitle}</Text>
-                        {h.skillLabel ? <Text style={styles.historySkill}>🎯 {h.skillLabel}</Text> : null}
+                        {h.skillLabel ? <Text style={styles.historySkill} numberOfLines={1}>🎯 {h.skillLabel}</Text> : null}
                         <Text style={styles.historyDate}>{formatDate(h.earnedAtMillis)}</Text>
                       </View>
                       <View style={{ alignItems: "flex-end", gap: 2 }}>
@@ -262,7 +265,7 @@ export default function MySkillBoardScreen() {
                   {historyLoadingMore ? (
                     <ActivityIndicator color={ACCENT} />
                   ) : historyLoadMoreError ? (
-                    <Pressable onPress={loadMoreHistory} accessibilityRole="button" accessibilityLabel="Retry loading more battle history">
+                    <Pressable onPress={loadMoreHistory} accessibilityRole="button" accessibilityLabel="Retry loading more battle history" hitSlop={8} style={{ paddingVertical: 6 }}>
                       <Text style={styles.retryText}>Couldn&rsquo;t load more — Tap to retry</Text>
                     </Pressable>
                   ) : !historyDone ? (

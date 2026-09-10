@@ -38,7 +38,7 @@ import { getActiveSkillCategories, getActiveSkills, type Skill, type SkillCatego
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { collection, getDocs, query, where } from "firebase/firestore";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   Pressable, RefreshControl, ScrollView, StyleSheet, Text, View,
 } from "react-native";
@@ -79,15 +79,21 @@ export default function SkillBattleDiscoveryScreen() {
         );
         setMySubmissions(Object.fromEntries(entries));
       }
-    } catch (e: unknown) {
-      setFetchError(e instanceof Error ? e.message : String(e));
+    } catch {
+      // Phase 2D-8 polish: never surface a raw Firebase/Firestore error
+      // string to the student (brief §20) — a friendly, retryable message
+      // instead.
+      setFetchError("Couldn't load Skill Battles. Check your connection and try again.");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  // Phase 2D-8 polish: useFocusEffect alone covers both "initial mount"
+  // and "returned to this screen" — a separate plain useEffect(fetchAll)
+  // here used to duplicate the same fetch on every first load (brief
+  // §23: "duplicate API calls").
   useFocusEffect(useCallback(() => { fetchAll(); }, [fetchAll]));
 
   const onRefresh = () => { setRefreshing(true); fetchAll(); };
@@ -140,6 +146,7 @@ export default function SkillBattleDiscoveryScreen() {
         onPress={() => router.push("/my-skillboard" as any)}
         accessibilityRole="button"
         accessibilityLabel="View my SkillBoard"
+        hitSlop={8}
         style={({ pressed }) => [styles.skillBoardLink, pressed && { opacity: 0.85 }]}
       >
         <Text style={styles.skillBoardLinkText}>🏆 My SkillBoard</Text>
@@ -148,6 +155,15 @@ export default function SkillBattleDiscoveryScreen() {
       {fetchError ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{fetchError}</Text>
+          <Pressable
+            onPress={fetchAll}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading Skill Battles"
+            hitSlop={8}
+            style={({ pressed }) => [styles.errorRetryBtn, pressed && { opacity: 0.8 }]}
+          >
+            <Text style={styles.errorRetryText}>Retry</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -236,8 +252,10 @@ const styles = StyleSheet.create({
   section: { gap: 12 },
   sectionTitle: { fontSize: 14, fontWeight: "900", color: "rgba(255,255,255,0.85)", textTransform: "uppercase", letterSpacing: 0.5 },
   chipScroll: { gap: 8, paddingRight: 8 },
-  errorBanner: { marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: "rgba(255,107,157,0.1)", borderWidth: 1, borderColor: "rgba(255,107,157,0.3)" },
-  errorText: { color: "#ff6b9d", fontSize: 11, fontWeight: "600" },
-  skillBoardLink: { marginHorizontal: 16, marginTop: 10, alignSelf: "flex-start", backgroundColor: "rgba(255,159,67,0.12)", borderWidth: 1, borderColor: "rgba(255,159,67,0.4)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
+  errorBanner: { marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: "rgba(255,107,157,0.1)", borderWidth: 1, borderColor: "rgba(255,107,157,0.3)", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  errorText: { color: "#ff6b9d", fontSize: 11, fontWeight: "600", flexShrink: 1 },
+  errorRetryBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: "rgba(255,107,157,0.18)" },
+  errorRetryText: { color: "#ff6b9d", fontSize: 11, fontWeight: "800" },
+  skillBoardLink: { marginHorizontal: 16, marginTop: 10, alignSelf: "flex-start", backgroundColor: "rgba(255,159,67,0.12)", borderWidth: 1, borderColor: "rgba(255,159,67,0.4)", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 },
   skillBoardLinkText: { color: ACCENT, fontSize: 12, fontWeight: "800" },
 });

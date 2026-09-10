@@ -19,6 +19,7 @@ export default function SkillChip({
       accessibilityRole={onPress ? "button" : "text"}
       accessibilityLabel={onPress ? `Browse ${label} battles` : label}
       accessibilityState={onPress ? { selected: !!active } : undefined}
+      hitSlop={6}
       style={({ pressed }) => [
         styles.chip,
         { borderColor: active ? accent : "rgba(255,255,255,0.12)", backgroundColor: active ? `${accent}22` : "rgba(255,255,255,0.04)" },

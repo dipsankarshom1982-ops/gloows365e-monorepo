@@ -10,12 +10,12 @@
 // [battleId] dynamic segment, since this codebase consistently pushes
 // params rather than using path segments for this feature).
 //
-// NOT built here (explicitly out of scope — brief §38): Competition,
-// Results, Winner Announcement, SkillBoard, Trophy Case, Battle History.
-// The "View Results" and "Enter Competition" CTAs below navigate to the
-// closest existing safe destination (the legacy /skillboard screen, or
-// nowhere yet for canonical battles) rather than a screen that doesn't
-// exist — see handleCTAPress().
+// UPDATED (Phase 2D-5/2D-6): Competition, Leaderboard, and Results now
+// exist for canonical battles (app/battle-competition.tsx,
+// app/battle-results.tsx) — the CTA routing below sends students there.
+// Legacy battles keep routing to the legacy /skillboard screen. SkillBoard
+// (app/my-skillboard.tsx, Phase 2D-7) and Trophy Case are reached from
+// those screens, not from here — see handleCTAPress().
 
 import Header from "@/components/header";
 import { BattleDetailsSkeleton } from "@/components/battle/SkeletonBlock";
@@ -24,7 +24,7 @@ import BattleStatusBadge from "@/components/battle/BattleStatusBadge";
 import Countdown from "@/components/battle/Countdown";
 import { fetchMySubmissionStatus } from "@/components/battle/fetchMySubmissionStatus";
 import {
-  buildBattleCardViewModel, classifyBattleEngine, isEligibleForClasses,
+  buildBattleCardViewModel, isEligibleForClasses,
   normalizeEligibleClasses, resolveCTAState, CTA_COPY, type RawBattle,
 } from "@/components/battle/resolveBattleExperience";
 import type { BattleDetailsViewModel } from "@/components/battle/types";
@@ -32,10 +32,11 @@ import { useTheme } from "@/context/ThemeContext";
 import { auth, db } from "@/lib/firebase";
 import { getActiveSkillCategories, getActiveSkills } from "@/services/skillTaxonomyService";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
 import { doc, getDoc } from "firebase/firestore";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -103,7 +104,13 @@ export default function BattleDetailsScreen() {
     }
   }, [battleId]);
 
-  useEffect(() => { load(); }, [load]);
+  // Phase 2D-8 polish: refresh on screen focus, not just first mount — a
+  // student who submits (Createreelscreen) and taps back should see their
+  // real, current CTA/status here immediately (brief §31 items 9/10),
+  // not a stale "Submit" from before they left. `load()` doesn't reset
+  // `loading` back to true, so a refocus-triggered refresh updates
+  // silently rather than flashing the skeleton again.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const handleCTAPress = () => {
     if (!details) return;
@@ -182,7 +189,7 @@ export default function BattleDetailsScreen() {
           {details.skill ? (
             <Text style={styles.skillLabel}>🎯 {details.skill.name}</Text>
           ) : null}
-          <Text style={styles.heroTitle}>{details.title}</Text>
+          <Text style={styles.heroTitle} numberOfLines={3}>{details.title}</Text>
           {details.description ? <Text style={styles.heroDesc} numberOfLines={4}>{details.description}</Text> : null}
           <View style={styles.heroFooter}>
             {details.reward ? <Text style={styles.heroReward}>🏆 {details.reward.label}</Text> : null}
@@ -229,9 +236,9 @@ export default function BattleDetailsScreen() {
         <Card title="Rules">
           <BulletText>Open to eligible students in the classes/scope shown above.</BulletText>
           <BulletText>One submission per student per battle.</BulletText>
-          <BulletText>Videos must follow Gloows365's content guidelines and be your own original work.</BulletText>
+          <BulletText>Videos must follow Gloows365&rsquo;s content guidelines and be your own original work.</BulletText>
           <BulletText>Every submission is reviewed before it appears in the competition.</BulletText>
-          <BulletText>Final results and winners are determined by Gloows365's competition system.</BulletText>
+          <BulletText>Final results and winners are determined by Gloows365&rsquo;s competition system.</BulletText>
         </Card>
 
         {/* Scoring explanation (§21) — matches Phase 2C's actual V1 inputs exactly */}
@@ -256,7 +263,7 @@ export default function BattleDetailsScreen() {
           <BulletText>Artificial engagement is not allowed.</BulletText>
           <BulletText>Self-engagement is not counted.</BulletText>
           <BulletText>Suspicious activity may be excluded from results.</BulletText>
-          <BulletText>Final results are determined by Gloows365's competition system.</BulletText>
+          <BulletText>Final results are determined by Gloows365&rsquo;s competition system.</BulletText>
         </Card>
 
         {/* Submission status (§25), if any */}
@@ -275,6 +282,7 @@ export default function BattleDetailsScreen() {
           disabled={details.cta === "NOT_ELIGIBLE" || details.cta === "CANCELLED" || details.cta === "SUBMISSIONS_CLOSED"}
           accessibilityRole="button"
           accessibilityLabel={CTA_COPY[details.cta]}
+          accessibilityState={{ disabled: !ctaEnabled(details.cta) }}
           style={({ pressed }) => [
             styles.ctaBtn,
             { backgroundColor: ctaEnabled(details.cta) ? ACCENT : "rgba(255,255,255,0.12)" },

@@ -4,10 +4,16 @@
 // engagement counts itself, never reads Firestore, never calls a Cloud
 // Function. The Like button reports the tap upward; battle-competition.tsx
 // owns the actual engageBattleSubmission call and all its error handling.
+//
+// Phase 2D-8 polish: "expanded" (is this card's video playing) is now a
+// CONTROLLED prop from the parent screen, not local state — the parent
+// tracks a single expandedId across the whole feed so at most one video
+// plays at a time (brief §29: "no excessive simultaneous playback"; §23:
+// "unnecessary video mounting"). Previously each card tracked this
+// independently, so multiple videos could end up mounted/playing at once.
 
 import { Ionicons } from "@expo/vector-icons";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 const ACCENT = "#ff9f43";
@@ -38,13 +44,14 @@ function medalFor(rank?: number): string | null {
 }
 
 export default function CompetitionCard({
-  data, onLike, liking,
+  data, onLike, liking, expanded, onExpand,
 }: {
   data: CompetitionCardData;
   onLike: (submissionId: string) => void;
   liking: boolean;
+  expanded: boolean;
+  onExpand: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const player = useVideoPlayer(expanded && data.mediaRef ? data.mediaRef : null, (p) => {
     p.loop = false;
   });
@@ -73,7 +80,7 @@ export default function CompetitionCard({
           <VideoView player={player} style={styles.video} nativeControls />
         ) : (
           <Pressable
-            onPress={() => setExpanded(true)}
+            onPress={onExpand}
             accessibilityRole="button"
             accessibilityLabel={`Play ${data.studentName}'s submission`}
             style={styles.playWrap}
@@ -112,7 +119,7 @@ export default function CompetitionCard({
         </View>
 
         {data.title ? <Text style={styles.title} numberOfLines={2}>{data.title}</Text> : null}
-        {data.skillLabel ? <Text style={styles.skillChip}>🎯 {data.skillLabel}</Text> : null}
+        {data.skillLabel ? <Text style={styles.skillChip} numberOfLines={1}>🎯 {data.skillLabel}</Text> : null}
 
         <View style={styles.footerRow}>
           <View style={styles.statsRow}>
@@ -128,6 +135,7 @@ export default function CompetitionCard({
             accessibilityRole="button"
             accessibilityState={{ disabled: likeDisabled, selected: data.liked }}
             accessibilityLabel={likeLabel}
+            hitSlop={8}
             style={({ pressed }) => [
               styles.likeBtn,
               data.liked && styles.likeBtnActive,

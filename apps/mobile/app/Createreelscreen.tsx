@@ -334,7 +334,7 @@ export default function CreateReelScreen() {
       try {
         const { uri: thumb } = await VideoThumbnails.getThumbnailAsync(file.uri, { time: 1000 });
         setThumbnail(thumb);
-      } catch (_) {}
+      } catch {}
     }
   };
 
@@ -437,7 +437,7 @@ export default function CreateReelScreen() {
               task.on("state_changed", undefined,
                 (err) => { console.warn("[Upload] thumb error (non-fatal):", err); resolve(); }, // non-fatal
                 async () => {
-                  try { thumbUrl = await getDownloadURL(task.snapshot.ref); } catch (_) {}
+                  try { thumbUrl = await getDownloadURL(task.snapshot.ref); } catch {}
                   resolve();
                 }
               );
@@ -562,7 +562,11 @@ export default function CreateReelScreen() {
       else if (/not open/i.test(rawMsg)) msg = "This battle isn't accepting submissions right now.";
       else if (/hasn.t started/i.test(rawMsg)) msg = "This battle hasn't started yet.";
       else if (/no longer active/i.test(rawMsg)) msg = "This battle is not currently active.";
-      else if (rawMsg) msg = rawMsg;
+      else if (/network/i.test(rawMsg)) msg = "Network error. Check your connection and try again.";
+      // Phase 2D-8 polish: no longer falls back to the raw backend/Firebase
+      // message (brief §20 — never expose that to a student) — an
+      // unrecognized failure keeps the generic, still-actionable message
+      // above. The real message is still logged below for debugging.
       console.error("[Upload] ERROR:", rawMsg);
       setUploadFailed(true);
       Alert.alert("Upload Failed", msg);
@@ -629,7 +633,13 @@ export default function CreateReelScreen() {
   if (notEligible) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          hitSlop={8}
+        >
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.centered}>
@@ -642,6 +652,8 @@ export default function CreateReelScreen() {
           <TouchableOpacity
             style={[styles.backToListBtn, { backgroundColor: colors.accent }]}
             onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Back to Battles"
           >
             <Text style={styles.backToListBtnText}>← Back to Battles</Text>
           </TouchableOpacity>
@@ -656,7 +668,13 @@ export default function CreateReelScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
         {/* Back */}
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          hitSlop={8}
+        >
           <Ionicons name="arrow-back" size={22} color={colors.text} />
           <Text style={[styles.backText, { color: colors.text }]}>Back</Text>
         </TouchableOpacity>
@@ -761,6 +779,9 @@ export default function CreateReelScreen() {
             <TouchableOpacity
               style={styles.sectionHeader}
               onPress={() => setShowMyPosts((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={`My Submissions, ${myPosts.length} of 4`}
+              accessibilityState={{ expanded: showMyPosts }}
             >
               <View style={styles.sectionHeaderLeft}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>📋 My Submissions</Text>
@@ -913,6 +934,9 @@ export default function CreateReelScreen() {
               ]}
               onPress={() => setScope("pan_india")}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Show my reel higher for Pan-India audience"
+              accessibilityState={{ selected: scope === "pan_india" }}
             >
               <Ionicons name="earth" size={14} color={scope === "pan_india" ? accent : colors.textSecondary} />
               <Text style={[styles.scopePillText, { color: scope === "pan_india" ? accent : colors.textSecondary }]}>
@@ -928,6 +952,9 @@ export default function CreateReelScreen() {
               onPress={() => setScope("state")}
               activeOpacity={0.85}
               disabled={!student?.location.state}
+              accessibilityRole="button"
+              accessibilityLabel={`Show my reel higher for ${student?.location.state || "my state"} audience only`}
+              accessibilityState={{ selected: scope === "state", disabled: !student?.location.state }}
             >
               <Ionicons name="location" size={14} color={scope === "state" ? accent : colors.textSecondary} />
               <Text style={[styles.scopePillText, { color: scope === "state" ? accent : colors.textSecondary }]}>
@@ -1041,7 +1068,7 @@ export default function CreateReelScreen() {
           <View style={[styles.progressBox, { backgroundColor: "#e74c3c12", borderColor: "#e74c3c40" }]}>
             <Text style={{ color: "#e74c3c", fontSize: 13, fontWeight: "800" }}>Upload failed</Text>
             <Text style={[styles.statusDesc, { color: colors.textSecondary }]}>
-              Your video wasn't uploaded successfully.
+              Your video wasn&rsquo;t uploaded successfully.
             </Text>
             <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
               <TouchableOpacity
@@ -1187,7 +1214,7 @@ const styles = StyleSheet.create({
   stepsRow:   { flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
   stepItem:   { alignItems: "center", gap: 4, flex: 1 },
   stepDot:    { width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  stepLabel:  { fontSize: 9, fontWeight: "700" },
+  stepLabel:  { fontSize: 10.5, fontWeight: "700" },
 
   submitBtn: { marginHorizontal: 16, marginBottom: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, borderRadius: 16 },
   submitBtnText: { color: "#fff", fontSize: 16, fontWeight: "800" },

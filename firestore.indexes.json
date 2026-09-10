@@ -610,6 +610,25 @@
       "density": "SPARSE_ALL"
     },
     {
+      "collectionGroup": "achievementEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "studentId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "ruleId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "earnedAt",
+          "order": "DESCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
       "collectionGroup": "prizeClaims",
       "queryScope": "COLLECTION",
       "fields": [

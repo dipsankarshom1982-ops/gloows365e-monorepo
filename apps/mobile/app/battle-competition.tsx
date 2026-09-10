@@ -83,6 +83,10 @@ export default function BattleCompetitionScreen() {
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [likingId, setLikingId] = useState<string | null>(null);
+  // Phase 2D-8 polish — at most one card's video plays at a time across
+  // the whole feed (brief §29); owned here, not per-card, so opening a
+  // new one always stops the previous one.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const loadedCountRef = useRef(0);
   const engagementOpenRef = useRef(false);
@@ -180,18 +184,14 @@ export default function BattleCompetitionScreen() {
 
   useEffect(() => { loadBattle(); }, [loadBattle]);
 
-  useEffect(() => {
-    if (phase !== "ready") return;
-    loadRank();
-    loadFeed(true);
-    // Intentionally NOT depending on loadFeed/loadRank (they're re-created
-    // per render via nextCursor) — this effect should fire exactly once
-    // when the screen becomes ready, not on every subsequent state change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
-
   // Refresh on screen focus (brief §16 — allowed, bounded refresh trigger;
-  // no timers, no polling loop).
+  // no timers, no polling loop). Phase 2D-8 polish: this is now the ONLY
+  // trigger for loadRank/loadFeed — a separate plain useEffect([phase])
+  // used to fire the identical call a second time, because useFocusEffect
+  // already re-runs whenever its memoized callback changes (which
+  // includes `phase` flipping to "ready") while the screen is focused,
+  // covering both "just became ready" and "returned to this screen" on
+  // its own.
   useFocusEffect(useCallback(() => {
     if (phase === "ready") { loadRank(); loadFeed(true); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -266,7 +266,13 @@ export default function BattleCompetitionScreen() {
         data={entries}
         keyExtractor={(item) => item.submissionId}
         renderItem={({ item }) => (
-          <CompetitionCard data={item} onLike={onLike} liking={likingId === item.submissionId} />
+          <CompetitionCard
+            data={item}
+            onLike={onLike}
+            liking={likingId === item.submissionId}
+            expanded={expandedId === item.submissionId}
+            onExpand={() => setExpandedId(item.submissionId)}
+          />
         )}
         ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
         contentContainerStyle={styles.list}

@@ -195,13 +195,6 @@ export default function BattleResultsScreen() {
 
   useEffect(() => { loadBattle(); }, [loadBattle]);
 
-  useEffect(() => {
-    if (phase !== "ready") return;
-    loadRank();
-    loadTop3();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
-
   // Once we know the student actually has a ranked entry, fetch their
   // achievements and award status — both battle-scoped, both bounded.
   useEffect(() => {
@@ -212,6 +205,11 @@ export default function BattleResultsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, myRank?.rank]);
 
+  // Phase 2D-8 polish: this is the ONLY trigger for loadRank/loadTop3 now
+  // (previously a plain useEffect([phase]) duplicated this exact call —
+  // useFocusEffect already re-runs whenever its memoized callback changes
+  // while the screen is focused, which includes the initial mount, so it
+  // alone covers both "phase just became ready" and "returned to screen").
   useFocusEffect(useCallback(() => {
     if (phase === "ready") { loadRank(); loadTop3(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -337,7 +335,7 @@ export default function BattleResultsScreen() {
                 <Text style={styles.muted}>Processing your reward…</Text>
               </View>
             ) : awardError ? (
-              <Pressable onPress={loadAward} accessibilityRole="button" accessibilityLabel="Retry checking your reward">
+              <Pressable onPress={loadAward} accessibilityRole="button" accessibilityLabel="Retry checking your reward" hitSlop={8} style={{ paddingVertical: 6 }}>
                 <Text style={styles.retryText}>Couldn&rsquo;t check your reward — Tap to retry</Text>
               </Pressable>
             ) : award && award.status === "credited" && (award.totalCredited ?? 0) > 0 ? (
