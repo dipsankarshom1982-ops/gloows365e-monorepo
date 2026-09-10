@@ -3,6 +3,10 @@ import { useAppTranslation } from "@/context/LanguageContext";
 import { getStreamUploadUrl, uploadToStream } from "@/lib/cloudflareStream";
 import { auth, db, functions, storage } from "@/lib/firebase";
 import { detectPostLanguage } from "@/lib/detectPostLanguage";
+// Phase 2D-4 — centralized engine classification (do not reimplement this
+// check locally, per the brief §4). Same function Discovery/Battle
+// Details already use.
+import { classifyBattleEngine, type RawBattle } from "@/components/battle/resolveBattleExperience";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
@@ -63,6 +67,21 @@ interface MyPost {
   status: PostStatus;
   createdAt: any;
   rejectionReason?: string;
+}
+
+// ─── Phase 2D-4: canonical (Phase 2C) submission status ────────
+// Deliberately a SEPARATE shape from MyPost above, not a reuse/coercion —
+// the canonical submissions/{battleId}_{uid} doc genuinely has a
+// different schema (status values, no thumbnail field — see the upload
+// flow below for why) than the legacy posts doc. Conflating them into
+// one type would be exactly the "second business-logic system" the
+// brief warns against; keeping them distinct keeps each engine's real
+// shape honest.
+type CanonicalSubmissionStatus = "PENDING_MODERATION" | "APPROVED" | "REJECTED" | "REMOVED" | "WITHDRAWN";
+interface CanonicalSubmission {
+  status: CanonicalSubmissionStatus;
+  rejectionReason: string;
+  createdAt: any;
 }
 
 // ─── Status watermark config ──────────────────────────────────
@@ -179,6 +198,17 @@ export default function CreateReelScreen() {
   const [myPosts,        setMyPosts]        = useState<MyPost[]>([]);
   const [showMyPosts,    setShowMyPosts]    = useState(true);
 
+  // ── Phase 2D-4: engine routing state ────────────────────────
+  // "loading" (not "legacy") is the default so nothing submits before the
+  // battle doc is actually fetched and classified — see the effect below.
+  const [engine, setEngine] = useState<"loading" | "legacy" | "canonical">("loading");
+  const [canonicalSubmission, setCanonicalSubmission] = useState<CanonicalSubmission | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
+  // Distinct from the Alert shown on failure — a persistent, dismissable-
+  // by-retry inline state so the student always has a visible next step
+  // rather than only a one-shot popup (brief §16).
+  const [uploadFailed, setUploadFailed] = useState(false);
+
   // FEATURE (language priority + scope ranking): caption is new — there
   // was no text field on this screen before, and detectPostLanguage needs
   // something to read. Scope defaults to "pan_india" (matches today's
@@ -224,10 +254,25 @@ export default function CreateReelScreen() {
     load();
   }, []);
 
-  // ── Real-time: my posts in this battle ────────────────────
+  // ── Phase 2D-4: classify battle engine ─────────────────────
+  // Centralized via classifyBattleEngine (resolveBattleExperience.ts) —
+  // the SAME function Discovery/Battle Details use, not a second
+  // independent detection mechanism (brief §4). Runs once; a battle's
+  // engine never changes mid-lifecycle (Phase 2A/2B design), so no
+  // realtime listener is needed here.
+  useEffect(() => {
+    if (!params.battleId) return;
+    getDoc(doc(db, "skillBattles", params.battleId)).then((snap) => {
+      if (!snap.exists()) { setEngine("legacy"); return; } // unresolvable — fail toward the proven path
+      const raw = { id: snap.id, ...snap.data() } as RawBattle;
+      setEngine(classifyBattleEngine(raw));
+    }).catch(() => setEngine("legacy"));
+  }, [params.battleId]);
+
+  // ── Real-time: my posts in this battle (LEGACY only) ───────
   useEffect(() => {
     const uid = auth.currentUser?.uid;
-    if (!uid || !params.battleId) return;
+    if (!uid || !params.battleId || engine !== "legacy") return;
 
     const q = query(
       collection(db, "posts"),
@@ -249,7 +294,28 @@ export default function CreateReelScreen() {
     });
 
     return () => unsub();
-  }, [params.battleId]);
+  }, [params.battleId, engine]);
+
+  // ── Real-time: my submission in this battle (CANONICAL only) ──
+  // A single doc, not a query — submissions/{battleId}_{uid} is the
+  // deterministic identity Phase 2C already owns (brief §19); this
+  // screen reads it, it never invents a different ID.
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !params.battleId || engine !== "canonical") return;
+
+    const unsub = onSnapshot(doc(db, "submissions", `${params.battleId}_${uid}`), (snap) => {
+      if (!snap.exists()) { setCanonicalSubmission(null); return; }
+      const d = snap.data();
+      setCanonicalSubmission({
+        status: (d.status as CanonicalSubmissionStatus) ?? "PENDING_MODERATION",
+        rejectionReason: d.rejectionReason ?? "",
+        createdAt: d.createdAt,
+      });
+    });
+
+    return () => unsub();
+  }, [params.battleId, engine]);
 
   // ── Pick video ─────────────────────────────────────────────
   const pickVideo = async () => {
@@ -264,6 +330,7 @@ export default function CreateReelScreen() {
       const file = result.assets[0];
       setVideoAsset(file);
       setThumbnail(null);
+      setUploadFailed(false);
       try {
         const { uri: thumb } = await VideoThumbnails.getThumbnailAsync(file.uri, { time: 1000 });
         setThumbnail(thumb);
@@ -286,17 +353,34 @@ export default function CreateReelScreen() {
     if (!videoAsset)      { Alert.alert("Please select a video.");                                            return; }
     if (notEligible)      { Alert.alert("Not eligible", "Only Class 6–12 students can upload skill reels."); return; }
     if (!params.battleId) { Alert.alert("No battle selected.");                                               return; }
+    if (engine === "loading") { Alert.alert("Still loading this battle — try again in a moment."); return; }
 
-    const allowed = await checkPostLimit(params.battleId, uid);
-    if (!allowed) { Alert.alert(t("limitReached"), t("limitReachedDesc")); return; }
+    // Phase 2D-4: the pre-flight duplicate check is engine-specific —
+    // legacy allows up to 4 (checkPostLimit, unchanged); canonical allows
+    // exactly 1, and we already have the authoritative answer in state
+    // (from the realtime submissions/{battleId}_{uid} listener) without
+    // an extra query. Either way this is UX only — the real enforcement
+    // is server-side (submitSkillBattleReel's transaction / brief §20-21).
+    if (engine === "legacy") {
+      const allowed = await checkPostLimit(params.battleId, uid);
+      if (!allowed) { Alert.alert(t("limitReached"), t("limitReachedDesc")); return; }
+    } else if (canonicalSubmission && canonicalSubmission.status !== "WITHDRAWN" && canonicalSubmission.status !== "REMOVED") {
+      Alert.alert("Already submitted", "You've already submitted to this battle. Withdraw your submission first if you need to resubmit.");
+      return;
+    }
 
     setLoading(true);
+    setUploadFailed(false);
     setPhase("idle");
     setUploadProgress(0);
     progressAnim.setValue(0);
 
     try {
       // ── Step 1: Get one-time upload URL from Cloudflare Worker ──
+      // Identical for both engines — media upload is engine-agnostic;
+      // only the record-creation step (Step 4) differs. See this file's
+      // header note on the Cloudflare Worker's known, unresolved
+      // authentication/ownership gap — unchanged, not addressed here.
       setPhase("getting_url");
       console.log("[Upload] Step 1: getting Cloudflare upload URL...");
 
@@ -329,81 +413,133 @@ export default function CreateReelScreen() {
       console.log("[Upload] Step 2 done. uid:", finalVideoId);
 
       // ── Step 3: Upload thumbnail to Firebase Storage ────────────
+      // LEGACY ONLY — createBattleSubmission (Phase 2C) has no
+      // thumbnail field in its accepted input at all (verified against
+      // the actual function signature, not assumed); inventing one here
+      // would mean either silently dropping the value server-side or
+      // modifying the Phase 2C function's schema, and the brief is
+      // explicit that Phase 2C's submission logic isn't this phase's to
+      // change. Canonical submissions skip this step entirely — the
+      // status UI shows a generic icon instead of a thumbnail image for
+      // them (see the render section below), an honest, documented
+      // trade-off rather than an invented field.
       let thumbUrl = finalThumbnailUrl;
-      setPhase("thumb");
+      if (engine === "legacy") {
+        setPhase("thumb");
+        if (thumbnail) {
+          try {
+            console.log("[Upload] Step 3: uploading thumbnail to Firebase Storage...");
+            const thumbBlob = await globalThis.fetch(thumbnail).then((r) => r.blob());
+            const thumbRef  = ref(storage, `thumbnails/${uid}/${Date.now()}_thumb.jpg`);
 
-      if (thumbnail) {
-        try {
-          console.log("[Upload] Step 3: uploading thumbnail to Firebase Storage...");
-          const thumbBlob = await globalThis.fetch(thumbnail).then((r) => r.blob());
-          const thumbRef  = ref(storage, `thumbnails/${uid}/${Date.now()}_thumb.jpg`);
+            await new Promise<void>((resolve, reject) => {
+              const task = uploadBytesResumable(thumbRef, thumbBlob, { contentType: "image/jpeg" });
+              task.on("state_changed", undefined,
+                (err) => { console.warn("[Upload] thumb error (non-fatal):", err); resolve(); }, // non-fatal
+                async () => {
+                  try { thumbUrl = await getDownloadURL(task.snapshot.ref); } catch (_) {}
+                  resolve();
+                }
+              );
+            });
 
-          await new Promise<void>((resolve, reject) => {
-            const task = uploadBytesResumable(thumbRef, thumbBlob, { contentType: "image/jpeg" });
-            task.on("state_changed", undefined,
-              (err) => { console.warn("[Upload] thumb error (non-fatal):", err); resolve(); }, // non-fatal
-              async () => {
-                try { thumbUrl = await getDownloadURL(task.snapshot.ref); } catch (_) {}
-                resolve();
-              }
-            );
-          });
-
-          console.log("[Upload] Step 3 done. thumbUrl:", thumbUrl?.slice(0, 60));
-        } catch (e) {
-          console.warn("[Upload] Step 3 failed (non-fatal — using CF thumb):", e);
+            console.log("[Upload] Step 3 done. thumbUrl:", thumbUrl?.slice(0, 60));
+          } catch (e) {
+            console.warn("[Upload] Step 3 failed (non-fatal — using CF thumb):", e);
+          }
         }
       }
 
-      // ── Step 4: Save post document ───────────────────────────────
+      // ── Step 4: Create the submission record ────────────────────
+      // Branches on engine — this is the ONLY step that differs, and the
+      // branch is explicit and isolated here, not spread across the file
+      // (brief §38). The upload that already happened above (Steps 1-3)
+      // is identical either way; a canonical submission is only ever
+      // created AFTER that upload has actually completed successfully —
+      // never pointing at a missing/failed/incomplete video (brief §13).
       setPhase("saving");
-      console.log("[Upload] Step 4: saving submission...");
+      console.log(`[Upload] Step 4: saving submission (engine=${engine})...`);
 
-      // FEATURE (language priority + scope ranking): targetState and
-      // targetLanguage — short_reels (admin-curated) already had these for
-      // the personalization scorer (lib/reelScoring.ts), but student-
-      // uploaded posts never did, so they got no language/state ranking
-      // boost at all. scope is the student's own choice (Pan-India vs
-      // their own state — see the picker above); language is auto-detected
-      // from the caption, since there's no language picker by product
-      // decision. Both are soft ranking signals only — neither value ever
-      // hides this post from anyone, see lib/reelScoring.ts.
-      const detectedLanguage = detectPostLanguage(caption, student.preferredLanguage);
-      const targetState: string[] =
-        scope === "state" && student.location.state ? [student.location.state] : ["All"];
+      if (engine === "legacy") {
+        // FEATURE (language priority + scope ranking): targetState and
+        // targetLanguage — short_reels (admin-curated) already had these
+        // for the personalization scorer (lib/reelScoring.ts), but
+        // student-uploaded posts never did, so they got no language/
+        // state ranking boost at all. scope is the student's own choice
+        // (Pan-India vs their own state — see the picker above);
+        // language is auto-detected from the caption, since there's no
+        // language picker by product decision. Both are soft ranking
+        // signals only — neither value ever hides this post from
+        // anyone, see lib/reelScoring.ts. LEGACY ONLY — the canonical
+        // engine has no feed-personalization system to feed.
+        const detectedLanguage = detectPostLanguage(caption, student.preferredLanguage);
+        const targetState: string[] =
+          scope === "state" && student.location.state ? [student.location.state] : ["All"];
 
-      // SECURITY FIX (SB-P0-02/SB-P1-03, SkillBattle trust-boundary
-      // remediation): this used to be a direct addDoc(collection(db,
-      // "posts"), {...}) call — the only thing standing between a
-      // malicious client and a pre-approved, fake-engagement,
-      // over-the-submission-limit post was firestore.rules and a
-      // client-side-only checkPostLimit() pre-flight query (see
-      // checkPostLimit's own comment above and functions/src/
-      // skillBattleSubmission.ts's header). Submission now goes through
-      // submitSkillBattleReel, which forces status/engagement/review
-      // fields server-side and enforces the per-battle submission cap
-      // inside one transaction — there's no client-writable path left
-      // that can bypass either.
-      await httpsCallable<
-        {
-          battleId: string; battleTitle?: string; battleType?: string; month?: string;
-          caption: string; targetState: string[]; targetLanguage: string[];
-          mediaUrl: string; thumbnail: string;
-        },
-        { postId: string }
-      >(functions, "submitSkillBattleReel")({
-        battleId:    params.battleId,
-        battleTitle: params.battleTitle,
-        battleType:  params.battleType,
-        month:       params.month,
-        caption:        caption.trim(),
-        targetState,
-        targetLanguage: [detectedLanguage],
-        mediaUrl:  finalPlaybackUrl,
-        thumbnail: thumbUrl ?? "",
-      });
+        // SECURITY FIX (SB-P0-02/SB-P1-03, SkillBattle trust-boundary
+        // remediation, Phase 1): this used to be a direct
+        // addDoc(collection(db, "posts"), {...}) call — the only thing
+        // standing between a malicious client and a pre-approved, fake-
+        // engagement, over-the-submission-limit post was firestore.rules
+        // and a client-side-only checkPostLimit() pre-flight query.
+        // Submission goes through submitSkillBattleReel, which forces
+        // status/engagement/review fields server-side and enforces the
+        // per-battle submission cap inside one transaction.
+        await httpsCallable<
+          {
+            battleId: string; battleTitle?: string; battleType?: string; month?: string;
+            caption: string; targetState: string[]; targetLanguage: string[];
+            mediaUrl: string; thumbnail: string;
+          },
+          { postId: string }
+        >(functions, "submitSkillBattleReel")({
+          battleId:    params.battleId,
+          battleTitle: params.battleTitle,
+          battleType:  params.battleType,
+          month:       params.month,
+          caption:        caption.trim(),
+          targetState,
+          targetLanguage: [detectedLanguage],
+          mediaUrl:  finalPlaybackUrl,
+          thumbnail: thumbUrl ?? "",
+        });
+      } else {
+        // CANONICAL — Phase 2C's createBattleSubmission
+        // (functions/src/battleSubmissions.ts). Student identity comes
+        // from the callable's own context.auth.uid server-side (brief
+        // §24) — there is no uid/studentId field in this payload at all
+        // for a client to override. battleTitle/battleType/month aren't
+        // accepted either (verified against the real function signature,
+        // not assumed) — the server resolves the battle's own fields
+        // itself rather than trusting client-supplied display copies.
+        // caption maps to the canonical model's `description` field (the
+        // closest real equivalent — brief §10: don't invent a new field
+        // for something the backend doesn't have).
+        try {
+          await httpsCallable<
+            { battleId: string; mediaRef: string; description?: string },
+            { submissionId: string }
+          >(functions, "createBattleSubmission")({
+            battleId: params.battleId,
+            mediaRef: finalPlaybackUrl,
+            description: caption.trim(),
+          });
+        } catch (err: any) {
+          // "already-exists" (brief §20/§21 — duplicate/concurrent
+          // submission attempt) is not a failure to alert-and-forget: the
+          // realtime listener above will already reflect the real
+          // (someone else's successful) submission moments after this,
+          // so the honest response is to surface that gently rather than
+          // a generic error, and NOT retry/create anything further.
+          if (err?.code === "functions/already-exists" || err?.details?.code === "already-exists" || /already submitted/i.test(err?.message ?? "")) {
+            Alert.alert("Already submitted", "You've already submitted to this battle.");
+            return;
+          }
+          throw err;
+        }
+      }
 
-      console.log("[Upload] Step 4 done. Post saved ✅");
+      console.log("[Upload] Step 4 done. Submission saved ✅");
 
       setVideoAsset(null);
       setThumbnail(null);
@@ -417,13 +553,62 @@ export default function CreateReelScreen() {
         [{ text: "OK" }]
       );
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Upload failed. Please try again.";
-      console.error("[Upload] ERROR:", msg);
+      // Friendly mapping for the canonical engine's known
+      // failed-precondition reasons (deadline passed / battle not open /
+      // inactive skill — brief §22/§23) instead of a raw backend message.
+      const rawMsg = e instanceof Error ? e.message : "";
+      let msg = "Upload failed. Please try again.";
+      if (/deadline/i.test(rawMsg)) msg = "Submissions are closed. This battle is no longer accepting entries.";
+      else if (/not open/i.test(rawMsg)) msg = "This battle isn't accepting submissions right now.";
+      else if (/hasn.t started/i.test(rawMsg)) msg = "This battle hasn't started yet.";
+      else if (/no longer active/i.test(rawMsg)) msg = "This battle is not currently active.";
+      else if (rawMsg) msg = rawMsg;
+      console.error("[Upload] ERROR:", rawMsg);
+      setUploadFailed(true);
       Alert.alert("Upload Failed", msg);
     } finally {
       setLoading(false);
       setPhase("idle");
     }
+  };
+
+  // ── Phase 2D-4: withdraw submission (CANONICAL only) ────────
+  // Legacy has no withdrawal capability at all (never built, unchanged
+  // by this phase — brief §30/§38: only expose it where the backend
+  // actually supports it). Only offered while PENDING_MODERATION,
+  // mirroring withdrawBattleSubmission's own server-side check
+  // (functions/src/battleSubmissions.ts) — the button below is already
+  // hidden outside that state, and the backend independently re-enforces
+  // it regardless.
+  const withdrawSubmission = () => {
+    if (!params.battleId) return;
+    Alert.alert(
+      "Withdraw this submission?",
+      "Your submission will no longer participate in this battle.",
+      [
+        { text: "Keep Submission", style: "cancel" },
+        {
+          text: "Withdraw", style: "destructive",
+          onPress: async () => {
+            setWithdrawing(true);
+            try {
+              await httpsCallable<{ battleId: string }, { ok: boolean }>(functions, "withdrawBattleSubmission")({
+                battleId: params.battleId,
+              });
+              // Refresh from authoritative state rather than assuming
+              // success locally (brief §32) — the realtime listener will
+              // pick up the real value; this just gives immediate
+              // feedback without racing it.
+              Alert.alert("Submission withdrawn", "This submission is no longer participating in the battle.");
+            } catch {
+              Alert.alert("Couldn't withdraw the submission", "Please try again.");
+            } finally {
+              setWithdrawing(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // ── Phase label & progress ─────────────────────────────────
@@ -516,8 +701,62 @@ export default function CreateReelScreen() {
           </View>
         )}
 
-        {/* My Submissions tracker */}
-        {myPosts.length > 0 && (
+        {/* My Submission tracker (CANONICAL) — Phase 2D-4. A single
+            submission, not a list (brief §20's one-per-battle rule),
+            deliberately a different layout from the legacy list below
+            rather than forcing both into one shape. */}
+        {engine === "canonical" && canonicalSubmission && canonicalSubmission.status !== "WITHDRAWN" && canonicalSubmission.status !== "REMOVED" && (
+          <View
+            style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, padding: 14, gap: 8 }]}
+            accessibilityLabel={`Your submission status: ${canonicalSubmission.status === "PENDING_MODERATION" ? "pending review" : canonicalSubmission.status === "APPROVED" ? "approved" : "rejected"}`}
+          >
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>📋 Your Submission</Text>
+            {canonicalSubmission.status === "PENDING_MODERATION" && (
+              <>
+                <Text style={{ color: "#f39c12", fontSize: 13, fontWeight: "800" }}>⏳ Submitted — Under review</Text>
+                <Text style={[styles.statusDesc, { color: colors.textSecondary }]}>
+                  Your submission has been received. It is being reviewed.
+                </Text>
+              </>
+            )}
+            {canonicalSubmission.status === "APPROVED" && (
+              <>
+                <Text style={{ color: "#2ecc71", fontSize: 13, fontWeight: "800" }}>✅ Approved</Text>
+                <Text style={[styles.statusDesc, { color: colors.textSecondary }]}>
+                  Your submission is now eligible for competition.
+                </Text>
+              </>
+            )}
+            {canonicalSubmission.status === "REJECTED" && (
+              <>
+                <Text style={{ color: "#e74c3c", fontSize: 13, fontWeight: "800" }}>❌ Submission not approved</Text>
+                {canonicalSubmission.rejectionReason ? (
+                  <View style={styles.rejectionBox}>
+                    <Text style={styles.rejectionLabel}>Reason:</Text>
+                    <Text style={styles.rejectionText}>{canonicalSubmission.rejectionReason}</Text>
+                  </View>
+                ) : null}
+              </>
+            )}
+
+            {canonicalSubmission.status === "PENDING_MODERATION" && (
+              <TouchableOpacity
+                onPress={withdrawSubmission}
+                disabled={withdrawing}
+                accessibilityRole="button"
+                accessibilityLabel="Withdraw submission"
+                style={{ alignSelf: "flex-start", marginTop: 4, opacity: withdrawing ? 0.5 : 1 }}
+              >
+                <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: "700", textDecorationLine: "underline" }}>
+                  {withdrawing ? "Withdrawing…" : "Manage · Withdraw Submission"}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* My Submissions tracker (LEGACY) */}
+        {engine === "legacy" && myPosts.length > 0 && (
           <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <TouchableOpacity
               style={styles.sectionHeader}
@@ -601,6 +840,8 @@ export default function CreateReelScreen() {
           onPress={pickVideo}
           activeOpacity={0.85}
           disabled={loading}
+          accessibilityRole="button"
+          accessibilityLabel={videoAsset ? "Replace video" : "Choose a video"}
         >
           {videoAsset ? (
             <>
@@ -654,7 +895,13 @@ export default function CreateReelScreen() {
         {/* Scope — who sees this reel boosted in their feed. Soft ranking
             only (see lib/reelScoring.ts) — picking your state never hides
             this reel from anyone outside it, it's still visible everywhere,
-            just ranked higher for viewers in that state. */}
+            just ranked higher for viewers in that state. LEGACY ONLY — the
+            canonical engine has no feed-personalization system this
+            feeds into, so showing the picker there would be meaningless
+            UI with no effect (Phase 2D-4 brief §11: don't let the
+            student change something scope-like that the battle itself
+            already determines). */}
+        {engine === "legacy" && (
         <View style={[styles.scopeBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.captionLabel, { color: colors.text }]}>Who should see this most?</Text>
           <View style={styles.scopeRow}>
@@ -692,18 +939,25 @@ export default function CreateReelScreen() {
             This still reaches everyone — it just shows higher up for the audience you pick.
           </Text>
         </View>
+        )}
 
         {/* Rules */}
         <View style={[styles.rulesBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.rulesTitle, { color: colors.text }]}>📋 Rules</Text>
-          {[
+          {(engine === "canonical" ? [
+            "Video must be your original skill content",
+            "One submission per battle · Max 60 seconds",
+            "Only Class 6–12 students can participate",
+            "No inappropriate content",
+            "Your submission goes through review before it competes",
+          ] : [
             "Video must be your original skill content",
             "Max 4 reels per battle · Max 60 seconds",
             "Only Class 6–12 students can participate",
             "No inappropriate content",
             "Your state is taken from your profile for the scope picker above",
             "All reels go through admin review before approval",
-          ].map((rule, i) => (
+          ]).map((rule, i) => (
             <View key={i} style={styles.ruleRow}>
               <Text style={[styles.ruleDot, { color: accent }]}>•</Text>
               <Text style={[styles.ruleText, { color: colors.textSecondary }]}>{rule}</Text>
@@ -735,15 +989,25 @@ export default function CreateReelScreen() {
               </View>
             )}
 
-            {/* Step indicators */}
+            {/* Step indicators — canonical submissions skip the thumbnail
+                step entirely (see uploadReel's Step 3 comment: the
+                canonical model has no thumbnail field to send it to), so
+                the indicator omits that step rather than showing one
+                that can never activate. */}
             <View style={styles.stepsRow}>
-              {[
+              {(engine === "canonical" ? [
+                { key: "getting_url", label: "Prepare" },
+                { key: "uploading",   label: "Upload"  },
+                { key: "saving",      label: "Save"    },
+              ] : [
                 { key: "getting_url", label: "Prepare" },
                 { key: "uploading",   label: "Upload"  },
                 { key: "thumb",       label: "Thumb"   },
                 { key: "saving",      label: "Save"    },
-              ].map((step, i) => {
-                const phases: UploadPhase[] = ["getting_url", "uploading", "thumb", "saving"];
+              ]).map((step, i) => {
+                const phases: UploadPhase[] = engine === "canonical"
+                  ? ["getting_url", "uploading", "saving"]
+                  : ["getting_url", "uploading", "thumb", "saving"];
                 const stepIdx  = phases.indexOf(step.key as UploadPhase);
                 const curIdx   = phases.indexOf(phase);
                 const done     = curIdx > stepIdx;
@@ -771,24 +1035,61 @@ export default function CreateReelScreen() {
           </View>
         )}
 
+        {/* Upload failed — persistent retry state (brief §16), not just
+            the one-shot Alert already shown at the moment of failure. */}
+        {uploadFailed && videoAsset && !loading && (
+          <View style={[styles.progressBox, { backgroundColor: "#e74c3c12", borderColor: "#e74c3c40" }]}>
+            <Text style={{ color: "#e74c3c", fontSize: 13, fontWeight: "800" }}>Upload failed</Text>
+            <Text style={[styles.statusDesc, { color: colors.textSecondary }]}>
+              Your video wasn't uploaded successfully.
+            </Text>
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
+              <TouchableOpacity
+                onPress={uploadReel}
+                accessibilityRole="button"
+                accessibilityLabel="Try upload again"
+                style={{ backgroundColor: accent, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10 }}
+              >
+                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "800" }}>Try Again</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={pickVideo}
+                accessibilityRole="button"
+                accessibilityLabel="Choose another video"
+                style={{ borderWidth: 1, borderColor: colors.border, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10 }}
+              >
+                <Text style={{ color: colors.text, fontSize: 12, fontWeight: "800" }}>Choose Another Video</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Submit button */}
-        <TouchableOpacity
-          style={[
-            styles.submitBtn,
-            { backgroundColor: accent, opacity: !videoAsset || loading ? 0.6 : 1 },
-          ]}
-          onPress={uploadReel}
-          disabled={!videoAsset || loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Ionicons name="rocket" size={18} color="#fff" />
-              <Text style={styles.submitBtnText}>Submit to Battle 🚀</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {(() => {
+          const alreadySubmitted = engine === "canonical" && !!canonicalSubmission
+            && canonicalSubmission.status !== "WITHDRAWN" && canonicalSubmission.status !== "REMOVED";
+          const disabled = !videoAsset || loading || engine === "loading" || alreadySubmitted;
+          const label = alreadySubmitted ? "Already Submitted" : loading ? "Submitting…" : "Submit to Battle 🚀";
+          return (
+            <TouchableOpacity
+              style={[styles.submitBtn, { backgroundColor: accent, opacity: disabled ? 0.6 : 1 }]}
+              onPress={uploadReel}
+              disabled={disabled}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+              accessibilityState={{ disabled }}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name={alreadySubmitted ? "checkmark-circle" : "rocket"} size={18} color="#fff" />
+                  <Text style={styles.submitBtnText}>{label}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          );
+        })()}
 
       </ScrollView>
     </SafeAreaView>
