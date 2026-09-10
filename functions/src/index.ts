@@ -55,6 +55,16 @@ export { claimVCoinReward, getVCoinBalance } from "./vcoins";
 export { creditSignupBonus, creditWatchReward, claimSkillBattleReward, getMySkillBattleStanding } from "./vcoins";
 export { submitSkillBattleReel } from "./skillBattleSubmission";
 export { transitionBattleState } from "./skillBattleDomain";
+
+// ── Battle Engine (Phase 2C) — new canonical submissions/scoring/ranking/
+// finalization/rewards pipeline. Parallel to, and independent of, the
+// legacy posts-based SkillBattle flow above — see battleSubmissions.ts's
+// header for why. Nothing in the mobile app calls any of these yet.
+export { createBattleSubmission, withdrawBattleSubmission, reviewBattleSubmission } from "./battleSubmissions";
+export { engageBattleSubmission } from "./battleEngagement";
+export { onBattleSubmissionWritten, onBattleEngagementWritten, getMyBattleRank, getBattleLeaderboardPage } from "./battleRanking";
+export { finalizeBattleResults } from "./battleFinalization";
+export { claimBattleReward } from "./battleRewards";
 export { joinVidyastarContest, deleteContest } from "./vidyastarContest";
 export { submitVidyastarContestQuiz } from "./submitVidyastarContestQuiz";
 export { finalizeContestRanking, autoFinalizeEndedContests } from "./contestLeaderboard";

@@ -549,6 +549,50 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ⚔️ BATTLE ENGINE (Phase 2C) — the new canonical submissions/scoring/
+    // ranking/finalization/rewards pipeline, parallel to and independent
+    // of the legacy posts-based flow above. Every collection here is
+    // client-read-only, Admin-SDK-write-only — ALL mutation goes through
+    // the callables in functions/src/battle*.ts (createBattleSubmission,
+    // reviewBattleSubmission, engageBattleSubmission,
+    // finalizeBattleResults, claimBattleReward), which enforce
+    // eligibility/ownership/state/idempotency server-side. Unlike
+    // posts/{postId}, there is no bounded-counter-bump exception for
+    // engagement here — verified engagement is recorded as immutable,
+    // structurally-deduplicated facts (submissions/{id}/engagements), not
+    // a client-writable counter field at all, so there's nothing for a
+    // direct client write to legitimately do to any of these collections.
+    match /submissions/{submissionId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+
+      match /engagements/{engagementId} {
+        allow read:  if request.auth != null;
+        allow write: if false;
+      }
+    }
+    match /battleScoreEntries/{entryId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+    match /battleResults/{battleId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+    match /battleAwards/{awardId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == resource.data.uid || request.auth.token.admin == true);
+      allow write: if false;
+    }
+    match /skillPoints/{pointsId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+    match /achievementEvents/{eventId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
     // 🤝 PARTNERS
     match /partners/{partnerId} {
       allow read: if request.auth != null;

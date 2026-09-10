@@ -801,6 +801,74 @@ describe("skillBattles/{battleId} — state is Admin-SDK-only, not even admin cl
   });
 });
 
+// ─── Phase 2C — Battle Engine: every collection is client-read-only,
+// Admin-SDK-write-only. All mutation goes through functions/src/battle*.ts
+// callables (createBattleSubmission, reviewBattleSubmission,
+// engageBattleSubmission, finalizeBattleResults, claimBattleReward) — the
+// offline suite (battleSubmissions/Engagement/Finalization/Rewards.test.ts)
+// covers THOSE callables' business logic; these tests cover the one thing
+// only the real rules can prove: that direct client writes are impossible,
+// admin included, for every collection this engine introduced.
+describe("Battle Engine (Phase 2C) — every new collection is write:false, even for admin", () => {
+  const battleId = "engine_battle_1";
+  const studentUid = "engine_student";
+
+  test("submissions/{id} — signed-in read allowed, direct client write always denied", async () => {
+    await seed(async (db) => {
+      await db.doc(`submissions/${battleId}_${studentUid}`).set({ studentId: studentUid, battleId, status: "PENDING_MODERATION" });
+    });
+    const studentDb = testEnv.authenticatedContext(studentUid).firestore();
+    await assertSucceeds(studentDb.doc(`submissions/${battleId}_${studentUid}`).get());
+    await assertFails(studentDb.doc(`submissions/${battleId}_${studentUid}`).update({ status: "APPROVED" }));
+
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertFails(adminDb.doc(`submissions/${battleId}_${studentUid}`).update({ status: "APPROVED" }));
+  });
+
+  test("submissions/{id}/engagements/{id} — read allowed, write always denied (Attack: fake a like)", async () => {
+    const studentDb = testEnv.authenticatedContext(studentUid).firestore();
+    await assertFails(studentDb.doc(`submissions/${battleId}_owner/engagements/like_${studentUid}`).set({ studentId: studentUid, type: "like" }));
+  });
+
+  test("battleScoreEntries/{id} — Attack 9/10: cannot set score/rank directly", async () => {
+    await seed(async (db) => { await db.doc(`battleScoreEntries/${battleId}_${studentUid}`).set({ battleId, studentId: studentUid, score: 1 }); });
+    const studentDb = testEnv.authenticatedContext(studentUid).firestore();
+    await assertSucceeds(studentDb.doc(`battleScoreEntries/${battleId}_${studentUid}`).get());
+    await assertFails(studentDb.doc(`battleScoreEntries/${battleId}_${studentUid}`).update({ score: 999999 }));
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertFails(adminDb.doc(`battleScoreEntries/${battleId}_${studentUid}`).update({ score: 999999 }));
+  });
+
+  test("battleResults/{battleId} — Attack 12: cannot modify a finalized result, even as admin", async () => {
+    await seed(async (db) => { await db.doc(`battleResults/${battleId}`).set({ battleId, status: "locked", entries: [] }); });
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertSucceeds(adminDb.doc(`battleResults/${battleId}`).get());
+    await assertFails(adminDb.doc(`battleResults/${battleId}`).update({ entries: [{ studentId: "attacker", rank: 1, isWinner: true }] }));
+  });
+
+  test("battleAwards/{id} — Attack 14: owner can read their own, a different student cannot read it, nobody can write", async () => {
+    await seed(async (db) => { await db.doc(`battleAwards/${battleId}_${studentUid}`).set({ uid: studentUid, coins: 500 }); });
+    const ownerDb = testEnv.authenticatedContext(studentUid).firestore();
+    await assertSucceeds(ownerDb.doc(`battleAwards/${battleId}_${studentUid}`).get());
+    await assertFails(ownerDb.doc(`battleAwards/${battleId}_${studentUid}`).update({ coins: 999999 }));
+
+    const strangerDb = testEnv.authenticatedContext("someone_else").firestore();
+    await assertFails(strangerDb.doc(`battleAwards/${battleId}_${studentUid}`).get());
+  });
+
+  test("skillPoints/{id} and achievementEvents/{id} — read allowed, write always denied (Attack 16: forge SkillBoard progression)", async () => {
+    await seed(async (db) => {
+      await db.doc(`skillPoints/${studentUid}_singing`).set({ studentId: studentUid, skillId: "singing", totalPoints: 5 });
+    });
+    const studentDb = testEnv.authenticatedContext(studentUid).firestore();
+    await assertSucceeds(studentDb.doc(`skillPoints/${studentUid}_singing`).get());
+    await assertFails(studentDb.doc(`skillPoints/${studentUid}_singing`).update({ totalPoints: 999999 }));
+    await assertFails(studentDb.doc(`achievementEvents/${battleId}_${studentUid}_winner`).set({
+      studentId: studentUid, battleId, ruleId: "winner",
+    }));
+  });
+});
+
 // ─── VidyaStar Phase 1 — Critical Security & Score Integrity Repair ────────
 // See functions/src/submitVidyastarContestQuiz.ts's header comment for the
 // full vulnerability this closes: the client used to be able to read the

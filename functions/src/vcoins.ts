@@ -284,7 +284,11 @@ async function getVCoinRule(source: string): Promise<VCoinRule | null> {
 // Core transactional credit — every source below funnels through this so
 // the duplicate-per-referenceId lock and per-source daily cap are enforced
 // identically regardless of caller, same as the old creditVCoins() did.
-async function creditVCoinsBalance(params: {
+// Exported (Phase 2C) — battleRewards.ts (the new battle engine's reward
+// path) reuses this exact transactional credit primitive (per-referenceId
+// idempotency lock, daily-limit handling) rather than re-implementing it,
+// same reasoning as VCOIN_DIST_PCT above.
+export async function creditVCoinsBalance(params: {
   uid:         string;
   amount:      number;
   source:      string;
@@ -462,9 +466,13 @@ export const creditWatchReward = functionsV1
 // functions/src/__tests__/skillBattleRewardDrift.test.ts for the
 // regression test guarding against this table ever drifting again.
 
-const VCOIN_DIST_PCT = [50, 30, 20, 12, 10, 8, 6, 5, 4, 3];
+// Exported (Phase 2C) so the new battleEngine reward path
+// (battleRewards.ts) reuses this exact table instead of an independent
+// copy — the whole point of "one authoritative reward configuration"
+// (SB-P0-05) is that there's nowhere left for a second copy to drift.
+export const VCOIN_DIST_PCT = [50, 30, 20, 12, 10, 8, 6, 5, 4, 3];
 
-function getSkillBattleCoinForRank(baseCoins: number, rank: number): number {
+export function getSkillBattleCoinForRank(baseCoins: number, rank: number): number {
   if (rank < 1 || rank > 10 || baseCoins <= 0) return 0;
   return Math.round((baseCoins * (VCOIN_DIST_PCT[rank - 1] ?? 0)) / 100);
 }

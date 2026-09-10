@@ -55,13 +55,20 @@ interface FakeDocRef {
   get(): Promise<{ exists: boolean; id: string; ref: FakeDocRef; data: () => DocData | undefined }>;
   set(data: DocData, opts?: { merge?: boolean }): Promise<void>;
   update(data: DocData): Promise<void>;
+  delete(): Promise<void>;
   collection(sub: string): FakeCollectionRef;
 }
 
-// "==" and "in" are the two operators real code under test actually uses
-// (skillBattleSubmission.ts's duplicate-submission count query needs
-// "in") — not a general query-operator emulator.
-type FakeWhereOp = "==" | "in";
+// The operators real code under test actually uses — not a general
+// query-operator emulator. "in" (skillBattleSubmission.ts's duplicate-
+// submission count query) and ">" (battleRanking.ts's getMyBattleRank,
+// "how many entries outscore mine") are both load-bearing, not
+// speculative additions.
+type FakeWhereOp = "==" | "in" | ">" | ">=" | "<" | "<=";
+
+interface FakeAggregateQuery {
+  get(): Promise<{ data: () => { count: number } }>;
+}
 
 interface FakeCollectionRef {
   doc(id?: string): FakeDocRef;
@@ -71,6 +78,7 @@ interface FakeCollectionRef {
   // A real CollectionReference IS a Query — get() works unfiltered too
   // (e.g. `db.collection(path).get()` with no where()/orderBy() first).
   get(): ReturnType<FakeQueryRef["get"]>;
+  count(): FakeAggregateQuery;
 }
 
 interface FakeQueryRef {
@@ -78,21 +86,37 @@ interface FakeQueryRef {
   // get() below — FakeDocRef has no such marker.
   __isQuery: true;
   where(field: string, op: FakeWhereOp, value: unknown): FakeQueryRef;
+  // Chainable — real Firestore supports multi-field composite ordering
+  // (battleFinalization.ts's tie-break chain needs it: score, then
+  // rawEngagement, then approvedAt, then studentId, each its own
+  // .orderBy() call). Each call ADDS a sort key, doesn't replace the
+  // previous one.
   orderBy(field: string, direction?: "asc" | "desc"): FakeQueryRef;
   limit(n: number): FakeQueryRef;
-  // Bounds apply against the field from the most recent orderBy() call —
-  // same semantics as real Firestore. Accepts a raw value or a FakeTimestamp.
+  // Bounds apply against the field from the MOST RECENT orderBy() call —
+  // same semantics as real Firestore's single-field cursor convenience.
+  // Accepts a raw value or a FakeTimestamp.
   startAfter(value: unknown): FakeQueryRef;
   startAt(value: unknown): FakeQueryRef;
   endAt(value: unknown): FakeQueryRef;
   get(): Promise<{ empty: boolean; size: number; docs: Array<{ id: string; data: () => DocData; ref: FakeDocRef }> }>;
+  count(): FakeAggregateQuery;
 }
 
-// "==" and "in" are the only operators real code under test uses.
 function whereFilter(field: string, op: FakeWhereOp, value: unknown): (d: DocData) => boolean {
   if (op === "in") {
     const values = value as unknown[];
     return (d) => values.includes(d[field]);
+  }
+  if (op === ">" || op === ">=" || op === "<" || op === "<=") {
+    const bound = sortableValue(value);
+    return (d) => {
+      const v = sortableValue(d[field]);
+      if (op === ">") return v > bound;
+      if (op === ">=") return v >= bound;
+      if (op === "<") return v < bound;
+      return v <= bound;
+    };
   }
   return (d) => d[field] === value;
 }
@@ -157,6 +181,9 @@ export class FakeFirestore {
       async update(data) {
         self.updateSync(path, data);
       },
+      async delete() {
+        self.store.delete(path);
+      },
       collection(sub: string) {
         return self.collectionRef(`${path}/${sub}`);
       },
@@ -181,10 +208,13 @@ export class FakeFirestore {
         return self.queryRef(path, [whereFilter(field, op, value)]);
       },
       orderBy(field, direction) {
-        return self.queryRef(path, [], undefined, { field, direction: direction ?? "asc" });
+        return self.queryRef(path, [], undefined, [{ field, direction: direction ?? "asc" }]);
       },
       get() {
         return self.queryRef(path, []).get();
+      },
+      count() {
+        return self.queryRef(path, []).count();
       },
     };
   }
@@ -193,71 +223,99 @@ export class FakeFirestore {
     path: string,
     filters: Array<(d: DocData) => boolean>,
     limitN?: number,
-    order?: { field: string; direction: "asc" | "desc" },
+    orders: Array<{ field: string; direction: "asc" | "desc" }> = [],
     bounds?: { startAfter?: unknown; startAt?: unknown; endAt?: unknown }
   ): FakeQueryRef {
     const self = this;
-    return {
-      __isQuery: true,
-      where(field, op, value) {
-        return self.queryRef(path, [...filters, whereFilter(field, op, value)], limitN, order, bounds);
-      },
-      orderBy(field, direction) {
-        return self.queryRef(path, filters, limitN, { field, direction: direction ?? "asc" }, bounds);
-      },
-      limit(n) {
-        return self.queryRef(path, filters, n, order, bounds);
-      },
-      startAfter(value) {
-        return self.queryRef(path, filters, limitN, order, { ...bounds, startAfter: value });
-      },
-      startAt(value) {
-        return self.queryRef(path, filters, limitN, order, { ...bounds, startAt: value });
-      },
-      endAt(value) {
-        return self.queryRef(path, filters, limitN, order, { ...bounds, endAt: value });
-      },
-      async get() {
-        const prefix = `${path}/`;
-        let docs = [...self.store.entries()]
-          .filter(([p]) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"))
-          .filter(([, data]) => filters.every((f) => f(data)))
-          .map(([p, data]) => {
-            const id = p.slice(prefix.length);
-            return { id, data: () => ({ ...data }), ref: self.docRef(p) };
-          });
-        if (order) {
-          const { field, direction } = order;
-          docs.sort((a, b) => {
+    // Bounds (startAfter/startAt/endAt) apply against the LAST orderBy
+    // field, matching real Firestore's single-cursor-value convenience API.
+    const lastOrder = orders[orders.length - 1];
+
+    const matchingDocs = () => {
+      const prefix = `${path}/`;
+      let docs = [...self.store.entries()]
+        .filter(([p]) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"))
+        .filter(([, data]) => filters.every((f) => f(data)))
+        .map(([p, data]) => {
+          const id = p.slice(prefix.length);
+          return { id, data: () => ({ ...data }), ref: self.docRef(p) };
+        });
+
+      if (orders.length > 0) {
+        docs.sort((a, b) => {
+          for (const { field, direction } of orders) {
             const av = sortableValue(a.data()[field]);
             const bv = sortableValue(b.data()[field]);
             const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-            return direction === "desc" ? -cmp : cmp;
+            if (cmp !== 0) return direction === "desc" ? -cmp : cmp;
+          }
+          return 0;
+        });
+      }
+
+      if (lastOrder) {
+        const { field, direction } = lastOrder;
+        if (bounds?.startAfter !== undefined) {
+          const boundV = sortableValue(bounds.startAfter);
+          docs = docs.filter((d) => {
+            const v = sortableValue(d.data()[field]);
+            return direction === "desc" ? v < boundV : v > boundV;
           });
-          if (bounds?.startAfter !== undefined) {
-            const boundV = sortableValue(bounds.startAfter);
-            docs = docs.filter((d) => {
-              const v = sortableValue(d.data()[field]);
-              return direction === "desc" ? v < boundV : v > boundV;
-            });
-          }
-          if (bounds?.startAt !== undefined) {
-            const boundV = sortableValue(bounds.startAt);
-            docs = docs.filter((d) => {
-              const v = sortableValue(d.data()[field]);
-              return direction === "desc" ? v <= boundV : v >= boundV;
-            });
-          }
-          if (bounds?.endAt !== undefined) {
-            const boundV = sortableValue(bounds.endAt);
-            docs = docs.filter((d) => {
-              const v = sortableValue(d.data()[field]);
-              return direction === "desc" ? v >= boundV : v <= boundV;
-            });
-          }
         }
+        if (bounds?.startAt !== undefined) {
+          const boundV = sortableValue(bounds.startAt);
+          docs = docs.filter((d) => {
+            const v = sortableValue(d.data()[field]);
+            return direction === "desc" ? v <= boundV : v >= boundV;
+          });
+        }
+        if (bounds?.endAt !== undefined) {
+          const boundV = sortableValue(bounds.endAt);
+          docs = docs.filter((d) => {
+            const v = sortableValue(d.data()[field]);
+            return direction === "desc" ? v >= boundV : v <= boundV;
+          });
+        }
+      }
+
+      return docs;
+    };
+
+    return {
+      __isQuery: true,
+      where(field, op, value) {
+        return self.queryRef(path, [...filters, whereFilter(field, op, value)], limitN, orders, bounds);
+      },
+      orderBy(field, direction) {
+        return self.queryRef(path, filters, limitN, [...orders, { field, direction: direction ?? "asc" }], bounds);
+      },
+      limit(n) {
+        return self.queryRef(path, filters, n, orders, bounds);
+      },
+      startAfter(value) {
+        return self.queryRef(path, filters, limitN, orders, { ...bounds, startAfter: value });
+      },
+      startAt(value) {
+        return self.queryRef(path, filters, limitN, orders, { ...bounds, startAt: value });
+      },
+      endAt(value) {
+        return self.queryRef(path, filters, limitN, orders, { ...bounds, endAt: value });
+      },
+      async get() {
+        let docs = matchingDocs();
         if (limitN !== undefined) docs = docs.slice(0, limitN);
         return { empty: docs.length === 0, size: docs.length, docs };
+      },
+      count() {
+        return {
+          async get() {
+            // count() ignores limit()/orderBy() ordering (matches real
+            // Firestore — an aggregation query counts matches regardless
+            // of any requested ordering), but does respect where()
+            // filters and cursor bounds, same as the real SDK.
+            return { data: () => ({ count: matchingDocs().length }) };
+          },
+        };
       },
     };
   }
@@ -300,6 +358,7 @@ export class FakeFirestore {
     get: (ref: FakeDocRef | FakeQueryRef) => Promise<any>;
     set: (ref: FakeDocRef, data: DocData, opts?: { merge?: boolean }) => void;
     update: (ref: FakeDocRef, data: DocData) => void;
+    delete: (ref: FakeDocRef) => void;
   }) => Promise<T>): Promise<T> {
     const self = this;
     const tx = {
@@ -313,6 +372,9 @@ export class FakeFirestore {
       },
       update: (ref: FakeDocRef, data: DocData) => {
         self.updateSync(ref.path, data);
+      },
+      delete: (ref: FakeDocRef) => {
+        self.store.delete(ref.path);
       },
     };
     return fn(tx);
