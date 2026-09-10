@@ -52,7 +52,8 @@ export { getHomeFeed, getReelsFeed } from "./feed";
 
 // ── VCoins ─────────────────────────────────────────────────────────────────
 export { claimVCoinReward, getVCoinBalance } from "./vcoins";
-export { creditSignupBonus, creditWatchReward, claimSkillBattleReward } from "./vcoins";
+export { creditSignupBonus, creditWatchReward, claimSkillBattleReward, getMySkillBattleStanding } from "./vcoins";
+export { submitSkillBattleReel } from "./skillBattleSubmission";
 export { joinVidyastarContest, deleteContest } from "./vidyastarContest";
 export { submitVidyastarContestQuiz } from "./submitVidyastarContestQuiz";
 export { finalizeContestRanking, autoFinalizeEndedContests } from "./contestLeaderboard";
@@ -193,6 +194,7 @@ interface PostData {
   isSkillBattle?: boolean;
   battleId?: string;
   month?: string;
+  status?: string;
   likes?: number;
   views?: number;
   watchTime?: number;
@@ -225,6 +227,7 @@ interface RanksMap {
 
 interface SkillboardDoc {
   userId: string;
+  battleId: string;
   name: string;
   profilePic: string;
   school: string;
@@ -252,6 +255,20 @@ interface SkillboardDoc {
 // Triggers on any post write — updates skillboard + ranks
 // ───────────────────────────────────────────────────────────
 
+// SECURITY FIX (SkillBattle trust-boundary remediation — SB-P0-04/SB-P1-02):
+// this pipeline previously scoped everything by `month` alone, with no
+// `battleId` and no `status=="approved"` filter at all — so (a) two
+// concurrent battles targeting the same class in the same month would have
+// had their submissions' scores merged into one corrupted leaderboard for
+// both, and (b) pending/rejected posts' engagement would have counted
+// toward a score before any moderation ever happened, had this pipeline
+// been wired up as-is. It was never actually consumed by the client (the
+// audit's SB-P0-04 finding) — apps/mobile's SkillBoard/SkillBattle screens
+// recomputed everything themselves from raw posts reads instead, via a
+// DIFFERENT, drifted score formula. This is now the single authoritative
+// scoring/ranking pipeline; the client (Createreelscreen.tsx onward) is
+// being migrated to read from it via getMySkillBattleStanding
+// (functions/src/vcoins.ts) instead of recomputing locally.
 export const updateSkillboard = onDocumentWritten(
   { document: "posts/{postId}", secrets: ["REDIS_URL", "REDIS_TOKEN"] },
   async (
@@ -269,12 +286,12 @@ export const updateSkillboard = onDocumentWritten(
       return null;
     }
 
-    const userId = after.userId;
-    const month  = after.month;
-    const cls    = after.class !== undefined ? String(after.class) : "";
+    const userId   = after.userId;
+    const battleId = after.battleId;
+    const cls      = after.class !== undefined ? String(after.class) : "";
 
-    if (!userId || !month || !cls) {
-      console.warn("⚠️ Missing userId, month or class — skipping");
+    if (!userId || !battleId || !cls) {
+      console.warn("⚠️ Missing userId, battleId or class — skipping");
       return null;
     }
 
@@ -305,13 +322,16 @@ export const updateSkillboard = onDocumentWritten(
       }
     }
 
-    // ── Aggregate all qualifying posts for this user+month ─
+    // ── Aggregate this user's APPROVED posts for THIS battle only ──
+    // status=="approved" — a pending/rejected submission's engagement must
+    // never count toward a score. battleId (not month) — the scoping unit.
     const postsSnap = await db
       .collection("posts")
       .where("userId",        "==", userId)
-      .where("month",         "==", month)
+      .where("battleId",      "==", battleId)
       .where("postType",      "==", "reel")
       .where("isSkillBattle", "==", true)
+      .where("status",        "==", "approved")
       .get();
 
     let totalLikes     = 0;
@@ -337,16 +357,20 @@ export const updateSkillboard = onDocumentWritten(
       totalWatchtime * 2;
 
     console.log(
-      `📊 Score for ${userId}: ${totalScore} | ` +
+      `📊 Score for ${userId} (battle ${battleId}): ${totalScore} | ` +
       `likes=${totalLikes} comments=${totalComments} ` +
       `shares=${totalShares} views=${totalViews} watchtime=${totalWatchtime}`
     );
 
-    const skillboardId  = `${userId}_${cls}_${month}`;
+    // Doc ID is battleId+class+userId — the authoritative "battleId +
+    // studentId + scope" shape (class stands in for the per-class
+    // leaderboard dimension the product already had; see recalculateRank).
+    const skillboardId  = `${battleId}_${cls}_${userId}`;
     const skillboardRef = db.collection("skillboard").doc(skillboardId);
 
     const docData: SkillboardDoc = {
       userId,
+      battleId,
       name:       after.name       ?? "",
       profilePic: after.profilePic ?? "",
       school:     after.school     ?? "",
@@ -358,7 +382,7 @@ export const updateSkillboard = onDocumentWritten(
         pincode,
         country: "India",
       },
-      month,
+      month: after.month ?? "",
       totalLikes,
       totalViews,
       totalWatchtime,
@@ -379,10 +403,10 @@ export const updateSkillboard = onDocumentWritten(
     console.log(`✅ Skillboard doc written: ${skillboardId} | score: ${totalScore}`);
 
     await Promise.all([
-      recalculateRank("india",    { class: cls, month }),
-      recalculateRank("state",    { class: cls, month, "location.state":    state    }),
-      recalculateRank("district", { class: cls, month, "location.district": district }),
-      recalculateRank("local",    { class: cls, month, "location.pincode":  pincode  }),
+      recalculateRank("india",    battleId, { class: cls }),
+      recalculateRank("state",    battleId, { class: cls, "location.state":    state    }),
+      recalculateRank("district", battleId, { class: cls, "location.district": district }),
+      recalculateRank("local",    battleId, { class: cls, "location.pincode":  pincode  }),
     ]);
 
     return null;
@@ -660,8 +684,13 @@ export const followUp = functionsV1
 // HELPER: recalculateRank
 // ───────────────────────────────────────────────────────────
 
+// SECURITY FIX (SB-P1-02): scoped by battleId (required, first-class param)
+// + class(+location) now, instead of month alone — see updateSkillboard's
+// header comment for why an ambiguous time-period scope let two concurrent
+// battles' rankings bleed into each other.
 async function recalculateRank(
   scopeKey: keyof RanksMap,
+  battleId: string,
   filters: Record<string, string>
 ): Promise<void> {
 
@@ -681,7 +710,8 @@ async function recalculateRank(
   }
 
   try {
-    let q: admin.firestore.Query = db.collection("skillboard");
+    let q: admin.firestore.Query = db.collection("skillboard")
+      .where("battleId", "==", battleId);
 
     for (const [field, value] of Object.entries(filters)) {
       if (value && value.trim() !== "") {
@@ -713,13 +743,13 @@ async function recalculateRank(
 
     if (scopeKey === "india") {
       const top50 = snap.docs.slice(0, 50).map((d) => ({ id: d.id, ...d.data() }));
-      const cacheKey = RK.leaderboard("india", filters.class ?? "", filters.month ?? "");
+      const cacheKey = RK.leaderboard("india", filters.class ?? "", battleId);
       getRedis().set(cacheKey, top50, { ex: TTL.leaderboard }).catch(() => {});
     }
 
     console.log(
       `✅ ${scopeKey} ranks updated for ${snap.size} students ` +
-      `(class=${filters.class}, month=${filters.month})`
+      `(battle=${battleId}, class=${filters.class})`
     );
   } catch (err) {
     console.error(`❌ recalculateRank(${scopeKey}) failed:`, err);

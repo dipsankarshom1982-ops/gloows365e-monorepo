@@ -3,7 +3,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { auth, db, functions } from "@/lib/firebase";
 import { getVCoinForRank, VCOIN_DIST_PCT } from "@/utils/formatVCoins";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   collection,
   doc,
@@ -202,6 +202,11 @@ const getCashPrize = (prizes: CashPrizeRow[], rank: number): string => {
 export default function SkillboardScreen() {
   const { colors } = useTheme();
   const router = useRouter();
+  // battleId is passed from skillbattle.tsx's "View Full Skillboard" button
+  // — used to resolve my own rank/reward server-side (SB-P0-04). If missing
+  // (e.g. a direct deep link), falls back to whatever sponsored battle is
+  // loaded for the active month, same as before this fix.
+  const routeParams = useLocalSearchParams<{ battleId?: string; month?: string }>();
 
   const [activeScope,    setActiveScope]    = useState<LocationScope>("india");
   const [activeMonth,    setActiveMonth]    = useState<MonthKey>(getAvailableMonths()[0]);
@@ -220,6 +225,12 @@ export default function SkillboardScreen() {
   const claimToastAnim   = useRef(new Animated.Value(0)).current;
 
   const availableMonths = getAvailableMonths();
+
+  // battleId scoping (SB-P0-04/SB-P1-02): prefer the route param
+  // (skillbattle.tsx's "View Full Skillboard" button always passes one),
+  // falling back to whatever sponsored battle is loaded for the active
+  // month so a direct deep-link with neither still resolves something.
+  const effectiveBattleId = routeParams.battleId || battle?.battleId || null;
 
   // Accent — sponsored orange always
   const accent  = "#ff9f43";
@@ -326,13 +337,22 @@ export default function SkillboardScreen() {
         }
       })();
 
+      // battleId scoping (SB-P1-02 foundation): without this, two
+      // concurrent battles for the same class in the same month would have
+      // their submissions merged into one corrupted leaderboard. Only
+      // added when known (route param or the loaded month's battle) so a
+      // direct deep-link with neither still degrades to the old
+      // month+class-only view rather than showing nothing.
+      const battleConstraint = effectiveBattleId ? where("battleId", "==", effectiveBattleId) : null;
+
       const snap = await getDocs(query(
         collection(db, "posts"),
         where("isSkillBattle", "==", true),
         where("status",        "==", "approved"),
         where("class",         "==", cls),
         where("month",         "==", activeMonth),
-        ...(scopeConstraint ? [scopeConstraint] : [])
+        ...(scopeConstraint ? [scopeConstraint] : []),
+        ...(battleConstraint ? [battleConstraint] : [])
       ));
 
       const userMap = new Map<string, BoardEntry & { postCount: number }>();
@@ -368,113 +388,101 @@ export default function SkillboardScreen() {
       const myUid = auth.currentUser?.uid;
       const myIdx = sorted.findIndex((e) => e.userId === myUid);
       setMyEntry(myIdx >= 0 ? sorted[myIdx] : null);
-      setMyRanks((prev) => ({ ...prev, [activeScope]: myIdx >= 0 ? myIdx + 1 : 0 }));
+      // SECURITY FIX (SB-P0-04): this used to also self-report rank here
+      // (setMyRanks from this same client-side scan), silently overwriting
+      // the server-resolved value fetchMyStanding sets below — meaning the
+      // value actually sent into the reward claim was still whatever the
+      // client computed last. myRanks is now written ONLY by
+      // fetchMyStanding (getMySkillBattleStanding); this list stays
+      // display-only (podium + the ranked-4+ list), which is why it isn't
+      // itself battleId-status-authoritative-critical the way myRanks is.
     } catch (e) {
       console.log("leaderboard:", e);
       setEntries([]);
     } finally {
       setLoading(false);
     }
-  }, [studentMeta, activeScope, activeMonth]);
+  }, [studentMeta, activeScope, activeMonth, effectiveBattleId]);
 
   useEffect(() => {
     if (studentMeta) buildLeaderboard();
   }, [buildLeaderboard]);
 
-  // ── 4. Build all 4 ranks simultaneously ───────────────────
-  const buildAllRanks = useCallback(async () => {
-    if (!studentMeta) return;
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    const cls = studentMeta.class;
+  // ── 4. My rank — SERVER-RESOLVED (SB-P0-04) ────────────────
+  // Used to recompute this by scanning raw `posts` client-side (4 full
+  // unpaginated queries) and self-report the result — including into the
+  // reward claim below. Now reads getMySkillBattleStanding
+  // (functions/src/vcoins.ts), which derives rank/score from the
+  // server-written skillboard/{battleId}_{class}_{uid} doc
+  // (functions/src/index.ts's updateSkillboard) instead. Falls back to the
+  // route-passed battleId when the month-based `battle` lookup hasn't
+  // resolved one (e.g. arriving here for a month with no active sponsored
+  // battle doc, but a valid battleId in the URL). See its declaration
+  // above (near the other derived state) for why it must be defined
+  // before buildLeaderboard, which also depends on it.
+  const fetchMyStanding = useCallback(async () => {
+    if (!auth.currentUser?.uid || !effectiveBattleId) return;
+    try {
+      const { data } = await httpsCallable<
+        { battleId: string },
+        {
+          ranks: RanksMap; totalScore: number;
+          participants: RanksMap;
+          battleEnded: boolean;
+        }
+      >(functions, "getMySkillBattleStanding")({ battleId: effectiveBattleId });
 
-    const scopes: { scope: LocationScope; extra: any }[] = [
-      { scope: "local",    extra: where("location.pincode",  "==", studentMeta.location.pincode)  },
-      { scope: "district", extra: where("location.district", "==", studentMeta.location.district) },
-      { scope: "state",    extra: where("location.state",    "==", studentMeta.location.state)    },
-      { scope: "india",    extra: null },
-    ];
-
-    const newRanks:  RanksMap                      = { local: 0, district: 0, state: 0, india: 0 };
-    const newCounts: Record<LocationScope, number> = { local: 0, district: 0, state: 0, india: 0 };
-
-    await Promise.all(scopes.map(async ({ scope, extra }) => {
-      try {
-        const snap = await getDocs(query(
-          collection(db, "posts"),
-          where("isSkillBattle", "==", true),
-          where("status",        "==", "approved"),
-          where("class",         "==", cls),
-          where("month",         "==", activeMonth),
-          ...(extra ? [extra] : [])
-        ));
-        const scoreMap = new Map<string, number>();
-        snap.docs.forEach((d) => {
-          const p = d.data();
-          if (!p.userId) return;
-          scoreMap.set(p.userId, (scoreMap.get(p.userId) ?? 0) + computeScore(p));
-        });
-        const sorted     = [...scoreMap.entries()].sort((a, b) => b[1] - a[1]);
-        const idx        = sorted.findIndex(([u]) => u === uid);
-        newRanks[scope]  = idx >= 0 ? idx + 1 : 0;
-        newCounts[scope] = sorted.length;
-      } catch (e) { console.log(`rank[${scope}]:`, e); }
-    }));
-
-    setMyRanks(newRanks);
-    setParticipantCounts(newCounts);
-  }, [studentMeta, activeMonth]);
+      setMyRanks(data.ranks);
+      setParticipantCounts(data.participants);
+    } catch (e) { console.log("standing:", e); }
+  }, [effectiveBattleId]);
 
   useEffect(() => {
-    if (studentMeta) buildAllRanks();
-  }, [buildAllRanks]);
+    if (studentMeta) fetchMyStanding();
+  }, [studentMeta, fetchMyStanding]);
 
-  // ── 5. Auto-credit V-Coins when battle has ended ──────────
+  // ── 5. Claim V-Coins when battle has ended ─────────────────
+  // SECURITY FIX (SB-P0-03): used to send this screen's own self-computed
+  // myRanks + the battle config's vcoin_* pool values straight to
+  // claimSkillBattleReward, which trusted both completely — a caller could
+  // invoke that Cloud Function directly with a fabricated rank AND a
+  // fabricated pool amount for any battleId, no app UI required. The
+  // client now sends only battleId; the function resolves rank, pool,
+  // reward %, and the credited amount itself from trusted server-side
+  // reads (see functions/src/vcoins.ts's claimSkillBattleReward /
+  // resolveSkillBattleStanding), and records an immutable
+  // skillBattleAwards/{battleId}_{uid} doc so a retried/duplicate call
+  // can't credit twice.
   useEffect(() => {
     const uid = auth.currentUser?.uid;
-    if (!uid || !battle || !battle.battleId || !battle.endDate) return;
+    if (!uid || !effectiveBattleId || !battle?.endDate) return;
 
     // Only proceed if battle has actually ended
     if (new Date(battle.endDate) >= new Date()) return;
 
     // Skip if already attempted for this battleId this session
-    if (claimAttemptRef.current === battle.battleId) return;
-    claimAttemptRef.current = battle.battleId;
+    if (claimAttemptRef.current === effectiveBattleId) return;
+    claimAttemptRef.current = effectiveBattleId;
 
     // Skip if user has no rank in any scope
     if (!Object.values(myRanks).some((r) => r > 0)) return;
 
-    // Migrated to the claimSkillBattleReward Cloud Function
-    // (functions/src/vcoins.ts) — uid comes from the callable's own
-    // context.auth server-side now, not passed in the payload.
     httpsCallable<
-      {
-        battleId: string; battleMonth: string; ranks: RanksMap;
-        vcoins: { vcoin_india: number; vcoin_state: number; vcoin_district: number; vcoin_local: number };
-      },
-      { totalCredited: number }
-    >(functions, "claimSkillBattleReward")({
-      battleId:    battle.battleId,
-      battleMonth: activeMonth,
-      ranks:       myRanks,
-      vcoins: {
-        vcoin_india:    battle.vcoin_india,
-        vcoin_state:    battle.vcoin_state,
-        vcoin_district: battle.vcoin_district,
-        vcoin_local:    battle.vcoin_local,
-      },
-    }).then(({ data }) => {
-      const totalCredited = data.totalCredited;
-      if (totalCredited <= 0) return;
-      setClaimedCoins(totalCredited);
-      // Animate toast in, hold, then fade out
-      Animated.sequence([
-        Animated.timing(claimToastAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
-        Animated.delay(3000),
-        Animated.timing(claimToastAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
-      ]).start();
-    }).catch(() => { /* silent — user can claim next time */ });
-  }, [battle, myRanks, activeMonth, claimToastAnim]);
+      { battleId: string },
+      { totalCredited: number; alreadyClaimed: boolean }
+    >(functions, "claimSkillBattleReward")({ battleId: effectiveBattleId })
+      .then(({ data }) => {
+        const totalCredited = data.totalCredited;
+        if (totalCredited <= 0 || data.alreadyClaimed) return;
+        setClaimedCoins(totalCredited);
+        // Animate toast in, hold, then fade out
+        Animated.sequence([
+          Animated.timing(claimToastAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+          Animated.delay(3000),
+          Animated.timing(claimToastAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
+        ]).start();
+      }).catch(() => { /* silent — user can claim next time */ });
+  }, [battle, effectiveBattleId, myRanks, claimToastAnim]);
 
   // ─── Render helpers ───────────────────────────────────────
 

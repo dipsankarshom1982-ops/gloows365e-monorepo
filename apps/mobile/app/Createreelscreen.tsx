@@ -1,7 +1,8 @@
 import { useTheme } from "@/context/ThemeContext";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { getStreamUploadUrl, uploadToStream } from "@/lib/cloudflareStream";
-import { auth, db, storage } from "@/lib/firebase";
+import { auth, db, functions, storage } from "@/lib/firebase";
+import { detectPostLanguage } from "@/lib/detectPostLanguage";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
@@ -9,16 +10,15 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
   getDocs,
   onSnapshot,
   query,
-  serverTimestamp,
   where,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import {
   getDownloadURL,
   ref,
@@ -33,6 +33,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -46,6 +47,7 @@ interface StudentData {
   class: string;
   school: string;
   profilePic: string;
+  preferredLanguage?: string;
   location: {
     city: string;
     district: string;
@@ -98,6 +100,12 @@ const STATUS_CONFIG: Record<
 const ELIGIBLE_CLASSES = ["6", "7", "8", "9", "10", "11", "12"];
 
 // ─── Post limit check ─────────────────────────────────────────
+// UX pre-check only (SB-P1-03) — lets the app show "limit reached" before
+// spending time on a video upload the server would reject anyway. The
+// actual enforcement is server-side now: submitSkillBattleReel
+// (functions/src/skillBattleSubmission.ts) re-checks this same limit
+// inside a transaction at save time, so a stale read here (or a bypass of
+// this check entirely) can't result in more than the real cap.
 const checkPostLimit = async (battleId: string, uid: string): Promise<boolean> => {
   const q = query(
     collection(db, "posts"),
@@ -171,6 +179,15 @@ export default function CreateReelScreen() {
   const [myPosts,        setMyPosts]        = useState<MyPost[]>([]);
   const [showMyPosts,    setShowMyPosts]    = useState(true);
 
+  // FEATURE (language priority + scope ranking): caption is new — there
+  // was no text field on this screen before, and detectPostLanguage needs
+  // something to read. Scope defaults to "pan_india" (matches today's
+  // implicit behavior: every post is already visible to every viewer,
+  // unchanged by this feature since scope is a soft ranking, not a
+  // filter — see lib/reelScoring.ts).
+  const [caption,    setCaption]    = useState("");
+  const [scope,      setScope]      = useState<"pan_india" | "state">("pan_india");
+
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   const player = useVideoPlayer(videoAsset?.uri ?? null, (p) => {
@@ -193,6 +210,7 @@ export default function CreateReelScreen() {
           class:      cls,
           school:     d.school     ?? "",
           profilePic: d.profilePic ?? "",
+          preferredLanguage: d.preferredLanguage ?? "",
           location: {
             city:     d.location?.city     ?? "",
             district: d.location?.district ?? "",
@@ -337,49 +355,60 @@ export default function CreateReelScreen() {
         }
       }
 
-      // ── Step 4: Save post document to Firestore ─────────────────
+      // ── Step 4: Save post document ───────────────────────────────
       setPhase("saving");
-      console.log("[Upload] Step 4: saving Firestore doc...");
+      console.log("[Upload] Step 4: saving submission...");
 
-      await addDoc(collection(db, "posts"), {
-        // Identity
-        userId:     uid,
-        name:       student.name,
-        school:     student.school,
-        class:      student.class,
-        profilePic: student.profilePic,
-        // Battle
-        battleId:      params.battleId,
-        battleTitle:   params.battleTitle,
-        battleType:    params.battleType,
-        isSkillBattle: true,
-        postType:      "reel",
-        month:         params.month,
-        // Location
-        location: {
-          city:     student.location.city,
-          district: student.location.district,
-          state:    student.location.state,
-          pincode:  student.location.pincode,
-          country:  "India",
+      // FEATURE (language priority + scope ranking): targetState and
+      // targetLanguage — short_reels (admin-curated) already had these for
+      // the personalization scorer (lib/reelScoring.ts), but student-
+      // uploaded posts never did, so they got no language/state ranking
+      // boost at all. scope is the student's own choice (Pan-India vs
+      // their own state — see the picker above); language is auto-detected
+      // from the caption, since there's no language picker by product
+      // decision. Both are soft ranking signals only — neither value ever
+      // hides this post from anyone, see lib/reelScoring.ts.
+      const detectedLanguage = detectPostLanguage(caption, student.preferredLanguage);
+      const targetState: string[] =
+        scope === "state" && student.location.state ? [student.location.state] : ["All"];
+
+      // SECURITY FIX (SB-P0-02/SB-P1-03, SkillBattle trust-boundary
+      // remediation): this used to be a direct addDoc(collection(db,
+      // "posts"), {...}) call — the only thing standing between a
+      // malicious client and a pre-approved, fake-engagement,
+      // over-the-submission-limit post was firestore.rules and a
+      // client-side-only checkPostLimit() pre-flight query (see
+      // checkPostLimit's own comment above and functions/src/
+      // skillBattleSubmission.ts's header). Submission now goes through
+      // submitSkillBattleReel, which forces status/engagement/review
+      // fields server-side and enforces the per-battle submission cap
+      // inside one transaction — there's no client-writable path left
+      // that can bypass either.
+      await httpsCallable<
+        {
+          battleId: string; battleTitle?: string; battleType?: string; month?: string;
+          caption: string; targetState: string[]; targetLanguage: string[];
+          mediaUrl: string; thumbnail: string;
         },
-        // Media — Cloudflare Stream playback URL (HLS)
+        { postId: string }
+      >(functions, "submitSkillBattleReel")({
+        battleId:    params.battleId,
+        battleTitle: params.battleTitle,
+        battleType:  params.battleType,
+        month:       params.month,
+        caption:        caption.trim(),
+        targetState,
+        targetLanguage: [detectedLanguage],
         mediaUrl:  finalPlaybackUrl,
         thumbnail: thumbUrl ?? "",
-        // Moderation
-        status:          "pending",
-        rejectionReason: "",
-        reviewedAt:      null,
-        reviewedBy:      "",
-        // Engagement
-        likes: 0, views: 0, shares: 0, comments: 0, watchTime: 0,
-        createdAt: serverTimestamp(),
       });
 
       console.log("[Upload] Step 4 done. Post saved ✅");
 
       setVideoAsset(null);
       setThumbnail(null);
+      setCaption("");
+      setScope("pan_india");
       setShowMyPosts(true);
 
       Alert.alert(
@@ -608,6 +637,62 @@ export default function CreateReelScreen() {
           )}
         </TouchableOpacity>
 
+        {/* Caption — used to auto-detect the post's language (see lib/detectPostLanguage.ts) */}
+        <View style={[styles.captionBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.captionLabel, { color: colors.text }]}>Caption (optional)</Text>
+          <TextInput
+            value={caption}
+            onChangeText={setCaption}
+            placeholder="Say something about your reel..."
+            placeholderTextColor={colors.textSecondary}
+            multiline
+            maxLength={200}
+            style={[styles.captionInput, { color: colors.text, borderColor: colors.border }]}
+          />
+        </View>
+
+        {/* Scope — who sees this reel boosted in their feed. Soft ranking
+            only (see lib/reelScoring.ts) — picking your state never hides
+            this reel from anyone outside it, it's still visible everywhere,
+            just ranked higher for viewers in that state. */}
+        <View style={[styles.scopeBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.captionLabel, { color: colors.text }]}>Who should see this most?</Text>
+          <View style={styles.scopeRow}>
+            <TouchableOpacity
+              style={[
+                styles.scopePill,
+                { borderColor: scope === "pan_india" ? accent : colors.border },
+                scope === "pan_india" && { backgroundColor: `${accent}18` },
+              ]}
+              onPress={() => setScope("pan_india")}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="earth" size={14} color={scope === "pan_india" ? accent : colors.textSecondary} />
+              <Text style={[styles.scopePillText, { color: scope === "pan_india" ? accent : colors.textSecondary }]}>
+                Pan-India
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.scopePill,
+                { borderColor: scope === "state" ? accent : colors.border },
+                scope === "state" && { backgroundColor: `${accent}18` },
+              ]}
+              onPress={() => setScope("state")}
+              activeOpacity={0.85}
+              disabled={!student?.location.state}
+            >
+              <Ionicons name="location" size={14} color={scope === "state" ? accent : colors.textSecondary} />
+              <Text style={[styles.scopePillText, { color: scope === "state" ? accent : colors.textSecondary }]}>
+                {student?.location.state || "My State"} only
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={[styles.scopeHint, { color: colors.textSecondary }]}>
+            This still reaches everyone — it just shows higher up for the audience you pick.
+          </Text>
+        </View>
+
         {/* Rules */}
         <View style={[styles.rulesBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.rulesTitle, { color: colors.text }]}>📋 Rules</Text>
@@ -616,7 +701,7 @@ export default function CreateReelScreen() {
             "Max 4 reels per battle · Max 60 seconds",
             "Only Class 6–12 students can participate",
             "No inappropriate content",
-            "Location is auto-detected from your profile",
+            "Your state is taken from your profile for the scope picker above",
             "All reels go through admin review before approval",
           ].map((rule, i) => (
             <View key={i} style={styles.ruleRow}>
@@ -773,6 +858,16 @@ const styles = StyleSheet.create({
   videoPickerSub:     { fontSize: 13, fontWeight: "500", textAlign: "center" },
   videoPickerBtn:     { flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, marginTop: 6 },
   videoPickerBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+
+  // Caption + scope (new)
+  captionBox:    { marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 14, borderWidth: 1, gap: 8 },
+  captionLabel:  { fontSize: 13, fontWeight: "800" },
+  captionInput:  { fontSize: 14, fontWeight: "500", minHeight: 60, borderWidth: 1, borderRadius: 10, padding: 10, textAlignVertical: "top" },
+  scopeBox:      { marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 14, borderWidth: 1, gap: 10 },
+  scopeRow:      { flexDirection: "row", gap: 10 },
+  scopePill:     { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5 },
+  scopePillText: { fontSize: 12, fontWeight: "700" },
+  scopeHint:     { fontSize: 11, fontWeight: "500", lineHeight: 15 },
 
   rulesBox:   { marginHorizontal: 16, marginBottom: 16, padding: 14, borderRadius: 14, borderWidth: 1, gap: 8 },
   rulesTitle: { fontSize: 14, fontWeight: "800", marginBottom: 4 },

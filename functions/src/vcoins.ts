@@ -292,12 +292,25 @@ async function creditVCoinsBalance(params: {
   description: string;
   referenceId: string;
   metadata?:   Record<string, unknown>;
+  // BUGFIX (surfaced while implementing SB-P0-03's server-side reward
+  // resolution): dailyLimit exists to cap REPEATABLE per-day earning
+  // (reel/video/story watch), not a one-time prize payout. SkillBattle
+  // credits used to route through the same cap anyway — a legitimate
+  // ₹-pool-adjacent India rank-1 reward (e.g. 500 VCoins) was silently
+  // clamped down to SKILLBATTLE_WINNER_REWARD's dailyLimit (100), with no
+  // error or indication to the student that they were underpaid. A
+  // SkillBattle claim already has its own correct anti-abuse control — one
+  // claim per battle+scope via referenceId (this function's own lock
+  // below) plus the immutable skillBattleAwards reservation
+  // (claimSkillBattleReward) — so it doesn't need or want the daily cap on
+  // top of that. Caught by functions/src/__tests__/skillBattleReward.test.ts.
+  bypassDailyLimit?: boolean;
 }): Promise<{ credited: boolean; amount: number; balanceAfter: number }> {
-  const { uid, amount, source, title, description, referenceId, metadata = {} } = params;
+  const { uid, amount, source, title, description, referenceId, metadata = {}, bypassDailyLimit = false } = params;
   if (amount <= 0) return { credited: false, amount: 0, balanceAfter: 0 };
 
   const rule       = await getVCoinRule(source);
-  const dailyLimit = rule?.dailyLimit ?? DEFAULT_DAILY_LIMITS[source] ?? 9999;
+  const dailyLimit = bypassDailyLimit ? Number.MAX_SAFE_INTEGER : (rule?.dailyLimit ?? DEFAULT_DAILY_LIMITS[source] ?? 9999);
 
   const userRef       = db.doc(`users/${uid}`);
   const txRef          = userRef.collection("vCoinTransactions").doc();
@@ -425,15 +438,30 @@ export const creditWatchReward = functionsV1
     return result;
   });
 
-// ─── claimSkillBattleReward ────────────────────────────────────────────────
-// SECURITY NOTE: ranks/vcoins are still trusted from the client here,
-// ported as-is from claimSkillBattleRewards — see this section's header
-// comment. referenceId = `${battleId}_${scope}` caps each scope to one
-// claim per battle, same as before.
+// ─── SkillBattle: server-authoritative standing + reward resolution ───────
+// SECURITY FIX (SkillBattle trust-boundary remediation — SB-P0-03/SB-P0-04/
+// SB-P0-05): claimSkillBattleReward used to accept `ranks` AND `vcoins`
+// (the reward-pool base amounts) directly from the client, with zero
+// server-side cross-check — a caller could invoke this Cloud Function
+// directly (no app UI needed) claiming e.g. rank #1 against a fabricated,
+// oversized pool amount for a battleId that need not even be real, and
+// receive an attacker-chosen VCoins amount. The client now sends ONLY
+// battleId; every other value below (rank, pool, reward %, reward amount,
+// whether the battle has even ended) is resolved here from trusted
+// server-side reads of skillboard/{battleId}_{class}_{uid} (written by
+// updateSkillboard, functions/src/index.ts) and skillBattles/{battleId} —
+// never from the request payload.
+//
+// VCOIN_DIST_PCT here is now the ONE authoritative reward-percentage table
+// — it used to have an independent copy in
+// apps/mobile/utils/formatVCoins.ts that had already drifted out of sync
+// (SB-P0-05), showing students one reward number and paying a different
+// one. The client no longer computes its own reward preview for anything
+// that could actually be claimed — getMySkillBattleStanding below returns
+// a server-computed estimatedReward the client only displays. See
+// functions/src/__tests__/skillBattleRewardDrift.test.ts for the
+// regression test guarding against this table ever drifting again.
 
-// Mirrors apps/mobile/utils/formatVCoins.ts's VCOIN_DIST_PCT — keep in sync
-// if that table ever changes; unifying the two is in scope for the
-// SkillBattle rank-verification follow-up, not this migration.
 const VCOIN_DIST_PCT = [50, 30, 20, 12, 10, 8, 6, 5, 4, 3];
 
 function getSkillBattleCoinForRank(baseCoins: number, rank: number): number {
@@ -450,55 +478,233 @@ function skillBattleSource(rank: number): string {
 const SKILLBATTLE_SCOPE_LABELS: Record<string, string> = {
   india: "All India", state: "State", district: "District", local: "Local",
 };
+const SKILLBATTLE_SCOPES = ["india", "state", "district", "local"] as const;
+type SkillBattleScope = (typeof SKILLBATTLE_SCOPES)[number];
 
-export const claimSkillBattleReward = functionsV1
-  .runWith({ timeoutSeconds: 30, memory: "128MB" })
-  .https.onCall(async (
-    data: {
-      battleId?:    string;
-      battleMonth?: string;
-      ranks?:  { india: number; state: number; district: number; local: number };
-      vcoins?: { vcoin_india: number; vcoin_state: number; vcoin_district: number; vcoin_local: number };
+interface SkillBattleDoc {
+  endDate?:        string | null;
+  month?:          string;
+  vcoin_india?:    number;
+  vcoin_state?:    number;
+  vcoin_district?: number;
+  vcoin_local?:    number;
+}
+
+interface SkillboardRankDoc {
+  totalScore?: number;
+  ranks?: Partial<Record<SkillBattleScope, number>>;
+}
+
+// Shared by getMySkillBattleStanding and claimSkillBattleReward — both need
+// the same "read the battle + this student's class + their skillboard doc"
+// resolution, and must agree on what a battle's reward pool per scope is.
+async function resolveSkillBattleStanding(uid: string, battleId: string): Promise<{
+  battle: SkillBattleDoc;
+  battleEnded: boolean;
+  cls: string;
+  totalScore: number;
+  ranks: Record<SkillBattleScope, number>;
+  vcoinPool: Record<SkillBattleScope, number>;
+}> {
+  const [battleSnap, studentSnap] = await Promise.all([
+    db.doc(`skillBattles/${battleId}`).get(),
+    db.doc(`students/${uid}`).get(),
+  ]);
+
+  if (!battleSnap.exists) {
+    throw new functionsV1.https.HttpsError("not-found", "This battle does not exist.");
+  }
+  const battle = battleSnap.data() as SkillBattleDoc;
+  const battleEnded = !!battle.endDate && new Date(battle.endDate).getTime() <= Date.now();
+
+  const cls = studentSnap.exists
+    ? String((studentSnap.data() as { class?: string | number })?.class ?? "")
+    : "";
+
+  const vcoinPool: Record<SkillBattleScope, number> = {
+    india:    battle.vcoin_india    ?? 0,
+    state:    battle.vcoin_state    ?? 0,
+    district: battle.vcoin_district ?? 0,
+    local:    battle.vcoin_local    ?? 0,
+  };
+
+  if (!cls) {
+    return { battle, battleEnded, cls, totalScore: 0, ranks: { india: 0, state: 0, district: 0, local: 0 }, vcoinPool };
+  }
+
+  const skillboardSnap = await db.doc(`skillboard/${battleId}_${cls}_${uid}`).get();
+  const skillboard = skillboardSnap.exists ? (skillboardSnap.data() as SkillboardRankDoc) : null;
+
+  return {
+    battle,
+    battleEnded,
+    cls,
+    totalScore: skillboard?.totalScore ?? 0,
+    ranks: {
+      india:    skillboard?.ranks?.india    ?? 0,
+      state:    skillboard?.ranks?.state    ?? 0,
+      district: skillboard?.ranks?.district ?? 0,
+      local:    skillboard?.ranks?.local    ?? 0,
     },
-    context
-  ) => {
+    vcoinPool,
+  };
+}
+
+// ─── getMySkillBattleStanding ──────────────────────────────────────────────
+// Read-only. Lets the client show "my rank" / "my estimated reward" for a
+// battle using the server-computed skillboard doc instead of recomputing
+// ranks itself from raw posts reads (the client-trusted approach the audit
+// flagged — SB-P0-04). Participant counts use Firestore's server-side
+// count() aggregation, not a full document fetch, so this stays cheap
+// regardless of how many students are in a scope (foundation for SB-P1-01).
+export const getMySkillBattleStanding = functionsV1
+  .runWith({ timeoutSeconds: 20, memory: "128MB" })
+  .https.onCall(async (data: { battleId?: string }, context) => {
     if (!context.auth) {
       throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
     }
     const uid = context.auth.uid;
-    const { battleId, battleMonth, ranks, vcoins } = data ?? {};
-
-    if (!battleId || !battleMonth || !ranks || !vcoins) {
-      throw new functionsV1.https.HttpsError("invalid-argument", "battleId, battleMonth, ranks, and vcoins are required");
+    const { battleId } = data ?? {};
+    if (!battleId || typeof battleId !== "string") {
+      throw new functionsV1.https.HttpsError("invalid-argument", "battleId is required");
     }
 
-    const scopes = [
-      { key: "india",    rank: ranks.india,    base: vcoins.vcoin_india    },
-      { key: "state",    rank: ranks.state,    base: vcoins.vcoin_state    },
-      { key: "district", rank: ranks.district, base: vcoins.vcoin_district },
-      { key: "local",    rank: ranks.local,    base: vcoins.vcoin_local    },
-    ] as const;
+    const { battleEnded, cls, totalScore, ranks, vcoinPool } =
+      await resolveSkillBattleStanding(uid, battleId);
+
+    const estimatedReward: Record<SkillBattleScope, number> = { india: 0, state: 0, district: 0, local: 0 };
+    const participants: Record<SkillBattleScope, number> = { india: 0, state: 0, district: 0, local: 0 };
+
+    if (cls) {
+      await Promise.all(SKILLBATTLE_SCOPES.map(async (scope) => {
+        estimatedReward[scope] = getSkillBattleCoinForRank(vcoinPool[scope], ranks[scope]);
+        try {
+          const countSnap = await db.collection("skillboard")
+            .where("battleId", "==", battleId)
+            .where("class",    "==", cls)
+            .where(`ranks.${scope}`, ">", 0)
+            .count()
+            .get();
+          participants[scope] = countSnap.data().count;
+        } catch {
+          participants[scope] = 0;
+        }
+      }));
+    }
+
+    return { battleId, class: cls, battleEnded, totalScore, ranks, estimatedReward, participants };
+  });
+
+// ─── claimSkillBattleReward ────────────────────────────────────────────────
+// referenceId = `${battleId}_${scope}` caps each scope's VCoins credit to
+// once per battle (creditVCoinsBalance's own lock). On top of that, an
+// immutable skillBattleAwards/{battleId}_{uid} doc is reserved via a
+// transaction BEFORE any crediting happens (Step 10: one immutable award,
+// no duplicate claims, auditable) — a second call for the same
+// battle+student, even a concurrent one, sees the award already reserved
+// and returns the original result instead of crediting again.
+export const claimSkillBattleReward = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "128MB" })
+  .https.onCall(async (data: { battleId?: string }, context) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const { battleId } = data ?? {};
+    if (!battleId || typeof battleId !== "string") {
+      throw new functionsV1.https.HttpsError("invalid-argument", "battleId is required");
+    }
+
+    const { battle, battleEnded, cls, ranks, vcoinPool } =
+      await resolveSkillBattleStanding(uid, battleId);
+
+    if (!battleEnded) {
+      throw new functionsV1.https.HttpsError(
+        "failed-precondition",
+        "This battle hasn't ended yet — rewards are only claimable once results are final."
+      );
+    }
+    if (!cls) {
+      return { totalCredited: 0, alreadyClaimed: false, breakdown: {} };
+    }
+
+    const awardRef = db.doc(`skillBattleAwards/${battleId}_${uid}`);
+
+    // Reserve the award atomically first — this is the single point that
+    // prevents a duplicate/concurrent claim, independent of and in
+    // addition to creditVCoinsBalance's own per-scope referenceId lock.
+    const reservation = await db.runTransaction(async (tx) => {
+      const existing = await tx.get(awardRef);
+      if (existing.exists) {
+        return { alreadyReserved: true, data: existing.data() };
+      }
+
+      const breakdown: Record<string, { rank: number; baseCoins: number; coins: number }> = {};
+      let totalCoins = 0;
+      for (const scope of SKILLBATTLE_SCOPES) {
+        const rank  = ranks[scope];
+        const base  = vcoinPool[scope];
+        const coins = getSkillBattleCoinForRank(base, rank);
+        breakdown[scope] = { rank, baseCoins: base, coins };
+        totalCoins += coins;
+      }
+
+      tx.set(awardRef, {
+        battleId, uid, class: cls,
+        battleMonth: battle.month ?? "",
+        breakdown, totalCoins,
+        status:    "reserved",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      return { alreadyReserved: false, data: { breakdown, totalCoins } };
+    });
+
+    if (reservation.alreadyReserved) {
+      const existing = reservation.data as { totalCoins?: number; breakdown?: unknown } | undefined;
+      console.log(`ℹ️ SkillBattle claim already awarded: uid=${uid} battle=${battleId}`);
+      return {
+        totalCredited: existing?.totalCoins ?? 0,
+        alreadyClaimed: true,
+        breakdown: existing?.breakdown ?? {},
+      };
+    }
+
+    const { breakdown } = reservation.data as {
+      breakdown: Record<string, { rank: number; baseCoins: number; coins: number }>;
+    };
 
     let totalCredited = 0;
-    for (const { key, rank, base } of scopes) {
-      const coins = getSkillBattleCoinForRank(base, rank);
+    for (const scope of SKILLBATTLE_SCOPES) {
+      const { rank, baseCoins, coins } = breakdown[scope];
       if (coins <= 0) continue;
 
       const source     = skillBattleSource(rank);
-      const scopeLabel = SKILLBATTLE_SCOPE_LABELS[key] ?? key;
+      const scopeLabel = SKILLBATTLE_SCOPE_LABELS[scope] ?? scope;
 
       const result = await creditVCoinsBalance({
         uid, amount: coins, source,
         title:       `SkillBattle ${scopeLabel} · Rank #${rank}`,
-        description: `${battleMonth} SkillBattle — ${scopeLabel} rank #${rank}`,
-        referenceId: `${battleId}_${key}`,
-        metadata:    { battleId, battleMonth, scope: key, rank, baseCoins: base },
+        description: `${battle.month ?? ""} SkillBattle — ${scopeLabel} rank #${rank}`,
+        referenceId: `${battleId}_${scope}`,
+        metadata:    { battleId, battleMonth: battle.month ?? "", scope, rank, baseCoins },
+        // BUGFIX: see creditVCoinsBalance's bypassDailyLimit doc comment —
+        // this is a one-time battle prize, not a repeatable per-day
+        // source; the referenceId lock above + the award reservation in
+        // the caller already prevent double-payment.
+        bypassDailyLimit: true,
       });
       if (result.credited) totalCredited += result.amount;
     }
 
+    await awardRef.set({
+      status: "credited",
+      creditedAt: admin.firestore.FieldValue.serverTimestamp(),
+      totalCredited,
+    }, { merge: true });
+
     console.log(`✅ SkillBattle claim: uid=${uid} battle=${battleId} totalCredited=${totalCredited}`);
-    return { totalCredited };
+    return { totalCredited, alreadyClaimed: false, breakdown };
   });
 
 // ─── manualResetAnnualVCoins ──────────────────────────────────────────────────

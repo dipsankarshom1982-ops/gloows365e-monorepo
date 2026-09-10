@@ -5,9 +5,11 @@
 // All rank/score/VCoin logic unchanged
 
 import Header from "@/components/header";
+import BannerCarousel from "@/components/BannerCarousel";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
-import { auth, db } from "@/lib/firebase";
+import { auth, db, functions } from "@/lib/firebase";
+import { VCOIN_DIST_PCT } from "@/utils/formatVCoins";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
@@ -15,6 +17,7 @@ import { useRouter } from "expo-router";
 import {
   collection, doc, getDoc, getDocs, query, where,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator, FlatList, Image, RefreshControl,
@@ -101,13 +104,11 @@ const isEligible = (studentClass: string, eligibleClasses: string[]): boolean =>
 
 const getMedalEmoji = (r: number) => r === 1 ? "🥇" : r === 2 ? "🥈" : r === 3 ? "🥉" : "";
 const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
-const SCORE_WEIGHTS = { likes: 5, views: 1, shares: 8, comments: 3, watchtime: 0.1 };
-const computeScore = (p: any): number =>
-  (p.likes     || 0) * SCORE_WEIGHTS.likes    +
-  (p.views     || 0) * SCORE_WEIGHTS.views    +
-  (p.shares    || 0) * SCORE_WEIGHTS.shares   +
-  (p.comments  || 0) * SCORE_WEIGHTS.comments +
-  (p.watchTime || 0) * SCORE_WEIGHTS.watchtime;
+// SCORE_WEIGHTS/computeScore removed (SB-P0-04 cleanup) — this was one of
+// three independently-hand-copied score formulas (see the SkillBattle
+// audit's SB-P2-04), used only by the client-side rank scan this file no
+// longer does; functions/src/index.ts's updateSkillboard is now the sole
+// scoring implementation.
 
 // ─── Rank mini-card ───────────────────────────────────────────
 function RankMiniCard({ icon, label, rank, total, reward, rewardColor, accent }: {
@@ -238,61 +239,43 @@ export default function SkillBattleScreen() {
   useEffect(() => { fetchBattles(); }, [fetchBattles]);
   useFocusEffect(useCallback(() => { fetchBattles(); }, [fetchBattles]));
 
-  // ── Compute my ranks ───────────────────────────────────────
+  // ── My ranks — SERVER-RESOLVED (SB-P0-04) ──────────────────
+  // Used to recompute this per battle by scanning raw `posts` client-side
+  // (4 full unpaginated queries PER battle in the list) and self-report
+  // the result. Now reads getMySkillBattleStanding
+  // (functions/src/vcoins.ts) once per battle — it derives rank/score
+  // from the server-written skillboard/{battleId}_{class}_{uid} doc
+  // (functions/src/index.ts's updateSkillboard), correctly scoped to that
+  // one battleId (fixing the cross-battle-contamination risk the old
+  // month+class-only query had — see the SkillBattle audit's SB-P1-02).
   useEffect(() => {
     if (!student || battles.length === 0) return;
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
+    if (!auth.currentUser?.uid) return;
     setRanksLoading(true);
 
-    const computeAllRanks = async () => {
+    const fetchAllStandings = async () => {
       const result: Record<string, MyBattleRank> = {};
       await Promise.all(
         battles.map(async (battle) => {
           try {
-            const cls = student.class;
-            const scopeConfigs = [
-              { scope: "india",    extra: null },
-              { scope: "state",    extra: where("location.state",    "==", student.location.state)    },
-              { scope: "district", extra: where("location.district", "==", student.location.district) },
-              { scope: "local",    extra: where("location.pincode",  "==", student.location.pincode)  },
-            ] as const;
-
-            const scopeResults = await Promise.all(
-              scopeConfigs.map(async ({ scope, extra }) => {
-                const constraints = [
-                  where("isSkillBattle", "==", true),
-                  where("status",        "==", "approved"),
-                  where("class",         "==", cls),
-                  where("month",         "==", battle.month),
-                  ...(extra ? [extra] : []),
-                ];
-                const snap = await getDocs(query(collection(db, "posts"), ...constraints));
-                const scoreMap = new Map<string, number>();
-                snap.docs.forEach((d) => {
-                  const p = d.data();
-                  if (!p.userId) return;
-                  scoreMap.set(p.userId, (scoreMap.get(p.userId) ?? 0) + computeScore(p));
-                });
-                const sorted = [...scoreMap.entries()].sort((a, b) => b[1] - a[1]);
-                const myIdx  = sorted.findIndex(([u]) => u === uid);
-                return { scope, rank: myIdx >= 0 ? myIdx + 1 : 0, participants: sorted.length, score: myIdx >= 0 ? sorted[myIdx][1] : 0 };
-              })
-            );
-
-            const india    = scopeResults.find((r) => r.scope === "india")!;
-            const state    = scopeResults.find((r) => r.scope === "state")!;
-            const district = scopeResults.find((r) => r.scope === "district")!;
-            const local    = scopeResults.find((r) => r.scope === "local")!;
+            const { data } = await httpsCallable<
+              { battleId: string },
+              { ranks: Record<string, number>; totalScore: number; participants: Record<string, number> }
+            >(functions, "getMySkillBattleStanding")({ battleId: battle.id });
 
             result[battle.id] = {
               battleId:     battle.id,
-              indiaRank:    india.rank,
-              stateRank:    state.rank,
-              districtRank: district.rank,
-              localRank:    local.rank,
-              totalScore:   india.score,
-              participants: { india: india.participants, state: state.participants, district: district.participants, local: local.participants },
+              indiaRank:    data.ranks.india    ?? 0,
+              stateRank:    data.ranks.state    ?? 0,
+              districtRank: data.ranks.district ?? 0,
+              localRank:    data.ranks.local    ?? 0,
+              totalScore:   data.totalScore,
+              participants: {
+                india:    data.participants.india    ?? 0,
+                state:    data.participants.state    ?? 0,
+                district: data.participants.district ?? 0,
+                local:    data.participants.local    ?? 0,
+              },
             };
           } catch {}
         })
@@ -301,7 +284,7 @@ export default function SkillBattleScreen() {
       setRanksLoading(false);
     };
 
-    computeAllRanks();
+    fetchAllStandings();
   }, [student, battles]);
 
   // ── Filter battles by tab ──────────────────────────────────
@@ -332,10 +315,15 @@ export default function SkillBattleScreen() {
     const vcoinLocal    = item.vcoin_local    ?? 0;
     const myRank        = myRanks[item.id];
 
+    // FIX (bug report — "skillboard logic bugs"): this local pcts array had
+    // drifted from VCOIN_DIST_PCT (services/vCoinsService.ts's actual payout
+    // table) at ranks 6 and 10 — [..., 4, 4, ..., 4] here vs the real
+    // [..., 5, 4, ..., 3]. Students were shown a reward preview that didn't
+    // match what claimSkillBattleRewards() actually credits. Now reads the
+    // same shared constant both places use.
     const getVCoinReward = (baseCoins: number, rank: number): string => {
       if (rank === 0 || rank > 10 || baseCoins === 0) return "—";
-      const pcts = [30, 20, 14, 10, 8, 4, 4, 3, 3, 4];
-      const coins = Math.round((baseCoins * (pcts[rank - 1] ?? 0)) / 100);
+      const coins = Math.round((baseCoins * (VCOIN_DIST_PCT[rank - 1] ?? 0)) / 100);
       return coins > 0 ? `🪙 ${coins}` : "—";
     };
 
@@ -556,6 +544,7 @@ export default function SkillBattleScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <Header />
+      <BannerCarousel screen="skillbattle" />
 
       {/* Student notice */}
       {student ? (

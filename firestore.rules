@@ -56,26 +56,113 @@ service cloud.firestore {
     // 🔥 POSTS
     match /posts/{postId} {
       allow read: if request.auth != null;
+
+      // SECURITY FIX (SkillBattle trust-boundary remediation — audit
+      // findings SB-P0-01/SB-P0-02): isSkillBattle:true posts (submitted via
+      // apps/mobile/app/Createreelscreen.tsx) now go through a strict,
+      // server-authoritative allowlist. Before this fix, create had NO
+      // field validation at all beyond ownership — a signed-in student
+      // could write a fully pre-approved submission (status:"approved")
+      // with arbitrary engagement counts in a single client SDK call, no
+      // app UI needed. Ordinary (non-SkillBattle) posts keep their
+      // previous, broader create behavior unchanged — this fix is scoped
+      // to SkillBattle, not a general posts-collection redesign.
       allow create: if request.auth != null
-        && request.resource.data.userId == request.auth.uid;
+        && request.resource.data.userId == request.auth.uid
+        && (
+          // Same 'in' guard as the update rule below — an ordinary
+          // (non-SkillBattle) post's create payload never includes
+          // isSkillBattle at all, and a bare field access on a genuinely
+          // absent key errors the whole expression rather than being falsy.
+          !('isSkillBattle' in request.resource.data) || request.resource.data.isSkillBattle != true
+          || (
+            request.resource.data.keys().hasOnly([
+              'userId', 'name', 'school', 'class', 'profilePic',
+              'battleId', 'battleTitle', 'battleType', 'isSkillBattle', 'postType', 'month',
+              'caption', 'targetState', 'targetLanguage',
+              'location', 'mediaUrl', 'thumbnail',
+              'status', 'rejectionReason', 'reviewedAt', 'reviewedBy',
+              'likes', 'views', 'shares', 'comments', 'watchTime', 'createdAt'
+            ])
+            // Every server-authoritative field must start in its one safe
+            // initial state — the moderation queue (an admin, or a future
+            // Cloud Function) is the only thing allowed to move status
+            // forward from here; the client can never create a
+            // pre-approved or pre-scored submission.
+            && request.resource.data.status == 'pending'
+            && request.resource.data.rejectionReason == ''
+            && request.resource.data.reviewedAt == null
+            && request.resource.data.reviewedBy == ''
+            && request.resource.data.likes == 0
+            && request.resource.data.views == 0
+            && request.resource.data.shares == 0
+            && request.resource.data.comments == 0
+            && request.resource.data.watchTime == 0
+          )
+        );
+
+      // SECURITY FIX (SB-P0-01): the old owner branch below had NO
+      // restriction beyond keeping userId unchanged — a student owning a
+      // SkillBattle post could flip status to "approved" and inflate any
+      // counter on their own submission at will, at any time (including
+      // after a battle closed), fully bypassing moderation and scoring.
+      // For isSkillBattle:true posts there is now no owner-bypass at all:
+      // owner and stranger alike are limited to the same narrow engagement
+      // allowlist as before, PLUS each counter is now bounded to the
+      // amount one real, single user action could ever produce (mirrors
+      // the existing contests/{id}.joinedCount == +1 pattern below) — a
+      // single write can no longer claim thousands of fake views/likes.
+      // Non-SkillBattle posts keep the previous, broader owner-can-edit-
+      // anything behavior unchanged (out of scope for this fix).
       allow update: if request.auth != null
         && (
           request.auth.token.admin == true
           || (
-            request.resource.data.userId == resource.data.userId
-            && (
-              request.auth.uid == resource.data.userId
-              // affectedKeys(), not changedKeys() — see users/{uid}'s update
-              // rule for why: a first-time-added field is invisible to
-              // changedKeys(), so a non-owner could otherwise smuggle in any
-              // brand-new field name on someone else's post as long as the
-              // post never had that field before. views/likes/comments/
-              // watchTime/shares are always seeded at post creation (see
-              // apps/mobile/app/Createreelscreen.tsx) so this tightens
-              // nothing for the legitimate counter-increment path.
-              || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                'views', 'likes', 'comments', 'watchTime', 'shares'
-              ])
+            // 'isSkillBattle' in resource.data — not a bare
+            // resource.data.isSkillBattle == true — because ordinary
+            // (non-SkillBattle) posts never set this field at all, and
+            // accessing a genuinely-missing map key errors out the whole
+            // expression rather than evaluating falsy; same reasoning as
+            // the 'role' in request.resource.data guards on users/{uid}
+            // and students/{uid} above.
+            ('isSkillBattle' in resource.data) && resource.data.isSkillBattle == true
+            ? (
+              request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['views', 'likes', 'comments', 'watchTime', 'shares'])
+              && (!('views' in request.resource.data.diff(resource.data).affectedKeys())
+                  || request.resource.data.views == resource.data.views + 1)
+              && (!('likes' in request.resource.data.diff(resource.data).affectedKeys())
+                  || request.resource.data.likes == resource.data.likes + 1)
+              && (!('shares' in request.resource.data.diff(resource.data).affectedKeys())
+                  || request.resource.data.shares == resource.data.shares + 1)
+              && (!('comments' in request.resource.data.diff(resource.data).affectedKeys())
+                  || request.resource.data.comments == resource.data.comments + 1)
+              // watchTime accumulates continuously rather than one-per-tap,
+              // so it's bounded to a plausible single-update range (must
+              // increase, capped at +60s — the max reel length, see
+              // Createreelscreen.tsx's videoMaxDuration) instead of exactly +1.
+              && (!('watchTime' in request.resource.data.diff(resource.data).affectedKeys())
+                  || (
+                    request.resource.data.watchTime > resource.data.watchTime
+                    && request.resource.data.watchTime <= resource.data.watchTime + 60
+                  ))
+            )
+            : (
+              request.resource.data.userId == resource.data.userId
+              && (
+                request.auth.uid == resource.data.userId
+                // affectedKeys(), not changedKeys() — see users/{uid}'s update
+                // rule for why: a first-time-added field is invisible to
+                // changedKeys(), so a non-owner could otherwise smuggle in any
+                // brand-new field name on someone else's post as long as the
+                // post never had that field before. views/likes/comments/
+                // watchTime/shares are always seeded at post creation (see
+                // apps/mobile/app/Createreelscreen.tsx) so this tightens
+                // nothing for the legitimate counter-increment path.
+                || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                  'views', 'likes', 'comments', 'watchTime', 'shares'
+                ])
+              )
             )
           )
         );
@@ -157,7 +244,25 @@ service cloud.firestore {
           // live only in client JS. Now server-only, same as the others.
           'vCoinsBalance',
           'vCoinsYear_2024','vCoinsYear_2025','vCoinsYear_2026','vCoinsYear_2027','vCoinsYear_2028',
-          'vCoinsHistory_2024','vCoinsHistory_2025','vCoinsHistory_2026','vCoinsHistory_2027','vCoinsHistory_2028'
+          'vCoinsHistory_2024','vCoinsHistory_2025','vCoinsHistory_2026','vCoinsHistory_2027','vCoinsHistory_2028',
+          // SECURITY FIX (tester/module-access follow-up): 'role'/'roles'
+          // were never in this deny-list, and the create rule above only
+          // pins role to 'student' on the very first write — nothing
+          // stopped a signed-in user from *updating* their own existing
+          // doc afterwards with role: "tester" (or "admin") via a plain
+          // client SDK call. That role now genuinely matters — it's what
+          // apps/mobile/context/AppConfigContext.tsx and shared-logic's
+          // FeatureFlagsContext.tsx read to grant full access to every
+          // admin-disabled module/feature and (functions/src/usageCheck.ts)
+          // unlimited free AI Guru usage — so self-assigning it was a real
+          // privilege-escalation/free-premium hole, not just cosmetic.
+          // Every legitimate client call site (signup.tsx, register.tsx)
+          // only ever (re)writes role/roles to "student"/["student"], so
+          // this can't break any real flow — actual promotion to tester
+          // happens only from apps/admin/src/pages/Students.tsx, which
+          // authenticates with the admin-claims path (line below) or via
+          // Cloud Functions (Admin SDK, bypasses these rules entirely).
+          'role', 'roles'
         ]);
       allow update: if request.auth.token.admin == true;
       allow delete: if false;
@@ -387,6 +492,17 @@ service cloud.firestore {
           ])
         );
       allow delete: if request.auth.token.admin == true;
+    }
+
+    // 🏅 SKILLBATTLE AWARDS — immutable award ledger (SB-P0-03/Step 10).
+    // Written only by claimSkillBattleReward (functions/src/vcoins.ts,
+    // Admin SDK) via a transaction that reserves the doc before any VCoins
+    // credit happens — never client-writable, at create or afterward, so a
+    // student can never modify their own award amount/status/rank.
+    match /skillBattleAwards/{awardId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == resource.data.uid || request.auth.token.admin == true);
+      allow write: if false;
     }
 
     // 🤝 PARTNERS

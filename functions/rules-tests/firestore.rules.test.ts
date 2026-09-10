@@ -166,6 +166,58 @@ describe("users/{uid} — VCoins forgery prevention", () => {
   });
 });
 
+// ─── users/{uid} — role self-escalation prevention (tester/module-access
+// follow-up) ─────────────────────────────────────────────────────────────
+// role/roles drive real access now — AppConfigContext.tsx and
+// FeatureFlagsContext.tsx (packages/shared-logic) grant a "tester" a
+// bypass past every admin module/feature toggle, and usageCheck.ts gives
+// one unlimited free AI Guru usage. Before this fix, the update rule's
+// deny-list only blocked VCoins fields, so a signed-in user could update
+// their own existing doc to role: "tester" (or "admin") directly.
+
+describe("users/{uid} — role self-escalation prevention", () => {
+  const uid = "student_xyz";
+
+  test("a user CANNOT promote their own role to tester via update", async () => {
+    await seed(async (db) => { await db.doc(`users/${uid}`).set({ role: "student" }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`users/${uid}`).update({ role: "tester" }));
+  });
+
+  test("a user CANNOT promote their own role to admin via update", async () => {
+    await seed(async (db) => { await db.doc(`users/${uid}`).set({ role: "student" }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`users/${uid}`).update({ role: "admin" }));
+  });
+
+  test("a user CANNOT rewrite their own roles array via update", async () => {
+    await seed(async (db) => { await db.doc(`users/${uid}`).set({ role: "student", roles: ["student"] }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`users/${uid}`).update({ roles: ["tester"] }));
+  });
+
+  test("a user cannot smuggle role: 'tester' alongside a legitimate field in one write", async () => {
+    await seed(async (db) => { await db.doc(`users/${uid}`).set({ role: "student" }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`users/${uid}`).set({ displayName: "sneaky", role: "tester" }, { merge: true }));
+  });
+
+  test("re-writing role to the SAME value ('student') alongside a legitimate field still succeeds", async () => {
+    // signup.tsx / register.tsx merge-write role: "student" again on top of
+    // an already-"student" doc — affectedKeys() only flags an actual value
+    // change, so this must keep working.
+    await seed(async (db) => { await db.doc(`users/${uid}`).set({ role: "student" }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc(`users/${uid}`).set({ role: "student", onboardingComplete: true }, { merge: true }));
+  });
+
+  test("an admin CAN promote a user's role via the admin-claim update rule", async () => {
+    await seed(async (db) => { await db.doc(`users/${uid}`).set({ role: "student" }); });
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertSucceeds(adminDb.doc(`users/${uid}`).update({ role: "tester" }));
+  });
+});
+
 // ─── users/{uid} create-rule allowlist (security follow-up, 2026-08-26) ────
 // Firestore classifies a write to a NOT-YET-EXISTING doc as `create`, not
 // `update` — the VCoins forgery suite above only exercised `update` on an
@@ -485,6 +537,178 @@ describe("posts/{postId} — non-owner update allowlist (changedKeys→affectedK
     await seed(async (db) => { await db.doc(`posts/${postId}`).set({ userId: ownerUid }); });
     const db = testEnv.authenticatedContext(ownerUid).firestore();
     await assertSucceeds(db.doc(`posts/${postId}`).update({ caption: "Updated caption" }));
+  });
+});
+
+// ─── SkillBattle trust-boundary remediation (SB-P0-01/SB-P0-02) ───────────
+// See firestore.rules' posts/{postId} create/update rule header comments
+// for the full vulnerability: create had no field validation at all beyond
+// ownership, and the owner-update branch had no restriction beyond
+// keeping userId unchanged — a student could self-approve their own
+// SkillBattle submission and inflate its engagement counters at will.
+describe("posts/{postId} — SkillBattle create allowlist (SB-P0-02)", () => {
+  const uid = "battle_student";
+
+  const legitimatePayload = {
+    userId: uid, name: "Test", school: "Test School", class: "8", profilePic: "",
+    battleId: "battle_1", battleTitle: "Test Battle", battleType: "sponsored",
+    isSkillBattle: true, postType: "reel", month: "2026-08",
+    caption: "my reel", targetState: ["All"], targetLanguage: ["English"],
+    location: { city: "", district: "", state: "", pincode: "", country: "India" },
+    mediaUrl: "https://example.com/v.m3u8", thumbnail: "",
+    status: "pending", rejectionReason: "", reviewedAt: null, reviewedBy: "",
+    likes: 0, views: 0, shares: 0, comments: 0, watchTime: 0,
+  };
+
+  test("a legitimate pending, zero-engagement submission CAN be created", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc("posts/p1").set(legitimatePayload));
+  });
+
+  test("CANNOT create a pre-approved SkillBattle submission", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc("posts/p1").set({ ...legitimatePayload, status: "approved" }));
+  });
+
+  test("CANNOT create a submission with pre-inflated engagement counts", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc("posts/p1").set({ ...legitimatePayload, likes: 999999, views: 999999 }));
+  });
+
+  test("CANNOT smuggle an out-of-allowlist field in alongside a legitimate payload", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc("posts/p1").set({ ...legitimatePayload, isWinner: true }));
+  });
+
+  test("CANNOT create a submission for another student (forged creator ID)", async () => {
+    const db = testEnv.authenticatedContext("someone_else").firestore();
+    await assertFails(db.doc("posts/p1").set(legitimatePayload));
+  });
+
+  test("an ordinary (non-SkillBattle) post's create rule is unaffected by this fix", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc("posts/p2").set({ userId: uid, caption: "just a normal photo post" }));
+  });
+});
+
+describe("posts/{postId} — SkillBattle update lockdown, no owner-bypass (SB-P0-01)", () => {
+  const ownerUid = "battle_owner";
+  const strangerUid = "battle_stranger";
+  const postId = "battle_post_1";
+
+  function seedApprovedBattlePost(overrides: Record<string, unknown> = {}) {
+    return seed(async (db) => {
+      await db.doc(`posts/${postId}`).set({
+        userId: ownerUid, isSkillBattle: true, status: "pending",
+        views: 0, likes: 0, comments: 0, watchTime: 0, shares: 0,
+        ...overrides,
+      });
+    });
+  }
+
+  test("the OWNER cannot self-approve their own submission", async () => {
+    await seedApprovedBattlePost();
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertFails(db.doc(`posts/${postId}`).update({ status: "approved" }));
+  });
+
+  test("the OWNER cannot move rejected -> approved either", async () => {
+    await seedApprovedBattlePost({ status: "rejected" });
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertFails(db.doc(`posts/${postId}`).update({ status: "approved" }));
+  });
+
+  test("the OWNER cannot bulk-inflate their own views in one write", async () => {
+    await seedApprovedBattlePost();
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertFails(db.doc(`posts/${postId}`).update({ views: 999999 }));
+  });
+
+  test("the OWNER cannot bulk-inflate their own likes in one write", async () => {
+    await seedApprovedBattlePost();
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertFails(db.doc(`posts/${postId}`).update({ likes: 999999 }));
+  });
+
+  test("the OWNER cannot smuggle isSkillBattle/battleId/class changes onto an existing post", async () => {
+    await seedApprovedBattlePost();
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertFails(db.doc(`posts/${postId}`).update({ battleId: "someone_elses_battle" }));
+  });
+
+  test("the OWNER CAN still bump their own views/likes by exactly +1, same as a stranger", async () => {
+    await seedApprovedBattlePost();
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertSucceeds(db.doc(`posts/${postId}`).update({ views: 1 }));
+  });
+
+  test("a STRANGER can bump views/likes by +1 (unchanged from before this fix)", async () => {
+    await seedApprovedBattlePost();
+    const db = testEnv.authenticatedContext(strangerUid).firestore();
+    await assertSucceeds(db.doc(`posts/${postId}`).update({ likes: 1 }));
+  });
+
+  test("a STRANGER cannot bulk-inflate likes even though the field is allowlisted", async () => {
+    await seedApprovedBattlePost();
+    const db = testEnv.authenticatedContext(strangerUid).firestore();
+    await assertFails(db.doc(`posts/${postId}`).update({ likes: 500 }));
+  });
+
+  test("watchTime can increase by up to 60s in one write (a single reel's max length)", async () => {
+    await seedApprovedBattlePost({ watchTime: 10 });
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertSucceeds(db.doc(`posts/${postId}`).update({ watchTime: 70 }));
+  });
+
+  test("watchTime cannot jump by more than 60s in one write", async () => {
+    await seedApprovedBattlePost({ watchTime: 10 });
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertFails(db.doc(`posts/${postId}`).update({ watchTime: 100 }));
+  });
+
+  test("watchTime cannot decrease", async () => {
+    await seedApprovedBattlePost({ watchTime: 30 });
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertFails(db.doc(`posts/${postId}`).update({ watchTime: 10 }));
+  });
+
+  test("an admin's client SDK write CAN still approve a submission (the real moderation path)", async () => {
+    await seedApprovedBattlePost();
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertSucceeds(adminDb.doc(`posts/${postId}`).update({ status: "approved", reviewedAt: Date.now() }));
+  });
+
+  test("an ordinary (non-SkillBattle) post's owner-can-edit-anything behavior is unaffected by this fix", async () => {
+    await seed(async (db) => { await db.doc(`posts/${postId}`).set({ userId: ownerUid, caption: "seed" }); });
+    const db = testEnv.authenticatedContext(ownerUid).firestore();
+    await assertSucceeds(db.doc(`posts/${postId}`).update({ caption: "edited freely, not a battle post" }));
+  });
+});
+
+describe("skillBattleAwards/{awardId} — immutable, server-only (Step 10)", () => {
+  const uid = "award_student";
+
+  test("the student CAN read their own award", async () => {
+    await seed(async (db) => { await db.doc(`skillBattleAwards/b1_${uid}`).set({ uid, totalCoins: 500 }); });
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertSucceeds(db.doc(`skillBattleAwards/b1_${uid}`).get());
+  });
+
+  test("a different student CANNOT read someone else's award", async () => {
+    await seed(async (db) => { await db.doc(`skillBattleAwards/b1_${uid}`).set({ uid, totalCoins: 500 }); });
+    const db = testEnv.authenticatedContext("someone_else").firestore();
+    await assertFails(db.doc(`skillBattleAwards/b1_${uid}`).get());
+  });
+
+  test("a student CANNOT write their own award directly (client SDK)", async () => {
+    const db = testEnv.authenticatedContext(uid).firestore();
+    await assertFails(db.doc(`skillBattleAwards/b1_${uid}`).set({ uid, totalCoins: 999999 }));
+  });
+
+  test("even an admin's client SDK write cannot create/modify an award — Admin SDK only", async () => {
+    await seed(async (db) => { await db.doc(`skillBattleAwards/b1_${uid}`).set({ uid, totalCoins: 500 }); });
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertFails(adminDb.doc(`skillBattleAwards/b1_${uid}`).update({ totalCoins: 999999 }));
   });
 });
 

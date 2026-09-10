@@ -181,8 +181,26 @@ export function getVCoinsSourceIconColor(source: string): string {
 }
 
 // ─── SkillBattle V-Coin distribution ─────────────────────────────────────────
-// Top 10 positions, must sum to 100
-export const VCOIN_DIST_PCT = [30, 20, 14, 10, 8, 5, 4, 3, 3, 3] as const;
+// SECURITY FIX (SB-P0-05, SkillBattle trust-boundary remediation): this
+// table had silently drifted from functions/src/vcoins.ts's copy — every
+// single rank differed ([30,20,14,10,8,5,4,3,3,3] here vs.
+// [50,30,20,12,10,8,6,5,4,3] there), so a student was shown one reward
+// number and credited a different one by claimSkillBattleReward. Values
+// below are now copied exactly from the server's table, which is the one
+// remaining source of truth — see functions/src/vcoins.ts's VCOIN_DIST_PCT
+// header comment and functions/src/__tests__/skillBattleRewardDrift.test.ts
+// (the regression test that would catch this drifting again).
+//
+// getVCoinForRank/VCOIN_DIST_PCT below should NOT be used to compute a
+// reward number that could actually be claimed (i.e. "my reward" on the
+// SkillBoard screen) — that now comes from the server via
+// getMySkillBattleStanding (apps/mobile/app/skillboard.tsx), which returns
+// an already-computed estimatedReward the client only displays. This local
+// copy remains for display-only previews (e.g. the public leaderboard's
+// per-row reward-preview column for OTHER students, and the admin battle
+// preview) where showing a number for a battle/rank the viewer did not
+// themselves claim doesn't need a network round-trip.
+export const VCOIN_DIST_PCT = [50, 30, 20, 12, 10, 8, 6, 5, 4, 3] as const;
 
 export function getVCoinForRank(baseCoins: number, rank: number): number {
   if (rank < 1 || rank > 10 || baseCoins <= 0) return 0;

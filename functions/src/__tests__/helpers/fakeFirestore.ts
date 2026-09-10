@@ -58,10 +58,15 @@ interface FakeDocRef {
   collection(sub: string): FakeCollectionRef;
 }
 
+// "==" and "in" are the two operators real code under test actually uses
+// (skillBattleSubmission.ts's duplicate-submission count query needs
+// "in") — not a general query-operator emulator.
+type FakeWhereOp = "==" | "in";
+
 interface FakeCollectionRef {
   doc(id?: string): FakeDocRef;
   add(data: DocData): Promise<FakeDocRef>;
-  where(field: string, op: "==", value: unknown): FakeQueryRef;
+  where(field: string, op: FakeWhereOp, value: unknown): FakeQueryRef;
   orderBy(field: string, direction?: "asc" | "desc"): FakeQueryRef;
   // A real CollectionReference IS a Query — get() works unfiltered too
   // (e.g. `db.collection(path).get()` with no where()/orderBy() first).
@@ -69,7 +74,10 @@ interface FakeCollectionRef {
 }
 
 interface FakeQueryRef {
-  where(field: string, op: "==", value: unknown): FakeQueryRef;
+  // Distinguishes a query object from a FakeDocRef for runTransaction's
+  // get() below — FakeDocRef has no such marker.
+  __isQuery: true;
+  where(field: string, op: FakeWhereOp, value: unknown): FakeQueryRef;
   orderBy(field: string, direction?: "asc" | "desc"): FakeQueryRef;
   limit(n: number): FakeQueryRef;
   // Bounds apply against the field from the most recent orderBy() call —
@@ -78,6 +86,15 @@ interface FakeQueryRef {
   startAt(value: unknown): FakeQueryRef;
   endAt(value: unknown): FakeQueryRef;
   get(): Promise<{ empty: boolean; size: number; docs: Array<{ id: string; data: () => DocData; ref: FakeDocRef }> }>;
+}
+
+// "==" and "in" are the only operators real code under test uses.
+function whereFilter(field: string, op: FakeWhereOp, value: unknown): (d: DocData) => boolean {
+  if (op === "in") {
+    const values = value as unknown[];
+    return (d) => values.includes(d[field]);
+  }
+  return (d) => d[field] === value;
 }
 
 // Extracts a comparable primitive from a stored field value — handles
@@ -161,7 +178,7 @@ export class FakeFirestore {
         return ref;
       },
       where(field, op, value) {
-        return self.queryRef(path, [(d) => d[field] === value]);
+        return self.queryRef(path, [whereFilter(field, op, value)]);
       },
       orderBy(field, direction) {
         return self.queryRef(path, [], undefined, { field, direction: direction ?? "asc" });
@@ -181,8 +198,9 @@ export class FakeFirestore {
   ): FakeQueryRef {
     const self = this;
     return {
+      __isQuery: true,
       where(field, op, value) {
-        return self.queryRef(path, [...filters, (d) => d[field] === value], limitN, order, bounds);
+        return self.queryRef(path, [...filters, whereFilter(field, op, value)], limitN, order, bounds);
       },
       orderBy(field, direction) {
         return self.queryRef(path, filters, limitN, { field, direction: direction ?? "asc" }, bounds);
@@ -279,13 +297,17 @@ export class FakeFirestore {
   }
 
   async runTransaction<T>(fn: (tx: {
-    get: (ref: FakeDocRef) => ReturnType<FakeDocRef["get"]>;
+    get: (ref: FakeDocRef | FakeQueryRef) => Promise<any>;
     set: (ref: FakeDocRef, data: DocData, opts?: { merge?: boolean }) => void;
     update: (ref: FakeDocRef, data: DocData) => void;
   }) => Promise<T>): Promise<T> {
     const self = this;
     const tx = {
-      get: (ref: FakeDocRef) => self.docRef(ref.path).get(),
+      // A real transaction.get() accepts either a DocumentReference or a
+      // Query — dispatches on the __isQuery marker FakeQueryRef carries
+      // (a FakeDocRef has no such property).
+      get: (ref: FakeDocRef | FakeQueryRef) =>
+        "__isQuery" in ref ? (ref as FakeQueryRef).get() : self.docRef((ref as FakeDocRef).path).get(),
       set: (ref: FakeDocRef, data: DocData, opts?: { merge?: boolean }) => {
         self.writeSync(ref.path, data, !!opts?.merge);
       },
