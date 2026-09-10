@@ -30,6 +30,7 @@ import BattleStatusBadge from "@/components/battle/BattleStatusBadge";
 import Countdown from "@/components/battle/Countdown";
 import { BattleCardSkeleton, BattleDetailsSkeleton } from "@/components/battle/SkeletonBlock";
 import CompetitionCard, { type CompetitionCardData } from "@/components/battle/CompetitionCard";
+import SharedPodium from "@/components/battle/Podium";
 import {
   fetchMyBattleRank, fetchLeaderboardPage, fetchSubmissionDisplay, fetchMyLikeState,
   likeSubmission, type MyBattleRank,
@@ -252,7 +253,11 @@ export default function BattleCompetitionScreen() {
     );
   }
 
-  const top3 = final ? entries.filter((e) => typeof e.rank === "number" && e.rank! <= 3).sort((a, b) => a.rank! - b.rank!) : [];
+  const top3 = final
+    ? entries
+        .filter((e): e is CompetitionCardData & { rank: number } => typeof e.rank === "number" && e.rank <= 3)
+        .map((e) => ({ submissionId: e.submissionId, studentName: e.studentName, score: e.score, rank: e.rank }))
+    : [];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -271,7 +276,17 @@ export default function BattleCompetitionScreen() {
           <View style={{ gap: 14, marginBottom: 16 }}>
             <Hero card={card} battleState={battleState} final={final} />
             <SummaryCard myRank={myRank} loading={myRankLoading} error={myRankError} onRetry={loadRank} />
-            {top3.length > 0 && <Podium entries={top3} />}
+            {final && myRank && myRank.rank > 0 && (
+              <Pressable
+                onPress={() => router.push({ pathname: "/battle-results" as any, params: { battleId } })}
+                accessibilityRole="button"
+                accessibilityLabel="View your final result"
+                style={styles.resultsBanner}
+              >
+                <Text style={styles.resultsBannerText}>🏁 Results are final — View Your Result</Text>
+              </Pressable>
+            )}
+            {top3.length > 0 && <SharedPodium entries={top3} />}
             <Text style={styles.feedTitle}>{final ? "🏁 Final Leaderboard" : "🎬 Competition"}</Text>
           </View>
         }
@@ -385,31 +400,6 @@ function SummaryCard({
   );
 }
 
-function Podium({ entries }: { entries: CompetitionCardData[] }) {
-  // Order left-to-right as 2nd / 1st / 3rd, matching the existing legacy
-  // SkillBoard podium's visual language (skillboard.tsx renderPodium) —
-  // ONLY ever rendered with authoritative `.rank` values (final results),
-  // never a positional guess.
-  const byRank = (r: number) => entries.find((e) => e.rank === r);
-  const ordered = [byRank(2), byRank(1), byRank(3)].filter(Boolean) as CompetitionCardData[];
-  const medal = (r?: number) => (r === 1 ? "🥇" : r === 2 ? "🥈" : r === 3 ? "🥉" : "");
-
-  return (
-    <View style={styles.podiumRow}>
-      {ordered.map((e) => (
-        <View key={e.submissionId} style={styles.podiumItem} accessibilityLabel={`Rank ${e.rank}: ${e.studentName}, ${e.score} points`}>
-          <View style={[styles.podiumAvatar, e.rank === 1 && styles.podiumAvatarLarge]}>
-            <Text style={styles.podiumInitial}>{e.studentName.charAt(0).toUpperCase() || "S"}</Text>
-          </View>
-          <Text style={styles.podiumMedal}>{medal(e.rank)}</Text>
-          <Text style={styles.podiumName} numberOfLines={1}>{e.studentName}</Text>
-          <Text style={styles.podiumScore}>{e.score} pts</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
   list: { padding: 16, paddingBottom: 40 },
@@ -422,6 +412,9 @@ const styles = StyleSheet.create({
   liveFinalText: { color: "#fff", fontSize: 10, fontWeight: "900" },
   heroTimer: { flexDirection: "row", alignItems: "center", gap: 5 },
   liveNote: { color: "rgba(255,255,255,0.45)", fontSize: 11, fontStyle: "italic" },
+
+  resultsBanner: { backgroundColor: "rgba(255,159,67,0.12)", borderWidth: 1, borderColor: "rgba(255,159,67,0.4)", borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, alignItems: "center" },
+  resultsBannerText: { color: ACCENT, fontSize: 12.5, fontWeight: "800" },
 
   card: { backgroundColor: "rgba(255,255,255,0.035)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", padding: 14 },
   muted: { color: "rgba(255,255,255,0.55)", fontSize: 13, fontWeight: "600", textAlign: "center" },

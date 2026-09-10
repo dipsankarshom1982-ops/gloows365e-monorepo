@@ -138,11 +138,12 @@ export default function BattleDetailsScreen() {
         if (details.engine === "legacy") {
           router.push({ pathname: "/skillboard", params: { battleId: details.id } });
         } else {
-          // Phase 2D-5 — the Competition screen self-detects `final` from
-          // Phase 2C's own APIs (battleResults existence) and renders the
-          // locked leaderboard; no separate Results screen exists yet
-          // (explicitly out of scope — Phase 2D-6).
-          router.push({ pathname: "/battle-competition" as any, params: { battleId: details.id } });
+          // Phase 2D-6 — dedicated Results screen (final rank, winner
+          // status, reward/award status, all authoritative). The
+          // Competition screen remains reachable from within Results
+          // ("View Final Leaderboard") for the full, everyone-included
+          // final leaderboard.
+          router.push({ pathname: "/battle-results" as any, params: { battleId: details.id } });
         }
         return;
       case "COMING_SOON":
