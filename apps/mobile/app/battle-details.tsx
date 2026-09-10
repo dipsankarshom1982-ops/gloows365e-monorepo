@@ -115,18 +115,34 @@ export default function BattleDetailsScreen() {
         });
         return;
       case "PENDING_MODERATION":
-      case "APPROVED_COMPETING":
       case "REJECTED":
         // "My Submission Status" already lives inside Createreelscreen
         // today (brief §25) — reuse it rather than build a second status
         // view in this phase.
         router.push({ pathname: "/Createreelscreen", params: { battleId: details.id, battleTitle: details.title, battleType: "sponsored", month: "" } });
         return;
+      case "APPROVED_COMPETING":
+        // Phase 2D-5 — canonical battles now have a real Competition
+        // screen (submissions/battle-ranking-engine-aware). Legacy battles
+        // keep their existing status view (Createreelscreen) unchanged —
+        // this CTA state is shared by both engines (resolveCTAState isn't
+        // engine-gated here), so the split happens on navigation, not by
+        // adding a second engine-detection mechanism.
+        if (details.engine === "canonical") {
+          router.push({ pathname: "/battle-competition" as any, params: { battleId: details.id } });
+        } else {
+          router.push({ pathname: "/Createreelscreen", params: { battleId: details.id, battleTitle: details.title, battleType: "sponsored", month: "" } });
+        }
+        return;
       case "VIEW_RESULTS":
         if (details.engine === "legacy") {
           router.push({ pathname: "/skillboard", params: { battleId: details.id } });
         } else {
-          Alert.alert("Results", "Results for this battle will be available soon.");
+          // Phase 2D-5 — the Competition screen self-detects `final` from
+          // Phase 2C's own APIs (battleResults existence) and renders the
+          // locked leaderboard; no separate Results screen exists yet
+          // (explicitly out of scope — Phase 2D-6).
+          router.push({ pathname: "/battle-competition" as any, params: { battleId: details.id } });
         }
         return;
       case "COMING_SOON":
