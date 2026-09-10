@@ -40,7 +40,7 @@ import { useRouter } from "expo-router";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { useCallback, useEffect, useState } from "react";
 import {
-  RefreshControl, ScrollView, StyleSheet, Text, View,
+  Pressable, RefreshControl, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -132,6 +132,18 @@ export default function SkillBattleDiscoveryScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <Header />
       <BannerCarousel screen="skillbattle" />
+
+      {/* Phase 2D-7 — minimal, additive entry point to the new persistent
+          SkillBoard (app/my-skillboard.tsx). Does not touch any existing
+          Discovery logic/state above. */}
+      <Pressable
+        onPress={() => router.push("/my-skillboard" as any)}
+        accessibilityRole="button"
+        accessibilityLabel="View my SkillBoard"
+        style={({ pressed }) => [styles.skillBoardLink, pressed && { opacity: 0.85 }]}
+      >
+        <Text style={styles.skillBoardLinkText}>🏆 My SkillBoard</Text>
+      </Pressable>
 
       {fetchError ? (
         <View style={styles.errorBanner}>
@@ -226,4 +238,6 @@ const styles = StyleSheet.create({
   chipScroll: { gap: 8, paddingRight: 8 },
   errorBanner: { marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10, backgroundColor: "rgba(255,107,157,0.1)", borderWidth: 1, borderColor: "rgba(255,107,157,0.3)" },
   errorText: { color: "#ff6b9d", fontSize: 11, fontWeight: "600" },
+  skillBoardLink: { marginHorizontal: 16, marginTop: 10, alignSelf: "flex-start", backgroundColor: "rgba(255,159,67,0.12)", borderWidth: 1, borderColor: "rgba(255,159,67,0.4)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7 },
+  skillBoardLinkText: { color: ACCENT, fontSize: 12, fontWeight: "800" },
 });

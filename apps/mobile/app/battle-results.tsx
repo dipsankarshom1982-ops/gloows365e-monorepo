@@ -368,6 +368,16 @@ export default function BattleResultsScreen() {
           >
             <Text style={styles.primaryBtnText}>View Final Leaderboard</Text>
           </Pressable>
+          {participated && (
+            <Pressable
+              onPress={() => router.push("/my-skillboard" as any)}
+              accessibilityRole="button"
+              accessibilityLabel="View my SkillBoard"
+              style={styles.secondaryBtn}
+            >
+              <Text style={styles.secondaryBtnText}>View My SkillBoard</Text>
+            </Pressable>
+          )}
           <Pressable
             onPress={() => router.push("/skillbattle")}
             accessibilityRole="button"
