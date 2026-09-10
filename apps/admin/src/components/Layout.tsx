@@ -39,6 +39,7 @@ const NAV_GROUPS = [
     { path: "/quizzes",          label: "🧩 Quizzes",          permKey: "quizzes" },
     { path: "/daily-streak-quiz",label: "🔥 Daily Streak Quiz",permKey: "daily-streak-quiz" },
     { path: "/skill-battles",    label: "⚔️ Skill Battles",    permKey: "skill-battles" },
+    { path: "/skill-categories", label: "🎯 Skill Taxonomy",   permKey: "skill-battles" },
     { path: "/learnfun",         label: "🎮 LearnFun",         permKey: "learnfun" },
     { path: "/badges",           label: "🏆 Badges & Stars",   permKey: "badges" },
   ]},

@@ -712,6 +712,95 @@ describe("skillBattleAwards/{awardId} — immutable, server-only (Step 10)", () 
   });
 });
 
+// ─── Phase 2B — Domain Foundation: skill taxonomy + battle state lockdown ──
+describe("skillCategories/{id} & skills/{id} — admin-only config, category relationship enforced", () => {
+  const studentUid = "taxonomy_student";
+
+  test("any signed-in user CAN read skill categories", async () => {
+    await seed(async (db) => { await db.doc("skillCategories/creative").set({ name: "Creative", isActive: true }); });
+    const db = testEnv.authenticatedContext(studentUid).firestore();
+    await assertSucceeds(db.doc("skillCategories/creative").get());
+  });
+
+  test("a student CANNOT create a skill category", async () => {
+    const db = testEnv.authenticatedContext(studentUid).firestore();
+    await assertFails(db.doc("skillCategories/hacked").set({ name: "Hacked", isActive: true }));
+  });
+
+  test("a student CANNOT edit an existing skill category", async () => {
+    await seed(async (db) => { await db.doc("skillCategories/creative").set({ name: "Creative", isActive: true }); });
+    const db = testEnv.authenticatedContext(studentUid).firestore();
+    await assertFails(db.doc("skillCategories/creative").update({ isActive: false }));
+  });
+
+  test("an admin CAN create a skill category", async () => {
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertSucceeds(adminDb.doc("skillCategories/creative").set({ name: "Creative", isActive: true, order: 1 }));
+  });
+
+  test("an admin CAN create a skill referencing a real category", async () => {
+    await seed(async (db) => { await db.doc("skillCategories/creative").set({ name: "Creative", isActive: true }); });
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertSucceeds(adminDb.doc("skills/singing").set({ name: "Singing", categoryId: "creative", isActive: true }));
+  });
+
+  test("an admin CANNOT create a skill referencing a category that doesn't exist", async () => {
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertFails(adminDb.doc("skills/singing").set({ name: "Singing", categoryId: "nonexistent_category", isActive: true }));
+  });
+
+  test("a student CANNOT create a skill at all, even referencing a real category", async () => {
+    await seed(async (db) => { await db.doc("skillCategories/creative").set({ name: "Creative", isActive: true }); });
+    const db = testEnv.authenticatedContext(studentUid).firestore();
+    await assertFails(db.doc("skills/singing").set({ name: "Singing", categoryId: "creative", isActive: true }));
+  });
+});
+
+describe("skillBattles/{battleId} — state is Admin-SDK-only, not even admin client SDK (Phase 2B)", () => {
+  const battleId = "battle_2b_1";
+
+  test("an admin CAN create a battle with the required initial state:DRAFT", async () => {
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertSucceeds(adminDb.doc(`skillBattles/${battleId}`).set({ title: "Test", state: "DRAFT", isActive: false }));
+  });
+
+  test("an admin CANNOT create a battle with a non-DRAFT initial state via the client SDK", async () => {
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertFails(adminDb.doc(`skillBattles/${battleId}`).set({ title: "Test", state: "OPEN", isActive: true }));
+  });
+
+  test("an admin's client SDK write CANNOT change battle state directly", async () => {
+    await seed(async (db) => { await db.doc(`skillBattles/${battleId}`).set({ title: "Test", state: "DRAFT" }); });
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertFails(adminDb.doc(`skillBattles/${battleId}`).update({ state: "OPEN" }));
+  });
+
+  test("an admin's client SDK CAN still edit other battle fields (skillId, scope, dates) unaffected by the state lock", async () => {
+    await seed(async (db) => { await db.doc(`skillBattles/${battleId}`).set({ title: "Test", state: "DRAFT" }); });
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertSucceeds(adminDb.doc(`skillBattles/${battleId}`).update({
+      skillId: "singing", scope: { type: "class", classFilter: ["8"] },
+    }));
+  });
+
+  test("a student CANNOT change battle state either", async () => {
+    await seed(async (db) => { await db.doc(`skillBattles/${battleId}`).set({ title: "Test", state: "DRAFT" }); });
+    const db = testEnv.authenticatedContext("some_student").firestore();
+    await assertFails(db.doc(`skillBattles/${battleId}`).update({ state: "OPEN" }));
+  });
+
+  test("the stateTransitions audit subcollection is admin-read-only, never client-writable (even by admin)", async () => {
+    await seed(async (db) => {
+      await db.doc(`skillBattles/${battleId}/stateTransitions/t1`).set({ fromState: "DRAFT", toState: "SCHEDULED" });
+    });
+    const adminDb = testEnv.authenticatedContext("admin_1", { admin: true }).firestore();
+    await assertSucceeds(adminDb.doc(`skillBattles/${battleId}/stateTransitions/t1`).get());
+    await assertFails(adminDb.doc(`skillBattles/${battleId}/stateTransitions/t2`).set({ fromState: "SCHEDULED", toState: "OPEN" }));
+    const studentDb = testEnv.authenticatedContext("some_student").firestore();
+    await assertFails(studentDb.doc(`skillBattles/${battleId}/stateTransitions/t1`).get());
+  });
+});
+
 // ─── VidyaStar Phase 1 — Critical Security & Score Integrity Repair ────────
 // See functions/src/submitVidyastarContestQuiz.ts's header comment for the
 // full vulnerability this closes: the client used to be able to read the

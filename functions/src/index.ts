@@ -54,6 +54,7 @@ export { getHomeFeed, getReelsFeed } from "./feed";
 export { claimVCoinReward, getVCoinBalance } from "./vcoins";
 export { creditSignupBonus, creditWatchReward, claimSkillBattleReward, getMySkillBattleStanding } from "./vcoins";
 export { submitSkillBattleReel } from "./skillBattleSubmission";
+export { transitionBattleState } from "./skillBattleDomain";
 export { joinVidyastarContest, deleteContest } from "./vidyastarContest";
 export { submitVidyastarContestQuiz } from "./submitVidyastarContestQuiz";
 export { finalizeContestRanking, autoFinalizeEndedContests } from "./contestLeaderboard";

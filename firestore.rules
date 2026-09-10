@@ -474,24 +474,68 @@ service cloud.firestore {
     }
 
     // ⚔️ SKILL BATTLES
+    // 🗂️ SKILL TAXONOMY (Phase 2B domain foundation) — config-driven,
+    // same admin-only-write pattern as appModules/featureFlags below.
+    // Read is open to any signed-in user (students need to read these to
+    // display a battle's skill/category — same posture as appModules).
+    match /skillCategories/{categoryId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+    match /skills/{skillId} {
+      allow read: if request.auth != null;
+      // Enforces the category relationship at write time — a skill can
+      // never reference a skillCategory that doesn't exist, on create OR
+      // update (covers editing categoryId on an existing skill too).
+      allow write: if request.auth.token.admin == true
+        && (
+          !('categoryId' in request.resource.data)
+          || exists(/databases/$(database)/documents/skillCategories/$(request.resource.data.categoryId))
+        );
+    }
+
     match /skillBattles/{battleId} {
       allow read: if request.auth != null;
-      allow create: if request.auth.token.admin == true;
-      allow update: if request.auth.token.admin == true
-        || (
-          request.auth != null
-          // affectedKeys(), not changedKeys() — same first-time-added-field
-          // gap as posts/{postId} above. `participants` in particular is
-          // NOT seeded at battle creation (apps/admin/src/pages/
-          // SkillBattles.tsx never writes it) — it's only ever set the
-          // first time someone joins, which changedKeys() couldn't see at
-          // all, silently exempting it (and anything else newly-added)
-          // from this allowlist entirely.
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'participants', 'participantCount', 'joinedCount'
-          ])
+      // SECURITY FIX (Phase 2B, Decision Lock §12/§13): `state` is
+      // excluded from every client-writable path below, admin included —
+      // it can only be set by transitionBattleState
+      // (functions/src/skillBattleDomain.ts, Admin SDK), which validates
+      // the transition against the canonical state graph before writing.
+      // This is the same "even an admin's client SDK write can't set this
+      // — real workflow uses the Admin SDK" posture already used for
+      // tutors/{uid}.verified and posts/{postId}.status (Phase 1) — state
+      // is exactly as privileged as those.
+      allow create: if request.auth.token.admin == true
+        && (!('state' in request.resource.data) || request.resource.data.state == 'DRAFT');
+      allow update: if request.auth != null
+        && (
+          (
+            request.auth.token.admin == true
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['state'])
+          )
+          || (
+            // affectedKeys(), not changedKeys() — same first-time-added-field
+            // gap as posts/{postId} above. `participants` in particular is
+            // NOT seeded at battle creation (apps/admin/src/pages/
+            // SkillBattles.tsx never writes it) — it's only ever set the
+            // first time someone joins, which changedKeys() couldn't see at
+            // all, silently exempting it (and anything else newly-added)
+            // from this allowlist entirely.
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'participants', 'participantCount', 'joinedCount'
+            ])
+          )
         );
       allow delete: if request.auth.token.admin == true;
+
+      // Lightweight audit trail for transitionBattleState — Admin-SDK-only
+      // (the callable is the only writer), read-only to admins for now;
+      // not the full cross-cutting AuditEvent model from the Phase 2A
+      // blueprint, which is out of scope for this phase.
+      match /stateTransitions/{transitionId} {
+        allow read:  if request.auth.token.admin == true;
+        allow write: if false;
+      }
     }
 
     // 🏅 SKILLBATTLE AWARDS — immutable award ledger (SB-P0-03/Step 10).
