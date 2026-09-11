@@ -1,0 +1,281 @@
+// PATH: functions/src/tutorReviews.ts
+// ShikshaHub Phase 6 — tutor ratings & reviews. Same v1 onCall convention
+// as every other ShikshaHub callable.
+//
+// Approved Phase 6 scope: reviewable only off a completed
+// instantHelpSessions/{id} (status === "ended") — bookings/{id} has no
+// "completed" concept at all today, so scheduled sessions are explicitly
+// NOT reviewable yet (later-phase scope, same discipline every prior
+// phase followed rather than inventing scope). One review per session:
+// tutorReviews/{sessionId} uses the session's own id as the review doc id,
+// so "already reviewed" is a single existence check inside the same
+// transaction that creates it — a student can never leave two reviews for
+// one session by construction.
+//
+// tutors/{uid}.ratingSum/ratingCount/ratingAverage are maintained
+// transactionally here (never recomputed by scanning tutorReviews
+// client-side) and mirrored to tutorMarketplaceProfiles/{uid} by
+// tutorMarketplace.ts's existing SAFE_FIELDS-driven sync trigger — this
+// file just adds the two public fields to that allowlist.
+//
+// Client never writes tutorReviews/{id} directly — firestore.rules has
+// `allow write: if false`, same closed-write pattern every other
+// ShikshaHub collection uses. submitTutorReview (student, owner of the
+// session) creates it; hideTutorReview (admin) is the only thing that
+// ever updates it afterward.
+
+import * as admin from "firebase-admin";
+import * as functionsV1 from "firebase-functions/v1";
+import { notifyStudent, notifyTutor } from "./shikshahubNotify";
+
+const db = admin.firestore();
+
+const MAX_REVIEW_TEXT_LENGTH = 1000;
+const MAX_REPLY_TEXT_LENGTH = 500;
+
+function roundToOneDecimal(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+// ─── submitTutorReview ───────────────────────────────────────────────────────
+// Booking completion phase — extended to accept EITHER an Instant Help
+// sessionId (original Phase 6 path, unchanged) OR a scheduled bookingId
+// (new). Exactly one of the two must be given; whichever is resolves the
+// same {tutorUid, studentUid, subject, serviceId} shape the rest of this
+// function was already written against, so the transaction/aggregate
+// logic below is identical either way.
+export const submitTutorReview = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (
+    data: { sessionId?: string; bookingId?: string; rating?: number; reviewText?: string },
+    context
+  ) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const studentUid = context.auth.uid;
+    const { sessionId, bookingId, rating, reviewText } = data ?? {};
+
+    if (sessionId && bookingId) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "Provide either sessionId or bookingId, not both");
+    }
+    if (!sessionId && !bookingId) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "sessionId or bookingId is required");
+    }
+    if (!Number.isInteger(rating) || (rating as number) < 1 || (rating as number) > 5) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "rating must be an integer from 1 to 5");
+    }
+    const trimmedText = typeof reviewText === "string" ? reviewText.trim().slice(0, MAX_REVIEW_TEXT_LENGTH) : "";
+
+    let sourceId: string;
+    let tutorUid: string;
+    let subject: string;
+    let serviceId: string | null;
+
+    if (sessionId) {
+      if (typeof sessionId !== "string") {
+        throw new functionsV1.https.HttpsError("invalid-argument", "sessionId must be a string");
+      }
+      const sessionSnap = await db.doc(`instantHelpSessions/${sessionId}`).get();
+      if (!sessionSnap.exists) {
+        throw new functionsV1.https.HttpsError("not-found", "Session not found");
+      }
+      const session = sessionSnap.data()!;
+      if (session.studentUid !== studentUid) {
+        throw new functionsV1.https.HttpsError("permission-denied", "This session doesn't belong to you");
+      }
+      if (session.status !== "ended") {
+        throw new functionsV1.https.HttpsError("failed-precondition", "You can only review a session after it has ended");
+      }
+      sourceId = sessionId;
+      tutorUid = session.tutorUid as string;
+      subject = (session.subject as string | undefined) ?? "";
+      serviceId = (session.serviceId as string | undefined) ?? null;
+    } else {
+      const id = bookingId as string;
+      if (typeof id !== "string") {
+        throw new functionsV1.https.HttpsError("invalid-argument", "bookingId must be a string");
+      }
+      const bookingSnap = await db.doc(`bookings/${id}`).get();
+      if (!bookingSnap.exists) {
+        throw new functionsV1.https.HttpsError("not-found", "Booking not found");
+      }
+      const booking = bookingSnap.data()!;
+      if (booking.studentUid !== studentUid) {
+        throw new functionsV1.https.HttpsError("permission-denied", "This booking doesn't belong to you");
+      }
+      if (booking.status !== "completed") {
+        throw new functionsV1.https.HttpsError("failed-precondition", "You can only review a booking after it's completed");
+      }
+      sourceId = id;
+      tutorUid = booking.tutorUid as string;
+      subject = (booking.subject as string | undefined) ?? "";
+      serviceId = (booking.serviceId as string | undefined) ?? null;
+    }
+
+    const studentSnap = await db.doc(`students/${studentUid}`).get();
+    const reviewRef = db.doc(`tutorReviews/${sourceId}`);
+    const tutorRef = db.doc(`tutors/${tutorUid}`);
+
+    await db.runTransaction(async (tx) => {
+      const [existingReview, tutorSnap] = await Promise.all([tx.get(reviewRef), tx.get(tutorRef)]);
+      if (existingReview.exists) {
+        throw new functionsV1.https.HttpsError("failed-precondition", "This has already been reviewed");
+      }
+
+      const tutor = tutorSnap.exists ? tutorSnap.data()! : {};
+      const newSum = (Number(tutor.ratingSum) || 0) + (rating as number);
+      const newCount = (Number(tutor.ratingCount) || 0) + 1;
+      const newAverage = roundToOneDecimal(newSum / newCount);
+
+      const now = admin.firestore.FieldValue.serverTimestamp();
+      tx.set(reviewRef, {
+        ...(sessionId ? { sessionId } : { bookingId: sourceId }),
+        studentUid,
+        tutorUid,
+        serviceId,
+        subject,
+        rating,
+        reviewText: trimmedText,
+        studentName: (studentSnap.exists ? (studentSnap.data()?.name as string | undefined) : undefined) ?? "",
+        hidden: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      tx.set(tutorRef, {
+        ratingSum: newSum,
+        ratingCount: newCount,
+        ratingAverage: newAverage,
+        updatedAt: now,
+      }, { merge: true });
+    });
+
+    console.log(`✅ Review submitted: ${sessionId ? `session=${sessionId}` : `booking=${sourceId}`} student=${studentUid} tutor=${tutorUid} rating=${rating}`);
+
+    const studentName = (studentSnap.exists ? (studentSnap.data()?.name as string | undefined) : undefined) || "A student";
+    await notifyTutor(tutorUid, {
+      title: "⭐ New review",
+      body: `${studentName} rated you ${rating} star${rating === 1 ? "" : "s"}${trimmedText ? `: "${trimmedText.slice(0, 80)}${trimmedText.length > 80 ? "…" : ""}"` : "."}`,
+      type: "review",
+    }).catch((e) => console.warn("submitTutorReview: notifyTutor failed:", e));
+
+    return { reviewId: sourceId };
+  });
+
+// ─── replyToTutorReview ──────────────────────────────────────────────────────
+// Tutor reply to reviews phase — the tutor being reviewed can post one
+// public reply to a review left on them. Ownership is the only check
+// (review.tutorUid === caller); a review already being hidden by admin
+// moderation doesn't block a reply — the reply just inherits the same
+// hidden-from-public-view state as the review itself, since it lives on
+// the same doc (useTutorReviews' where(hidden==false) already excludes
+// hidden docs entirely, reply included). Re-calling this on a review that
+// already has a reply overwrites it — one reply slot per review, always
+// editable by the tutor who owns it, same as any other "the owner can
+// always update their own content" field in this app.
+export const replyToTutorReview = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (data: { reviewId?: string; replyText?: string }, context) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const tutorUid = context.auth.uid;
+    const { reviewId, replyText } = data ?? {};
+    if (!reviewId || typeof reviewId !== "string") {
+      throw new functionsV1.https.HttpsError("invalid-argument", "reviewId is required");
+    }
+    const trimmed = typeof replyText === "string" ? replyText.trim().slice(0, MAX_REPLY_TEXT_LENGTH) : "";
+    if (!trimmed) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "replyText is required");
+    }
+
+    const reviewRef = db.doc(`tutorReviews/${reviewId}`);
+    const reviewSnap = await reviewRef.get();
+    if (!reviewSnap.exists) {
+      throw new functionsV1.https.HttpsError("not-found", "Review not found");
+    }
+    const review = reviewSnap.data()!;
+    if (review.tutorUid !== tutorUid) {
+      throw new functionsV1.https.HttpsError("permission-denied", "This review isn't yours to reply to");
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await reviewRef.update({ tutorReply: trimmed, tutorReplyAt: now, updatedAt: now });
+
+    console.log(`✅ Tutor ${tutorUid} replied to review ${reviewId}`);
+
+    await notifyStudent(review.studentUid as string, {
+      title: "💬 Your tutor replied",
+      body: `Your tutor replied to your review: "${trimmed.slice(0, 80)}${trimmed.length > 80 ? "…" : ""}"`,
+      type: "review",
+    }).catch((e) => console.warn("replyToTutorReview: notifyStudent failed:", e));
+
+    return { reviewId, tutorReply: trimmed };
+  });
+
+// ─── hideTutorReview (admin) ─────────────────────────────────────────────────
+// Moderate, don't destroy — the review doc is never deleted, only excluded
+// from the tutor's public aggregate and from useTutorReviews' default
+// query. Idempotent: hiding an already-hidden review (or unhiding an
+// already-visible one) is a no-op on the aggregate, only the
+// reason/updatedAt fields change.
+export const hideTutorReview = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (data: { reviewId?: string; hidden?: boolean; reason?: string }, context) => {
+    if (!context.auth?.token?.admin) {
+      throw new functionsV1.https.HttpsError("permission-denied", "Admins only");
+    }
+    const adminUid = context.auth.uid;
+    const { reviewId, hidden, reason } = data ?? {};
+    if (!reviewId || typeof reviewId !== "string") {
+      throw new functionsV1.https.HttpsError("invalid-argument", "reviewId is required");
+    }
+    if (typeof hidden !== "boolean") {
+      throw new functionsV1.https.HttpsError("invalid-argument", "hidden must be a boolean");
+    }
+
+    const reviewRef = db.doc(`tutorReviews/${reviewId}`);
+
+    await db.runTransaction(async (tx) => {
+      const reviewSnap = await tx.get(reviewRef);
+      if (!reviewSnap.exists) {
+        throw new functionsV1.https.HttpsError("not-found", "Review not found");
+      }
+      const review = reviewSnap.data()!;
+      const now = admin.firestore.FieldValue.serverTimestamp();
+
+      if (review.hidden === hidden) {
+        // No aggregate change — just update the moderation note.
+        tx.update(reviewRef, { hiddenBy: adminUid, hiddenReason: reason ?? null, updatedAt: now });
+        return;
+      }
+
+      const tutorRef = db.doc(`tutors/${review.tutorUid}`);
+      const tutorSnap = await tx.get(tutorRef);
+      const tutor = tutorSnap.exists ? tutorSnap.data()! : {};
+      const delta = hidden ? -Number(review.rating) : Number(review.rating);
+      const countDelta = hidden ? -1 : 1;
+
+      const newSum = Math.max(0, (Number(tutor.ratingSum) || 0) + delta);
+      const newCount = Math.max(0, (Number(tutor.ratingCount) || 0) + countDelta);
+      const newAverage = newCount > 0 ? roundToOneDecimal(newSum / newCount) : 0;
+
+      tx.set(tutorRef, {
+        ratingSum: newSum,
+        ratingCount: newCount,
+        ratingAverage: newAverage,
+        updatedAt: now,
+      }, { merge: true });
+
+      tx.update(reviewRef, {
+        hidden,
+        hiddenBy: adminUid,
+        hiddenReason: reason ?? null,
+        updatedAt: now,
+      });
+    });
+
+    console.log(`✅ Review ${reviewId} ${hidden ? "hidden" : "unhidden"} by admin ${adminUid}`);
+    return { reviewId, hidden };
+  });

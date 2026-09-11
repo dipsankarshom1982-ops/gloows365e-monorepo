@@ -11,7 +11,11 @@
     "deploy:web": "pnpm build:web && firebase deploy --only hosting:web",
     "deploy:admin": "pnpm build:admin && firebase deploy --only hosting:admin",
     "deploy:functions": "firebase deploy --only functions",
-    "deploy:all": "pnpm build:web && pnpm build:admin && firebase deploy"
+    "deploy:all": "pnpm build:web && pnpm build:admin && firebase deploy",
+    "check:functions": "node scripts/check-function-calls.mjs",
+    "test:functions": "npm --prefix functions test",
+    "test:rules": "npm --prefix functions run test:rules",
+    "test:all": "npm run check:functions && npm run test:functions"
   },
   "devDependencies": {
     "typescript": "~5.9.2"

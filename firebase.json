@@ -13,6 +13,13 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "emulators": {
+    "firestore": { "port": 8080 },
+    "functions": { "port": 5001 },
+    "auth":      { "port": 9099 },
+    "ui":        { "enabled": true, "port": 4000 },
+    "singleProjectMode": true
+  },
   "hosting": [
     {
       "target": "website",
@@ -21,10 +28,7 @@
     },
     {
       "target": "web",
-      "public": "apps/web/.next",
-      "frameworksBackend": {
-        "region": "us-central1"
-      },
+      "public": "apps/web/out",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
     },
     {

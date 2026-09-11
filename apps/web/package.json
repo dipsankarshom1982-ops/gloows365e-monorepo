@@ -11,6 +11,7 @@
   "dependencies": {
     "@gloows/shared-logic": "workspace:*",
     "firebase": "^12.11.0",
+    "hls.js": "^1.5.17",
     "i18next": "^26.2.0",
     "next": "^15.2.0",
     "react": "19.1.0",

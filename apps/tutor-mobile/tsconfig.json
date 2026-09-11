@@ -1,0 +1,30 @@
+{
+  "extends": "./node_modules/expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"],
+      "@gloows/shared-logic": ["../../packages/shared-logic/src/index.ts"],
+      "@gloows/shared-logic/*": ["../../packages/shared-logic/src/*"],
+      "@gloows/tutor-i18n": ["../../packages/tutor-i18n/src/index.ts"],
+      "@gloows/tutor-ui": ["../../packages/tutor-ui/src/index.ts"]
+    },
+    "ignoreDeprecations": "5.0",
+    "jsx": "react-jsx",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

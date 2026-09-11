@@ -235,13 +235,25 @@ export const getUserSubscriptionHistory = onCall(async (request) => {
 
   const db = admin.firestore();
 
-  const [subsSnap, seekhoSnap] = await Promise.all([
-    db.collection("subscriptions").where("userId", "==", userId).get().catch(() => null),
+  // FIX (found during Payment Management investigation, 2026-08-26):
+  // subscriptions/{uid} is a single doc per user KEYED BY uid — the doc
+  // never has a `userId` FIELD inside it (see aiGuruSubscription.ts's
+  // aiGuruPaymentSuccess: db.doc(`subscriptions/${uid}`), no userId field
+  // ever written). The old `.where("userId","==",userId)` query against
+  // that collection could therefore never match anything — this "main"
+  // branch has likely never returned a result since it was written. Fixed
+  // to a direct doc().get(), which is also what every other reader of this
+  // collection in the codebase already does. seekho_subscriptions/{userId}
+  // is different — it DOES store a userId field (seekho.ts's
+  // seekhoCreateSubscription writes { userId, plan, ... }) — that query
+  // was already correct and is left unchanged.
+  const [subSnap, seekhoSnap] = await Promise.all([
+    db.doc(`subscriptions/${userId}`).get().catch(() => null),
     db.collection("seekho_subscriptions").where("userId", "==", userId).get().catch(() => null),
   ]);
 
   const subscriptions = [
-    ...(subsSnap?.docs ?? []).map((d) => ({ id: d.id, source: "main", ...d.data() })),
+    ...(subSnap?.exists ? [{ id: subSnap.id, source: "main", ...subSnap.data() }] : []),
     ...(seekhoSnap?.docs ?? []).map((d) => ({ id: d.id, source: "seekho", ...d.data() })),
   ];
 

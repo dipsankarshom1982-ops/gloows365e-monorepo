@@ -1,103 +1,130 @@
-// apps/web/src/app/page.tsx
-// Landing / home page for web users
-// Students see their dashboard; guests see a marketing page
-
 "use client";
 
-import { useStudentProfile } from "@gloows/shared-logic";
-import Link from "next/link";
+// PATH: apps/web/src/app/page.tsx
+//
+// Root entry point — mirrors mobile app/index.tsx routing logic exactly.
+//
+// Flow:
+//   1. First ever visit (no "alreadyLaunched" in localStorage) → /welcome
+//   2. Not signed in → /login   (AuthGuard handles this for app pages too,
+//      but we also redirect here directly so there's no flash)
+//   3. Signed in, users/{uid} exists, profileType = "restartEducation":
+//        onboardingComplete true  → /restart-education/home
+//        onboardingComplete false → /restart-education/onboarding
+//   4. Signed in, students/{uid} exists:
+//        onboardingComplete true  → /home
+//        onboardingComplete false → /register
+//   5. Signed in, neither doc found → /register
+//
+// This replaces the old "always go to /home" shortcut which broke
+// first-launch UX and sent restart-education users to the wrong place.
 
-export default function HomePage() {
-  const { user, authLoading } = useStudentProfile();
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, doc, getDoc } from "firebase/firestore";
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-indigo-500" />
-      </div>
-    );
-  }
+const RESTART_TYPES = ["restartEducation", "restart_education", "restart"];
+const RESTART_INDICATOR_FIELDS = ["lastClassPassed", "educationGapReason", "currentOccupation"];
 
-  if (user) {
-    // Logged-in students go straight to dashboard
-    return <StudentDashboard />;
-  }
+export default function RootPage() {
+  const router = useRouter();
+  const [ready, setReady] = useState(false);
 
-  return <LandingPage />;
-}
+  useEffect(() => {
+    // Step 1: first-ever launch check (mirrors AsyncStorage "alreadyLaunched")
+    const launched = localStorage.getItem("alreadyLaunched");
+    if (!launched) {
+      localStorage.setItem("alreadyLaunched", "true");
+      router.replace("/welcome");
+      return;
+    }
 
-function LandingPage() {
+    // Step 2: watch auth state then route
+    const auth = getAuth();
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      try {
+        const db = getFirestore();
+
+        // --- Check users/{uid} first (newer path) ---
+        const userSnap = await getDoc(doc(db, "users", user.uid));
+        if (userSnap.exists()) {
+          const d = userSnap.data();
+          const profileType = d?.profileType as string | undefined;
+          const onboarding  = d?.onboardingComplete as boolean | undefined;
+
+          // Explicit restart profileType
+          if (profileType && RESTART_TYPES.includes(profileType)) {
+            router.replace(onboarding === true
+              ? "/restart-education/home"
+              : "/restart-education/onboarding"
+            );
+            return;
+          }
+
+          // Implicit restart user (profileType write failed but indicator fields exist)
+          const hasRestartFields = RESTART_INDICATOR_FIELDS.some((f) => f in d);
+          if (hasRestartFields) {
+            router.replace(onboarding === true
+              ? "/restart-education/home"
+              : "/restart-education/onboarding"
+            );
+            return;
+          }
+        }
+
+        // --- Fall back to students/{uid} (legacy / normal student path) ---
+        const studentSnap = await getDoc(doc(db, "students", user.uid));
+        if (studentSnap.exists()) {
+          const onboarding = studentSnap.data()?.onboardingComplete ?? false;
+          router.replace(onboarding ? "/home" : "/register");
+          return;
+        }
+
+        // --- Nothing found → send to registration ---
+        router.replace("/register");
+
+      } catch (e) {
+        console.warn("Root routing error:", e);
+        router.replace("/login");
+      }
+    });
+
+    return () => unsub();
+  }, [router]);
+
+  // Minimal branded splash while we resolve
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      {/* Hero */}
-      <section className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
-        {/* Brand logo — matches mobile app */}
-        <div className="flex items-baseline gap-0 text-5xl font-black mb-6">
-          <span className="text-indigo-400">Gl</span>
-          <span className="text-white">oows</span>
-          <span className="bg-gradient-to-r from-violet-400 to-indigo-400 text-transparent bg-clip-text mx-1 text-3xl px-2 py-0.5 border border-indigo-400/40 rounded-full">
-            365
-          </span>
-          <span className="text-amber-400 text-3xl">E</span>
-        </div>
-
-        <p className="text-slate-300 text-xl max-w-lg mb-8">
-          AI-powered learning for every Indian student. Study smarter with Vidya AI Guru.
-        </p>
-
-        <div className="flex gap-4 flex-wrap justify-center">
-          <Link
-            href="/login"
-            className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-8 py-3 rounded-xl transition-colors"
-          >
-            Get Started
-          </Link>
-          <Link
-            href="/ai-guru"
-            className="border border-indigo-500 hover:bg-indigo-500/10 text-indigo-300 font-semibold px-8 py-3 rounded-xl transition-colors"
-          >
-            Try AI Guru
-          </Link>
-        </div>
-
-        {/* Download app CTA */}
-        <p className="mt-12 text-slate-500 text-sm">
-          Best on mobile →{" "}
-          <a href="#download" className="text-indigo-400 hover:underline">
-            Download the app
-          </a>
-        </p>
-      </section>
-    </main>
-  );
-}
-
-function StudentDashboard() {
-  return (
-    <main className="min-h-screen bg-slate-950 text-white p-6">
-      <h1 className="text-2xl font-bold mb-6">Welcome back!</h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <DashboardCard href="/ai-guru" title="AI Guru" description="Ask questions, get instant answers" emoji="🤖" />
-        <DashboardCard href="/seekho" title="Seekho" description="Study chapters and lessons" emoji="📚" />
-        <DashboardCard href="/skill-battle" title="Skill Battle" description="Compete with students across India" emoji="⚔️" />
-        <DashboardCard href="/wallet" title="V-Coins Wallet" description="Your rewards and transactions" emoji="🪙" />
-        <DashboardCard href="/leaderboard" title="Leaderboard" description="See where you rank" emoji="🏆" />
-        <DashboardCard href="/reels" title="Short Reels" description="Quick educational videos" emoji="🎬" />
+    <div style={{
+      minHeight: "100dvh",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "#0f172a",
+    }}>
+      <div style={{ fontSize: 48, fontWeight: 900, letterSpacing: -1 }}>
+        <span style={{ color: "#A5B4FC" }}>Gl</span>
+        <span style={{ color: "#F1F5F9" }}>oows</span>
+        <span style={{ color: "#818CF8", fontSize: 36 }}>365</span>
+        <span style={{ color: "#FBBF24", fontSize: 38 }}>E</span>
       </div>
-    </main>
-  );
-}
-
-function DashboardCard({ href, title, description, emoji }: {
-  href: string; title: string; description: string; emoji: string;
-}) {
-  return (
-    <Link href={href}>
-      <div className="bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-2xl p-5 transition-colors cursor-pointer">
-        <div className="text-3xl mb-3">{emoji}</div>
-        <h2 className="text-white font-semibold text-lg">{title}</h2>
-        <p className="text-slate-400 text-sm mt-1">{description}</p>
+      <div style={{ color: "#94a3b8", marginTop: 12, fontSize: 14 }}>
+        Learn • Compete • Earn 🚀
       </div>
-    </Link>
+      <div style={{
+        marginTop: 32, width: 32, height: 32,
+        border: "3px solid rgba(99,102,241,0.3)",
+        borderTop: "3px solid #6366F1",
+        borderRadius: "50%",
+        animation: "spin 0.8s linear infinite",
+      }} />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
   );
 }

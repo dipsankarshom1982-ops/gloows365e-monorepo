@@ -2,8 +2,16 @@
 // FILE: functions/src/referral.ts
 // PATH: functions/src/referral.ts
 // FIXES APPLIED:
-//   1. vCoinsBalance → vCoins  (lines 146, 153, 178, 182, 231, 233)
-//   2. "VidyaAI" → "Gloows365E"  (line 194)
+//   1. vCoinsBalance → vCoins, "VidyaAI" → "Gloows365E" (earlier pass)
+//   2. Single-use bypass: "already referred" check now also queries the
+//      tamper-proof `referrals` collection instead of trusting the mutable,
+//      client-writable users/{uid}.referredBy field alone.
+//   3. Balance/count updates now use FieldValue.increment() instead of
+//      read-then-add-literal, removing a lost-update race under concurrent
+//      redemptions of the same code.
+//   4. Milestone selection picks the largest matching `every` instead of the
+//      first array match, so a smaller milestone can no longer permanently
+//      shadow a larger one that shares a common multiple (e.g. 5 vs 10).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import * as admin from "firebase-admin";
@@ -84,9 +92,20 @@ export const applyReferral = functionsV1
     }
 
     // ── Check if referee already used a referral code ─────────────────────────
+    // Checked against the `referrals` collection (clients cannot write there —
+    // see firestore.rules) rather than trusting users/{uid}.referredBy alone.
+    // That field has no client-write restriction in firestore.rules, so a
+    // client could clear it via a plain updateDoc() and re-call this function
+    // to farm the referee welcome bonus repeatedly. The referrals-collection
+    // check closes that gap regardless of what the mutable user-doc field says.
     const refereeUserRef  = db.doc(`users/${refereeId}`);
     const refereeUserSnap = await refereeUserRef.get();
-    if (refereeUserSnap.exists && refereeUserSnap.data()?.referredBy) {
+    const priorReferralSnap = await db
+      .collection("referrals")
+      .where("refereeId", "==", refereeId)
+      .limit(1)
+      .get();
+    if (!priorReferralSnap.empty || (refereeUserSnap.exists && refereeUserSnap.data()?.referredBy)) {
       throw new functionsV1.https.HttpsError("already-exists", "You have already used a referral code");
     }
 
@@ -121,8 +140,9 @@ export const applyReferral = functionsV1
       }
     }
 
-    const now   = admin.firestore.FieldValue.serverTimestamp();
-    const batch = db.batch();
+    const now             = admin.firestore.FieldValue.serverTimestamp();
+    const batch           = db.batch();
+    const referrerUserRef = db.doc(`users/${referrerId}`);
 
     // ── 1. Create referrals document ──────────────────────────────────────────
     const referralRef = db.collection("referrals").doc();
@@ -143,20 +163,16 @@ export const applyReferral = functionsV1
     }, { merge: true });
 
     // ── 3. Credit referrer's VCoins ───────────────────────────────────────────
+    // Uses FieldValue.increment() instead of read-then-add-literal so
+    // concurrent redemptions of the same referral code can't stomp on each
+    // other's updates (a plain read + literal write would silently drop one
+    // referrer's credit if two referrals landed close together).
     if (config.referrerCoins > 0) {
-      const referrerUserRef = db.doc(`users/${referrerId}`);
-      const referrerSnap    = await referrerUserRef.get();
-      const currentBal      = referrerSnap.exists ? (referrerSnap.data()?.vCoins ?? 0) : 0;           // ✅ FIX: was vCoinsBalance
-      const currentEarned   = referrerSnap.exists ? (referrerSnap.data()?.vCoinsLifetimeEarned ?? 0) : 0;
-      const currentCount    = referrerSnap.exists ? (referrerSnap.data()?.referralCount ?? 0) : 0;
-      const currentRefCoins = referrerSnap.exists ? (referrerSnap.data()?.referralCoinsEarned ?? 0) : 0;
-
-      // Update referrer balance + referral stats
       batch.update(referrerUserRef, {
-        vCoins:               currentBal      + config.referrerCoins,  // ✅ FIX: was vCoinsBalance
-        vCoinsLifetimeEarned: currentEarned   + config.referrerCoins,
-        referralCount:        currentCount    + 1,
-        referralCoinsEarned:  currentRefCoins + config.referrerCoins,
+        vCoins:               admin.firestore.FieldValue.increment(config.referrerCoins),
+        vCoinsLifetimeEarned: admin.firestore.FieldValue.increment(config.referrerCoins),
+        referralCount:        admin.firestore.FieldValue.increment(1),
+        referralCoinsEarned:  admin.firestore.FieldValue.increment(config.referrerCoins),
         vCoinsUpdatedAt:      now,
       });
 
@@ -178,12 +194,9 @@ export const applyReferral = functionsV1
 
     // ── 4. Credit referee's welcome bonus ─────────────────────────────────────
     if (config.refereeCoins > 0) {
-      const refereeBal    = refereeUserSnap.exists ? (refereeUserSnap.data()?.vCoins ?? 0) : 0;           // ✅ FIX: was vCoinsBalance
-      const refereeEarned = refereeUserSnap.exists ? (refereeUserSnap.data()?.vCoinsLifetimeEarned ?? 0) : 0;
-
       batch.update(refereeUserRef, {
-        vCoins:               refereeBal    + config.refereeCoins,  // ✅ FIX: was vCoinsBalance
-        vCoinsLifetimeEarned: refereeEarned + config.refereeCoins,
+        vCoins:               admin.firestore.FieldValue.increment(config.refereeCoins),
+        vCoinsLifetimeEarned: admin.firestore.FieldValue.increment(config.refereeCoins),
         vCoinsUpdatedAt:      now,
       });
 
@@ -210,34 +223,40 @@ export const applyReferral = functionsV1
       const referrerData = referrerDoc.data();
       const newCount     = (referrerData?.referralCount ?? 0) + 1;
 
-      for (const milestone of config.milestones) {
-        if (newCount % milestone.every === 0) {
-          milestoneGiftLabel = milestone.giftLabel;
-          // Bonus coins milestone
-          if (milestone.giftType === "coins" && milestone.giftValue > 0) {
-            const msTxRef = db.collection(`users/${referrerId}/vCoinTransactions`).doc();
-            batch.set(msTxRef, {
-              type:        "CREDIT",
-              amount:      milestone.giftValue,
-              source:      "REFERRAL_REWARD",
-              title:       `Milestone Reward 🏆`,
-              description: `${newCount}th referral milestone: ${milestone.giftLabel}`,
-              status:      "SUCCESS",
-              referenceId: `milestone_${newCount}`,
-              metadata:    { milestone: newCount, giftLabel: milestone.giftLabel },
-              createdAt:   now,
-              updatedAt:   now,
-            });
+      // Pick the largest `every` among milestones newCount evenly divides,
+      // not just the first array match — otherwise a smaller milestone
+      // (e.g. "every 5") permanently shadows a larger one that shares a
+      // common multiple (e.g. "every 10" would never fire, since every
+      // multiple of 10 is also a multiple of 5 and array order put 5 first).
+      const dueMilestone = config.milestones
+        .filter((m) => m.every > 0 && newCount % m.every === 0)
+        .reduce<MilestoneReward | null>(
+          (biggest, m) => (!biggest || m.every > biggest.every ? m : biggest),
+          null
+        );
 
-            const referrerUserRef2 = db.doc(`users/${referrerId}`);
-            const snap2 = await referrerUserRef2.get();
-            const bal2  = snap2.exists ? (snap2.data()?.vCoins ?? 0) : 0;  // ✅ FIX: was vCoinsBalance
-            batch.update(referrerUserRef2, {
-              vCoins:               bal2 + milestone.giftValue,  // ✅ FIX: was vCoinsBalance
-              vCoinsLifetimeEarned: admin.firestore.FieldValue.increment(milestone.giftValue),
-            });
-          }
-          break; // only one milestone per referral
+      if (dueMilestone) {
+        milestoneGiftLabel = dueMilestone.giftLabel;
+        // Bonus coins milestone
+        if (dueMilestone.giftType === "coins" && dueMilestone.giftValue > 0) {
+          const msTxRef = db.collection(`users/${referrerId}/vCoinTransactions`).doc();
+          batch.set(msTxRef, {
+            type:        "CREDIT",
+            amount:      dueMilestone.giftValue,
+            source:      "REFERRAL_REWARD",
+            title:       `Milestone Reward 🏆`,
+            description: `${newCount}th referral milestone: ${dueMilestone.giftLabel}`,
+            status:      "SUCCESS",
+            referenceId: `milestone_${newCount}`,
+            metadata:    { milestone: newCount, giftLabel: dueMilestone.giftLabel },
+            createdAt:   now,
+            updatedAt:   now,
+          });
+
+          batch.update(referrerUserRef, {
+            vCoins:               admin.firestore.FieldValue.increment(dueMilestone.giftValue),
+            vCoinsLifetimeEarned: admin.firestore.FieldValue.increment(dueMilestone.giftValue),
+          });
         }
       }
     }

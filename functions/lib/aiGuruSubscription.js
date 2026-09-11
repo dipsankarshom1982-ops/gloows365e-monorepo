@@ -10,6 +10,26 @@ const db = admin.firestore();
 function isVerifyPayload(data) {
     return "razorpayPaymentId" in data && typeof data.razorpayPaymentId === "string";
 }
+// Resolves the real price of a plan+cycle server-side from
+// subscriptionPlans/{planId} — the client never gets to state its own
+// price. Mirrors aiGuruCreditOrders' "resolve pack price from Firestore,
+// never trust the client" rule (see aiGuruCredits.ts's header comment).
+async function resolvePlanPrice(planId, cycle) {
+    const planSnap = await db.doc(`subscriptionPlans/${planId}`).get();
+    if (!planSnap.exists) {
+        throw new functionsV1.https.HttpsError("not-found", "Subscription plan not found");
+    }
+    const plan = planSnap.data();
+    if (plan.isActive === false) {
+        throw new functionsV1.https.HttpsError("failed-precondition", "This plan is no longer available");
+    }
+    const priceRupees = cycle === "annual" ? Number(plan.annualPrice) : Number(plan.monthlyPrice);
+    const amountPaise = Math.round(priceRupees * 100);
+    if (!amountPaise || amountPaise < 100) {
+        throw new functionsV1.https.HttpsError("failed-precondition", "Plan is misconfigured");
+    }
+    return amountPaise;
+}
 exports.aiGuruCreateSubscription = functionsV1
     .runWith({
     timeoutSeconds: 60,
@@ -24,8 +44,15 @@ exports.aiGuruCreateSubscription = functionsV1
     const keyId = process.env["RAZORPAY_KEY_ID"] ?? "";
     const keySecret = process.env["RAZORPAY_KEY_SECRET"] ?? "";
     // ── Phase 2: Verify payment and write subscription ────────────────────────
+    // planId/cycle come from OUR OWN aiGuruSubscriptionOrders/{orderId} doc
+    // (written in Phase 1 below from a server-resolved price), never from
+    // this call's payload — same rule aiGuruCreditPaymentSuccess follows.
+    // Not currently called by any client (both apps verify via the HTTP
+    // aiGuruPaymentSuccess endpoint below instead), but a callable function
+    // is reachable by anyone with an ID token regardless of what the app UI
+    // does, so it gets the same trust model.
     if (isVerifyPayload(data)) {
-        const { planId, cycle, razorpayPaymentId, razorpayOrderId, razorpaySignature } = data;
+        const { razorpayPaymentId, razorpayOrderId, razorpaySignature } = data;
         const expectedSig = crypto
             .createHmac("sha256", keySecret)
             .update(`${razorpayOrderId}|${razorpayPaymentId}`)
@@ -33,31 +60,51 @@ exports.aiGuruCreateSubscription = functionsV1
         if (expectedSig !== razorpaySignature) {
             throw new functionsV1.https.HttpsError("permission-denied", "Payment verification failed");
         }
-        const durationMs = cycle === "annual"
-            ? 365 * 24 * 3600 * 1000
-            : 30 * 24 * 3600 * 1000;
-        await db.doc(`subscriptions/${uid}`).set({
-            planId,
-            cycle,
-            status: "active",
-            endDate: admin.firestore.Timestamp.fromMillis(Date.now() + durationMs),
-            razorpayPaymentId,
-            razorpayOrderId,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        const orderRef = db.doc(`aiGuruSubscriptionOrders/${razorpayOrderId}`);
+        const result = await db.runTransaction(async (tx) => {
+            const orderSnap = await tx.get(orderRef);
+            if (!orderSnap.exists) {
+                throw new functionsV1.https.HttpsError("not-found", "Order not found");
+            }
+            const order = orderSnap.data();
+            if (order.uid !== uid) {
+                throw new functionsV1.https.HttpsError("permission-denied", "This order doesn't belong to you");
+            }
+            if (order.status === "paid") {
+                return { alreadyActivated: true, planId: order.planId, cycle: order.cycle };
+            }
+            const durationMs = order.cycle === "annual"
+                ? 365 * 24 * 3600 * 1000
+                : 30 * 24 * 3600 * 1000;
+            const now = admin.firestore.FieldValue.serverTimestamp();
+            tx.set(db.doc(`subscriptions/${uid}`), {
+                planId: order.planId,
+                cycle: order.cycle,
+                status: "active",
+                endDate: admin.firestore.Timestamp.fromMillis(Date.now() + durationMs),
+                razorpayPaymentId,
+                razorpayOrderId,
+                createdAt: now,
+                updatedAt: now,
+            });
+            tx.update(orderRef, { status: "paid", razorpayPaymentId, paidAt: now });
+            return { alreadyActivated: false, planId: order.planId, cycle: order.cycle };
         });
-        console.log(`✅ AI Guru subscription created: uid=${uid} plan=${planId} cycle=${cycle}`);
-        return { success: true, planId, cycle };
+        console.log(`✅ AI Guru subscription created: uid=${uid} plan=${result.planId} cycle=${result.cycle}`);
+        return { success: true, planId: result.planId, cycle: result.cycle };
     }
     // ── Phase 1: Create Razorpay order ────────────────────────────────────────
-    const { amountPaise } = data;
+    // Price is resolved server-side from subscriptionPlans/{planId} — the
+    // client only says WHICH plan/cycle it wants, never what it costs.
+    const { planId, cycle } = data;
+    if (!planId || (cycle !== "monthly" && cycle !== "annual")) {
+        throw new functionsV1.https.HttpsError("invalid-argument", "planId and a valid cycle are required");
+    }
     if (!keyId || !keySecret) {
         console.error("Razorpay secrets missing — keyId:", !!keyId, "keySecret:", !!keySecret);
         throw new functionsV1.https.HttpsError("failed-precondition", "Razorpay not configured — secrets missing");
     }
-    if (!amountPaise || amountPaise < 100) {
-        throw new functionsV1.https.HttpsError("invalid-argument", `Invalid amount: ${amountPaise} paise`);
-    }
+    const amountPaise = await resolvePlanPrice(planId, cycle);
     try {
         const response = await axios_1.default.post("https://api.razorpay.com/v1/orders", {
             amount: amountPaise,
@@ -68,7 +115,17 @@ exports.aiGuruCreateSubscription = functionsV1
             timeout: 10000,
         });
         const razorpayOrderId = response.data.id;
-        console.log(`✅ AI Guru Razorpay order created: ${razorpayOrderId} for uid=${uid}`);
+        // Written from the resolved plan price, not from anything the client
+        // sent — this is what both verify paths trust from here on.
+        await db.doc(`aiGuruSubscriptionOrders/${razorpayOrderId}`).set({
+            uid,
+            planId,
+            cycle,
+            amountPaise,
+            status: "created",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`✅ AI Guru Razorpay order created: ${razorpayOrderId} for uid=${uid} plan=${planId} cycle=${cycle} amountPaise=${amountPaise}`);
         return { razorpayOrderId };
     }
     catch (err) {
@@ -81,11 +138,46 @@ exports.aiGuruCreateSubscription = functionsV1
     }
 });
 // ── Serve Razorpay checkout HTML page ─────────────────────────────────────────
-// Called by the app — opens in Chrome — no data: URI needed
+// Called by the app — opens in Chrome — no data: URI needed.
+//
+// `purpose` distinguishes what this checkout is paying for — defaults to
+// "sub" so existing subscription-checkout links behave exactly as before.
+// "credits" posts to aiGuruCreditPaymentSuccess instead of
+// aiGuruPaymentSuccess on success; the credit endpoint only needs the three
+// Razorpay fields (it resolves uid/packId/credits server-side from the
+// order doc written at aiGuruCreateCreditOrder time — see aiGuruCredits.ts
+// for why that matters).
 exports.aiGuruCheckoutPage = (0, https_1.onRequest)({ timeoutSeconds: 10, memory: "128MiB" }, async (req, res) => {
     res.set("Access-Control-Allow-Origin", "*");
-    const { key, order_id, amount, plan, email, uid, planId, cycle } = req.query;
+    const { key, order_id, amount, plan, email, uid, planId, cycle, purpose } = req.query;
+    const isCredits = purpose === "credits";
+    // ShikshaHub Phase 4 — reuses this same generic checkout page for tutor
+    // credits rather than duplicating it, same extension pattern "credits"
+    // itself used alongside the original "sub" purpose (see this
+    // function's header comment).
+    const isTutorCredits = purpose === "tutorcredits";
     const cfBase = `https://us-central1-${process.env.GCLOUD_PROJECT ?? "gloows-03b6sz"}.cloudfunctions.net`;
+    const successEndpoint = isCredits
+        ? "aiGuruCreditPaymentSuccess"
+        : isTutorCredits
+            ? "tutorCreditPaymentSuccess"
+            : "aiGuruPaymentSuccess";
+    // Every value below came from a URL query string a user could edit —
+    // JSON.stringify (not raw interpolation) is what keeps an edited query
+    // param from breaking out of the string literal into executable script.
+    const j = (v) => JSON.stringify(String(v ?? ""));
+    // amount must stay a numeric literal (Razorpay's own options object
+    // expects a number, not a string) — validated via Number(), not
+    // interpolated raw, so a non-numeric query param can't inject anything.
+    const amt = Number(amount) || 0;
+    const subLabel = isCredits ? "AI Guru Credits" : isTutorCredits ? "Instant Help Credits" : "Premium Subscription";
+    // Both credits flavors' verify endpoints resolve uid/packId/credits
+    // themselves from their own order doc (see aiGuruCredits.ts /
+    // tutorCredits.ts) — only the three Razorpay fields need to travel
+    // from this page back to the server.
+    const verifyBodyExtra = (isCredits || isTutorCredits)
+        ? ""
+        : `uid: ${j(uid)}, planId: ${j(planId)}, cycle: ${j(cycle)},`;
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -113,9 +205,9 @@ exports.aiGuruCheckoutPage = (0, https_1.onRequest)({ timeoutSeconds: 10, memory
 <body>
   <div class="box">
     <div class="logo">Gl<span>oows</span><span class="pill">365</span>E</div>
-    <div class="sub">Premium Subscription</div>
+    <div class="sub">${subLabel}</div>
     <div id="msg" class="msg">Opening payment…</div>
-    <button class="btn" id="payBtn" onclick="openRzp()">Pay ₹${Math.round(Number(amount) / 100)}</button>
+    <button class="btn" id="payBtn" onclick="openRzp()">Pay ₹${Math.round(amt / 100)}</button>
   </div>
 <script>
 var paid = false;
@@ -123,23 +215,23 @@ function openRzp() {
   document.getElementById("payBtn").disabled = true;
   document.getElementById("msg").innerText = "Loading Razorpay…";
   var options = {
-    key: "${key}",
-    order_id: "${order_id}",
-    amount: ${amount},
+    key: ${j(key)},
+    order_id: ${j(order_id)},
+    amount: ${amt},
     currency: "INR",
     name: "GLOOWS365E",
-    description: "${plan}",
-    prefill: { email: "${email}" },
+    description: ${j(plan)},
+    prefill: { email: ${j(email)} },
     theme: { color: "#6366f1" },
     handler: function(r) {
       paid = true;
       document.getElementById("msg").innerHTML = '<div class="success">✅ Payment Successful!<br>Return to the app.</div>';
       document.getElementById("payBtn").style.display = "none";
-      fetch("${cfBase}/aiGuruPaymentSuccess", {
+      fetch(${j(`${cfBase}/${successEndpoint}`)}, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          uid: "${uid}", planId: "${planId}", cycle: "${cycle}",
+          ${verifyBodyExtra}
           razorpay_payment_id: r.razorpay_payment_id,
           razorpay_order_id: r.razorpay_order_id,
           razorpay_signature: r.razorpay_signature
@@ -192,8 +284,14 @@ exports.aiGuruPaymentSuccess = (0, https_1.onRequest)({
         return;
     }
     try {
-        const { uid, planId, cycle, razorpay_payment_id, razorpay_order_id, razorpay_signature, } = req.body;
-        if (!uid || !razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+        const { razorpay_payment_id, razorpay_order_id, razorpay_signature, } = req.body;
+        // Note: the checkout page still sends uid/planId/cycle in the body
+        // for backward compatibility, but they're deliberately ignored below
+        // — uid/planId/cycle come from OUR OWN aiGuruSubscriptionOrders/{id}
+        // doc (written server-side in aiGuruCreateSubscription's Phase 1
+        // from a resolved plan price), never from the client request. Same
+        // trust model aiGuruCreditPaymentSuccess already follows.
+        if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
             res.status(400).json({ error: "Missing required fields" });
             return;
         }
@@ -207,21 +305,42 @@ exports.aiGuruPaymentSuccess = (0, https_1.onRequest)({
             res.status(400).json({ error: "Invalid signature" });
             return;
         }
-        // Activate subscription in Firestore
-        const durationMs = cycle === "annual"
-            ? 365 * 24 * 3600 * 1000
-            : 30 * 24 * 3600 * 1000;
-        await db.doc(`subscriptions/${uid}`).set({
-            planId,
-            cycle,
-            status: "active",
-            endDate: admin.firestore.Timestamp.fromMillis(Date.now() + durationMs),
-            razorpayPaymentId: razorpay_payment_id,
-            razorpayOrderId: razorpay_order_id,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        const orderRef = db.doc(`aiGuruSubscriptionOrders/${razorpay_order_id}`);
+        const result = await db.runTransaction(async (tx) => {
+            const orderSnap = await tx.get(orderRef);
+            if (!orderSnap.exists) {
+                return { notFound: true };
+            }
+            const order = orderSnap.data();
+            if (order.status === "paid") {
+                return { alreadyActivated: true };
+            }
+            const durationMs = order.cycle === "annual"
+                ? 365 * 24 * 3600 * 1000
+                : 30 * 24 * 3600 * 1000;
+            const now = admin.firestore.FieldValue.serverTimestamp();
+            tx.set(db.doc(`subscriptions/${order.uid}`), {
+                planId: order.planId,
+                cycle: order.cycle,
+                status: "active",
+                endDate: admin.firestore.Timestamp.fromMillis(Date.now() + durationMs),
+                razorpayPaymentId: razorpay_payment_id,
+                razorpayOrderId: razorpay_order_id,
+                createdAt: now,
+                updatedAt: now,
+            });
+            tx.update(orderRef, { status: "paid", razorpayPaymentId: razorpay_payment_id, paidAt: now });
+            return { activated: true, uid: order.uid, planId: order.planId, cycle: order.cycle };
         });
-        console.log(`✅ AI Guru subscription activated via browser: uid=${uid} plan=${planId} cycle=${cycle}`);
+        if ("notFound" in result) {
+            res.status(404).json({ error: "Order not found" });
+            return;
+        }
+        if ("alreadyActivated" in result) {
+            res.status(200).json({ success: true, alreadyActivated: true });
+            return;
+        }
+        console.log(`✅ AI Guru subscription activated via browser: uid=${result.uid} plan=${result.planId} cycle=${result.cycle}`);
         res.status(200).json({ success: true });
     }
     catch (e) {

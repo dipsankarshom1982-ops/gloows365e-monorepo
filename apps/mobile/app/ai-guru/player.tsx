@@ -24,6 +24,7 @@ import FlashcardDeck from "@/components/aiGuru/FlashcardDeck";
 import ProgressXpBar from "@/components/aiGuru/ProgressXpBar";
 import AiGuruAvatar from "@/components/aiGuru/AiGuruAvatar";
 import PracticalActivityCard from "@/components/aiGuru/PracticalActivityCard";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 
 // "quiz" removed from Section type
 type Section = "intro" | "scenes" | "concepts" | "activity" | "notes" | "flashcards" | "mission";
@@ -86,7 +87,7 @@ export default function PlayerScreen() {
     setAskLoading(true);
     setAskAnswer(null);
     try {
-      const resp = await sendFollowUp(lessonId, askText.trim(), lesson?.language ?? "English", "doubt");
+      const resp = await sendFollowUp(lessonId, askText.trim(), lesson?.language ?? "English", "ask_doubt");
       setAskAnswer(resp.answer);
       setAskText("");
     } catch {
@@ -110,19 +111,16 @@ export default function PlayerScreen() {
 
   return (
     <LinearGradient colors={["#0a0a1a", "#0f172a"]} style={S.bg}>
-      {/* Header */}
-      <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
-          <Ionicons name="chevron-back" size={22} color="#94a3b8" />
-        </TouchableOpacity>
-        <View style={S.headerMid}>
-          <Text style={S.headerTitle} numberOfLines={1}>{lj.lessonTitle}</Text>
-          <ProgressXpBar xp={xp} maxXp={(lj.flashcards?.length ?? 5) * 15} label="Session XP" />
-        </View>
-        <TouchableOpacity style={S.askFab} onPress={() => setAskVisible(true)}>
-          <Ionicons name="chatbubble-ellipses" size={20} color="#a5b4fc" />
-        </TouchableOpacity>
-      </View>
+      <AiGuruHeader
+        title={lj.lessonTitle}
+        subtitle={<ProgressXpBar xp={xp} maxXp={(lj.flashcards?.length ?? 5) * 15} label="Session XP" />}
+        showLanguageBadge
+        rightElement={
+          <TouchableOpacity style={S.askFab} onPress={() => setAskVisible(true)}>
+            <Ionicons name="chatbubble-ellipses" size={20} color="#a5b4fc" />
+          </TouchableOpacity>
+        }
+      />
 
       {/* Section tabs */}
       <ScrollView
@@ -419,10 +417,6 @@ const S = StyleSheet.create({
   bg:               { flex: 1 },
   center:           { flex: 1, justifyContent: "center", alignItems: "center", gap: 16 },
   loadingText:      { color: "#64748b", fontSize: 14 },
-  header:           { flexDirection: "row", alignItems: "center", paddingTop: 52, paddingBottom: 10, paddingHorizontal: 16, gap: 10 },
-  backBtn:          { width: 38, height: 38, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.08)", justifyContent: "center", alignItems: "center" },
-  headerMid:        { flex: 1, gap: 4 },
-  headerTitle:      { color: "#f1f5f9", fontSize: 15, fontWeight: "800" },
   askFab:           { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(99,102,241,0.2)", justifyContent: "center", alignItems: "center" },
   tabsScroll:       { maxHeight: 52 },
   tabsContent:      { paddingHorizontal: 12, gap: 6 },

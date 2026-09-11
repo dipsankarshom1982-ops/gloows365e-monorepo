@@ -5,24 +5,164 @@ service cloud.firestore {
     // 🔒 STUDENTS PROFILE
     match /students/{userId} {
       allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
-      allow create, update, delete: if request.auth.uid == userId;
+      // SECURITY FIX (full audit, 2026-08-27): this used to have NO field
+      // restriction at all on create or update — any signed-in user could
+      // set literally any field on their own students/{uid} doc via a
+      // direct client SDK write. Two fields that actually matters:
+      // studentId (functions/src/studentId.ts's GLS###### human-readable
+      // ID — its whole point is to be a stable, unique lookup key support
+      // reads back to a student over the phone, and admin's Payment
+      // Management studentId search, functions/src/refundSearch.ts, does a
+      // `where("studentId","==",...)` lookup that trusts it's unique) and
+      // learnScore (server-only, credited by functions/src/seekho.ts's
+      // completeChapter via the Admin SDK). Neither was ever meant to be
+      // client-writable — same class of gap already fixed on users/{uid}
+      // above, just left unswept on this sibling collection.
+      //
+      // Allowlist is the exact union of every field written by a real
+      // students/{uid} create call site in the repo (mobile + web
+      // registration, both platforms' minimal signup.tsx/page.tsx bootstrap
+      // doc, profile-settings resave-after-missing-doc, language-only and
+      // push-token-only writes, mobile's LearnFun mission rewards) —
+      // re-verified against current code. studentId/learnScore are
+      // deliberately absent, so hasOnly() rejects them outright on create
+      // regardless of value.
+      allow create: if request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'name', 'title', 'phone', 'school', 'board', 'section', 'class',
+          'preferredLanguage', 'profilePic', 'parentPhone', 'parentPhoneVerified',
+          'parentalConsent', 'dob', 'age', 'location', 'interests', 'stats',
+          'learningProfile', 'onboardingComplete', 'createdAt', 'updatedAt',
+          'email', 'role', 'pushToken',
+          'LearnFunXP', 'LearnFunStreak', 'LearnFunLastMissionDate',
+          'LearnFunCompletedMissions', 'LearnFunBadges'
+        ])
+        && (!('role' in request.resource.data) || request.resource.data.role == 'student');
+      // Deny-list, not an allowlist — every legitimate field profile edits/
+      // language changes/push-token registration/LearnFun rewards write
+      // needs room to keep working without this rule needing a re-edit
+      // every time a new profile field ships; only the two server-only
+      // fields are ever blocked. affectedKeys(), not changedKeys() — a
+      // field being touched for the FIRST time on an existing doc lands in
+      // addedKeys(), invisible to changedKeys(), which is exactly the bug
+      // users/{uid}'s update rule above was fixed for; affectedKeys() is
+      // the union of added+changed+removed and is what a "never touch
+      // these fields" deny-list actually needs.
+      allow update: if request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['studentId', 'learnScore']);
+      allow delete: if request.auth.uid == userId;
     }
 
     // 🔥 POSTS
     match /posts/{postId} {
       allow read: if request.auth != null;
+
+      // SECURITY FIX (SkillBattle trust-boundary remediation — audit
+      // findings SB-P0-01/SB-P0-02): isSkillBattle:true posts (submitted via
+      // apps/mobile/app/Createreelscreen.tsx) now go through a strict,
+      // server-authoritative allowlist. Before this fix, create had NO
+      // field validation at all beyond ownership — a signed-in student
+      // could write a fully pre-approved submission (status:"approved")
+      // with arbitrary engagement counts in a single client SDK call, no
+      // app UI needed. Ordinary (non-SkillBattle) posts keep their
+      // previous, broader create behavior unchanged — this fix is scoped
+      // to SkillBattle, not a general posts-collection redesign.
       allow create: if request.auth != null
-        && request.resource.data.userId == request.auth.uid;
+        && request.resource.data.userId == request.auth.uid
+        && (
+          // Same 'in' guard as the update rule below — an ordinary
+          // (non-SkillBattle) post's create payload never includes
+          // isSkillBattle at all, and a bare field access on a genuinely
+          // absent key errors the whole expression rather than being falsy.
+          !('isSkillBattle' in request.resource.data) || request.resource.data.isSkillBattle != true
+          || (
+            request.resource.data.keys().hasOnly([
+              'userId', 'name', 'school', 'class', 'profilePic',
+              'battleId', 'battleTitle', 'battleType', 'isSkillBattle', 'postType', 'month',
+              'caption', 'targetState', 'targetLanguage',
+              'location', 'mediaUrl', 'thumbnail',
+              'status', 'rejectionReason', 'reviewedAt', 'reviewedBy',
+              'likes', 'views', 'shares', 'comments', 'watchTime', 'createdAt'
+            ])
+            // Every server-authoritative field must start in its one safe
+            // initial state — the moderation queue (an admin, or a future
+            // Cloud Function) is the only thing allowed to move status
+            // forward from here; the client can never create a
+            // pre-approved or pre-scored submission.
+            && request.resource.data.status == 'pending'
+            && request.resource.data.rejectionReason == ''
+            && request.resource.data.reviewedAt == null
+            && request.resource.data.reviewedBy == ''
+            && request.resource.data.likes == 0
+            && request.resource.data.views == 0
+            && request.resource.data.shares == 0
+            && request.resource.data.comments == 0
+            && request.resource.data.watchTime == 0
+          )
+        );
+
+      // SECURITY FIX (SB-P0-01): the old owner branch below had NO
+      // restriction beyond keeping userId unchanged — a student owning a
+      // SkillBattle post could flip status to "approved" and inflate any
+      // counter on their own submission at will, at any time (including
+      // after a battle closed), fully bypassing moderation and scoring.
+      // For isSkillBattle:true posts there is now no owner-bypass at all:
+      // owner and stranger alike are limited to the same narrow engagement
+      // allowlist as before, PLUS each counter is now bounded to the
+      // amount one real, single user action could ever produce (mirrors
+      // the existing contests/{id}.joinedCount == +1 pattern below) — a
+      // single write can no longer claim thousands of fake views/likes.
+      // Non-SkillBattle posts keep the previous, broader owner-can-edit-
+      // anything behavior unchanged (out of scope for this fix).
       allow update: if request.auth != null
         && (
           request.auth.token.admin == true
           || (
-            request.resource.data.userId == resource.data.userId
-            && (
-              request.auth.uid == resource.data.userId
-              || request.resource.data.diff(resource.data).changedKeys().hasOnly([
-                'views', 'likes', 'comments', 'watchTime', 'shares'
-              ])
+            // 'isSkillBattle' in resource.data — not a bare
+            // resource.data.isSkillBattle == true — because ordinary
+            // (non-SkillBattle) posts never set this field at all, and
+            // accessing a genuinely-missing map key errors out the whole
+            // expression rather than evaluating falsy; same reasoning as
+            // the 'role' in request.resource.data guards on users/{uid}
+            // and students/{uid} above.
+            ('isSkillBattle' in resource.data) && resource.data.isSkillBattle == true
+            ? (
+              request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['views', 'likes', 'comments', 'watchTime', 'shares'])
+              && (!('views' in request.resource.data.diff(resource.data).affectedKeys())
+                  || request.resource.data.views == resource.data.views + 1)
+              && (!('likes' in request.resource.data.diff(resource.data).affectedKeys())
+                  || request.resource.data.likes == resource.data.likes + 1)
+              && (!('shares' in request.resource.data.diff(resource.data).affectedKeys())
+                  || request.resource.data.shares == resource.data.shares + 1)
+              && (!('comments' in request.resource.data.diff(resource.data).affectedKeys())
+                  || request.resource.data.comments == resource.data.comments + 1)
+              // watchTime accumulates continuously rather than one-per-tap,
+              // so it's bounded to a plausible single-update range (must
+              // increase, capped at +60s — the max reel length, see
+              // Createreelscreen.tsx's videoMaxDuration) instead of exactly +1.
+              && (!('watchTime' in request.resource.data.diff(resource.data).affectedKeys())
+                  || (
+                    request.resource.data.watchTime > resource.data.watchTime
+                    && request.resource.data.watchTime <= resource.data.watchTime + 60
+                  ))
+            )
+            : (
+              request.resource.data.userId == resource.data.userId
+              && (
+                request.auth.uid == resource.data.userId
+                // affectedKeys(), not changedKeys() — see users/{uid}'s update
+                // rule for why: a first-time-added field is invisible to
+                // changedKeys(), so a non-owner could otherwise smuggle in any
+                // brand-new field name on someone else's post as long as the
+                // post never had that field before. views/likes/comments/
+                // watchTime/shares are always seeded at post creation (see
+                // apps/mobile/app/Createreelscreen.tsx) so this tightens
+                // nothing for the legitimate counter-increment path.
+                || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                  'views', 'likes', 'comments', 'watchTime', 'shares'
+                ])
+              )
             )
           )
         );
@@ -45,12 +185,84 @@ service cloud.firestore {
     // 👤 USERS — all profile types (student, restartEducation, parent)
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow create: if request.auth.uid == userId;
+      // SECURITY FIX (Task 8 rules-suite follow-up, 2026-08-26): this used
+      // to have NO field restriction at all — any signed-in user could
+      // create their own users/{uid} doc (their first-ever write, before
+      // any app or server flow gets there) with literally any fields,
+      // including vCoinsBalance/vCoins*/admin. The update rule below was
+      // already locked down, but Firestore classifies a write to a
+      // not-yet-existing doc as `create`, not `update`, so that protection
+      // never applied to a user's very first write — a signed-in attacker
+      // could call the client SDK directly (no app UI needed) and forge
+      // their own balance/role on day one.
+      //
+      // Allowlist is the exact union of fields written by every confirmed
+      // client-side users/{uid} creation call site in the repo (mobile +
+      // web signup, Google-signin bootstrap, register, restart-education
+      // onboarding/redirect) — re-verified against the current code, not
+      // assumed. role/roles/profileType get an exact-value check on top
+      // since every real call site writes one specific value each; nothing
+      // client-side ever needs to self-assign admin/superAdmin/moderator
+      // or any other role, and no privileged/system field (vCoinsBalance,
+      // vCoins*, verified, earnings, payout*, admin) is in the allowlist at
+      // all, so hasOnly() rejects it outright regardless of value.
+      allow create: if request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'role', 'roles', 'profileType', 'email', 'name', 'photoURL',
+          'signupPlatform', 'consent', 'onboardingComplete', 'referralCode',
+          'title', 'profilePic', 'preferredLanguage', 'dob', 'age',
+          'lastClassPassed', 'currentOccupation', 'educationGapReason',
+          'createdAt', 'updatedAt'
+        ])
+        && (!('role' in request.resource.data) || request.resource.data.role == 'student')
+        && (!('roles' in request.resource.data) || request.resource.data.roles == ['student'])
+        && (!('profileType' in request.resource.data)
+          || request.resource.data.profileType in ['student', 'restartEducation']);
       allow update: if request.auth.uid == userId
-        && !request.resource.data.diff(resource.data).changedKeys().hasAny([
+        // SECURITY FIX (Task 8 rules-suite finding, 2026-08-26): this used
+        // to check changedKeys(), which only flags a field that exists in
+        // BOTH the before and after doc with a different value. A field
+        // that doesn't exist on the doc YET — e.g. a brand-new user whose
+        // Cloud-Function-only vCoinsBalance/vCoinsYear_* fields haven't
+        // been initialized — lands in addedKeys(), not changedKeys(), so
+        // the deny-list below silently didn't apply to a first-time write
+        // of any of these fields. affectedKeys() is the union of
+        // added+changed+removed and is what a "never touch these fields"
+        // deny-list actually needs — same function tutors/{uid}'s allowlist
+        // above already uses correctly. Caught by
+        // rules-tests/firestore.rules.test.ts's VCoins forgery suite.
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'vCoins', 'vCoinsLifetimeEarned', 'vCoinsLifetimeSpent',
+          // vCoinsBalance — the OTHER VCoins pool (reel/video/story watch,
+          // signup bonus, SkillBattle claims — see functions/src/vcoins.ts's
+          // "vCoinsBalance crediting (security migration)" section). Used to
+          // be missing from this list entirely: every other VCoins-adjacent
+          // field here was locked down but this one — the field that field
+          // actually holds most of a user's balance — wasn't, so any signed-in
+          // user could set their own vCoinsBalance to any number with a plain
+          // Firestore write, bypassing every reward/limit check that used to
+          // live only in client JS. Now server-only, same as the others.
+          'vCoinsBalance',
           'vCoinsYear_2024','vCoinsYear_2025','vCoinsYear_2026','vCoinsYear_2027','vCoinsYear_2028',
-          'vCoinsHistory_2024','vCoinsHistory_2025','vCoinsHistory_2026','vCoinsHistory_2027','vCoinsHistory_2028'
+          'vCoinsHistory_2024','vCoinsHistory_2025','vCoinsHistory_2026','vCoinsHistory_2027','vCoinsHistory_2028',
+          // SECURITY FIX (tester/module-access follow-up): 'role'/'roles'
+          // were never in this deny-list, and the create rule above only
+          // pins role to 'student' on the very first write — nothing
+          // stopped a signed-in user from *updating* their own existing
+          // doc afterwards with role: "tester" (or "admin") via a plain
+          // client SDK call. That role now genuinely matters — it's what
+          // apps/mobile/context/AppConfigContext.tsx and shared-logic's
+          // FeatureFlagsContext.tsx read to grant full access to every
+          // admin-disabled module/feature and (functions/src/usageCheck.ts)
+          // unlimited free AI Guru usage — so self-assigning it was a real
+          // privilege-escalation/free-premium hole, not just cosmetic.
+          // Every legitimate client call site (signup.tsx, register.tsx)
+          // only ever (re)writes role/roles to "student"/["student"], so
+          // this can't break any real flow — actual promotion to tester
+          // happens only from apps/admin/src/pages/Students.tsx, which
+          // authenticates with the admin-claims path (line below) or via
+          // Cloud Functions (Admin SDK, bypasses these rules entirely).
+          'role', 'roles'
         ]);
       allow update: if request.auth.token.admin == true;
       allow delete: if false;
@@ -61,8 +273,14 @@ service cloud.firestore {
         allow read:                   if request.auth.uid == userId;
         allow create, update, delete: if false;
       }
+      // Server-only, same reasoning as vCoinsBalance above — these are the
+      // idempotency locks functions/src/vcoins.ts's creditVCoinsBalance()
+      // checks before crediting. Leaving them client-writable would let a
+      // user delete their own "already claimed" lock after a legitimate
+      // reward and re-trigger the same Cloud Function to claim it again.
       match /vCoinActivityLocks/{lockId} {
-        allow read, write: if request.auth.uid == userId;
+        allow read:                   if request.auth.uid == userId;
+        allow create, update, delete: if false;
       }
     }
 
@@ -156,7 +374,11 @@ service cloud.firestore {
       allow update: if request.auth.token.admin == true
         || (
           request.auth != null
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['joinedCount', 'updatedAt'])
+          // affectedKeys(), not changedKeys() — same first-time-added-field
+          // gap as posts/{postId} above. joinedCount is always seeded to 0
+          // at contest creation (apps/admin/src/pages/CreateContest.tsx) so
+          // this doesn't change the legitimate join-increment path.
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['joinedCount', 'updatedAt'])
           && request.resource.data.joinedCount == resource.data.joinedCount + 1
           && request.resource.data.joinedCount <= resource.data.totalSpots
         );
@@ -178,14 +400,26 @@ service cloud.firestore {
         // batch — see submitVidyastarContestQuiz.ts for the full story).
         allow update: if false;
       }
+      // SECURITY FIX (VidyaStar Phase 1 — score integrity, see
+      // functions/src/submitVidyastarContestQuiz.ts's header comment):
+      // this doc used to be world-readable to any authenticated user, and
+      // (until the contestLesson.ts split) its lessonJson.quiz carried
+      // correctAnswerIndex/explanation for the contest's actual scored
+      // quiz — so any student could read the full answer key directly.
+      // getContestLesson (the only legitimate way to fetch this content)
+      // now strips quiz answers before ever returning a response, so
+      // direct client reads of this doc are no longer needed for anything
+      // legitimate — closed entirely rather than "closed except for the
+      // sanitized fields", since Firestore rules can't do field-level
+      // read redaction.
       match /lessons/{language} {
-        // Lesson content is generated lazily per (contest, language) by the
-        // getContestLesson Cloud Function (Admin SDK, bypasses these rules)
-        // the first time a student in that language opens the lesson —
-        // never written directly by a client, same reason participant
-        // writes are Cloud-Function-only above.
-        allow read: if request.auth != null;
-        allow write: if false;
+        allow read, write: if false;
+      }
+      // Private answer key — Admin-SDK-only, never returned by any
+      // callable. Populated by getContestLesson, read only by
+      // submitVidyastarContestQuiz for server-side grading.
+      match /lessonAnswers/{language} {
+        allow read, write: if false;
       }
     }
 
@@ -240,17 +474,123 @@ service cloud.firestore {
     }
 
     // ⚔️ SKILL BATTLES
+    // 🗂️ SKILL TAXONOMY (Phase 2B domain foundation) — config-driven,
+    // same admin-only-write pattern as appModules/featureFlags below.
+    // Read is open to any signed-in user (students need to read these to
+    // display a battle's skill/category — same posture as appModules).
+    match /skillCategories/{categoryId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+    match /skills/{skillId} {
+      allow read: if request.auth != null;
+      // Enforces the category relationship at write time — a skill can
+      // never reference a skillCategory that doesn't exist, on create OR
+      // update (covers editing categoryId on an existing skill too).
+      allow write: if request.auth.token.admin == true
+        && (
+          !('categoryId' in request.resource.data)
+          || exists(/databases/$(database)/documents/skillCategories/$(request.resource.data.categoryId))
+        );
+    }
+
     match /skillBattles/{battleId} {
       allow read: if request.auth != null;
-      allow create: if request.auth.token.admin == true;
-      allow update: if request.auth.token.admin == true
-        || (
-          request.auth != null
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly([
-            'participants', 'participantCount', 'joinedCount'
-          ])
+      // SECURITY FIX (Phase 2B, Decision Lock §12/§13): `state` is
+      // excluded from every client-writable path below, admin included —
+      // it can only be set by transitionBattleState
+      // (functions/src/skillBattleDomain.ts, Admin SDK), which validates
+      // the transition against the canonical state graph before writing.
+      // This is the same "even an admin's client SDK write can't set this
+      // — real workflow uses the Admin SDK" posture already used for
+      // tutors/{uid}.verified and posts/{postId}.status (Phase 1) — state
+      // is exactly as privileged as those.
+      allow create: if request.auth.token.admin == true
+        && (!('state' in request.resource.data) || request.resource.data.state == 'DRAFT');
+      allow update: if request.auth != null
+        && (
+          (
+            request.auth.token.admin == true
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['state'])
+          )
+          || (
+            // affectedKeys(), not changedKeys() — same first-time-added-field
+            // gap as posts/{postId} above. `participants` in particular is
+            // NOT seeded at battle creation (apps/admin/src/pages/
+            // SkillBattles.tsx never writes it) — it's only ever set the
+            // first time someone joins, which changedKeys() couldn't see at
+            // all, silently exempting it (and anything else newly-added)
+            // from this allowlist entirely.
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'participants', 'participantCount', 'joinedCount'
+            ])
+          )
         );
       allow delete: if request.auth.token.admin == true;
+
+      // Lightweight audit trail for transitionBattleState — Admin-SDK-only
+      // (the callable is the only writer), read-only to admins for now;
+      // not the full cross-cutting AuditEvent model from the Phase 2A
+      // blueprint, which is out of scope for this phase.
+      match /stateTransitions/{transitionId} {
+        allow read:  if request.auth.token.admin == true;
+        allow write: if false;
+      }
+    }
+
+    // 🏅 SKILLBATTLE AWARDS — immutable award ledger (SB-P0-03/Step 10).
+    // Written only by claimSkillBattleReward (functions/src/vcoins.ts,
+    // Admin SDK) via a transaction that reserves the doc before any VCoins
+    // credit happens — never client-writable, at create or afterward, so a
+    // student can never modify their own award amount/status/rank.
+    match /skillBattleAwards/{awardId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == resource.data.uid || request.auth.token.admin == true);
+      allow write: if false;
+    }
+
+    // ⚔️ BATTLE ENGINE (Phase 2C) — the new canonical submissions/scoring/
+    // ranking/finalization/rewards pipeline, parallel to and independent
+    // of the legacy posts-based flow above. Every collection here is
+    // client-read-only, Admin-SDK-write-only — ALL mutation goes through
+    // the callables in functions/src/battle*.ts (createBattleSubmission,
+    // reviewBattleSubmission, engageBattleSubmission,
+    // finalizeBattleResults, claimBattleReward), which enforce
+    // eligibility/ownership/state/idempotency server-side. Unlike
+    // posts/{postId}, there is no bounded-counter-bump exception for
+    // engagement here — verified engagement is recorded as immutable,
+    // structurally-deduplicated facts (submissions/{id}/engagements), not
+    // a client-writable counter field at all, so there's nothing for a
+    // direct client write to legitimately do to any of these collections.
+    match /submissions/{submissionId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+
+      match /engagements/{engagementId} {
+        allow read:  if request.auth != null;
+        allow write: if false;
+      }
+    }
+    match /battleScoreEntries/{entryId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+    match /battleResults/{battleId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+    match /battleAwards/{awardId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == resource.data.uid || request.auth.token.admin == true);
+      allow write: if false;
+    }
+    match /skillPoints/{pointsId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+    match /achievementEvents/{eventId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
     }
 
     // 🤝 PARTNERS
@@ -416,6 +756,55 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 🎫 AI GURU CREDITS — pay-as-you-go, coexists with subscriptions above.
+    // Balance + ledger are Admin-SDK-only, same reasoning as vCoinTransactions:
+    // every mutation goes through aiGuruCreditDebit.ts / aiGuruCredits.ts
+    // Cloud Functions so a client can never grant or spend its own credits.
+    match /aiGuruCredits/{uid} {
+      allow read:  if request.auth.uid == uid || request.auth.token.admin == true;
+      allow write: if false;
+      match /transactions/{txId} {
+        allow read:                   if request.auth.uid == uid || request.auth.token.admin == true;
+        allow create, update, delete: if false;
+      }
+    }
+    match /aiGuruCreditPacks/{packId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+    match /aiGuruCreditConfig/{docId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+    // Server-only — the security boundary for credit purchases. Order amount
+    // and credit count are derived from aiGuruCreditPacks at order-create
+    // time and read back from this doc at verify time, never from client
+    // input, so nobody can tamper with what a payment is worth after the
+    // fact (see aiGuruCredits.ts).
+    match /aiGuruCreditOrders/{orderId} {
+      allow read, write: if false;
+    }
+
+    // Server-only — same role as aiGuruCreditOrders above, for the flat-fee
+    // subscription flow instead of credit packs. Price is resolved from
+    // subscriptionPlans/{planId} at order-create time and read back from
+    // this doc at verify time, never from client input (see
+    // aiGuruSubscription.ts).
+    match /aiGuruSubscriptionOrders/{orderId} {
+      allow read, write: if false;
+    }
+
+    // 💸 REFUNDS — admin-controlled refund/reconciliation system (launch
+    // audit Task 7). Every write happens via functions/src/refunds.ts's
+    // Cloud Functions (Admin SDK) — processRefund verifies the original
+    // order, calls Razorpay, and reconciles the entitlement, all
+    // server-side. Admins can read directly for the Refund Management UI;
+    // nothing else touches this collection.
+    match /refunds/{refundId} {
+      allow read:  if request.auth != null && request.auth.token.admin == true;
+      allow write: if false;
+    }
+
     // 📚 SEEKHO MODULE
     match /seekho_courses/{courseId} {
       allow read: if request.auth != null;
@@ -436,6 +825,12 @@ service cloud.firestore {
     match /seekho_subscriptions/{userId} {
       allow read: if request.auth.uid == userId || request.auth.token.admin == true;
       allow write: if false;
+    }
+    // Server-only — same role as aiGuruSubscriptionOrders. Price/plan is
+    // resolved server-side at order-create time and read back from this
+    // doc at verify time, never from client input (see seekho.ts).
+    match /seekho_subscription_orders/{orderId} {
+      allow read, write: if false;
     }
     match /seekho_revision_queue/{docId} {
       allow read: if request.auth != null && resource.data.userId == request.auth.uid;
@@ -618,10 +1013,367 @@ service cloud.firestore {
           resource.data.uid == request.auth.uid
           && resource.data.status == "unclaimed"
           && request.resource.data.status == "claimed"
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly(["claimInfo", "status"])
+          // affectedKeys(), not changedKeys() — same first-time-added-field
+          // gap as posts/{postId} above. claimInfo itself is ALWAYS a
+          // first-time add here (admin creates the doc without it), so the
+          // old changedKeys() check never actually saw claimInfo in the
+          // diff at all — meaning a student could add arbitrary extra new
+          // fields alongside their real claimInfo submission and this
+          // hasOnly() would silently let every one of them through.
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["claimInfo", "status"])
         )
       );
-      allow delete: if false;
+      // Admin-only "revoke" — only while still unclaimed, so a student who
+      // already submitted delivery details can't have their in-flight
+      // claim vanish out from under them (matches assignSurpriseGift's own
+      // reasoning in apps/admin/src/pages/VCoinLeaderboard.tsx).
+      allow delete: if request.auth != null && request.auth.token.admin == true
+        && resource.data.status == "unclaimed";
+    }
+
+    // 🎓 GLOOWS TUTOR — Phase 1a. Role granted via Firebase custom claim
+    // (request.auth.token.role, set by functions/src/tutorAccounts.ts'
+    // registerTutorAccount — never a Firestore field, same rule this repo
+    // already follows for admins/{uid}) — not enforced here since these
+    // are owner-scoped docs; the claim matters for future collections
+    // (students-under-tutor, batches, etc.) that need to distinguish
+    // TUTOR/TEACHER/COACHING_CENTER, not this one.
+    //
+    // Profile writes happen directly from the client (no callable) — see
+    // functions/src/tutorAccounts.ts's header comment for why.
+    match /tutors/{uid} {
+      allow read:   if request.auth != null && (request.auth.uid == uid || request.auth.token.admin == true);
+      // ShikshaHub Phase 1 — sessionFee is the one profile field that
+      // actually needs a server-side check (it drives what a student
+      // gets charged in a later phase), so it's validated right here
+      // rather than needing a callable for what's otherwise a plain
+      // direct-Firestore-write field (see this match block's original
+      // comment above). Split from a single `allow write` into
+      // create/update/delete specifically so this check never runs
+      // against request.resource.data on a delete, where it doesn't
+      // exist. availability isn't validated beyond "the owner wrote
+      // it" — same trust level qualification/subjects/bio already have.
+      //
+      // SECURITY FIX (launch audit, tutor self-verification hole) — the
+      // sessionFee check above was the ONLY validation on this doc, which
+      // left every other field — most importantly verified, ratingAverage/
+      // ratingCount, and isOnlineForInstantHelp — fully client-writable by
+      // the doc's own owner. `verified` is the entire output of the admin
+      // review workflow (reviewTutorVerification in tutorAccounts.ts) and
+      // is what requestBooking/requestInstantHelp actually gate on, so a
+      // tutor could set verified:true on themselves with one setDoc and
+      // immediately take real bookings with zero vetting. ratingAverage/
+      // ratingCount are maintained transactionally by tutorReviews.ts, and
+      // isOnlineForInstantHelp is set only by instantHelp.ts's
+      // setInstantHelpOnlineStatus — neither should ever move via a direct
+      // client write either.
+      //
+      // TUTOR_SELF_EDITABLE_FIELDS below is the allowlist of what a
+      // tutor's own profile screens actually write — verified, uid, email,
+      // createdAt, rating*, and isOnlineForInstantHelp are deliberately
+      // absent, so no value the client sends for them is ever accepted, on
+      // create or update. Cross-checked against every tutors/{uid} client
+      // write in the repo: apps/tutor's and apps/tutor-mobile's profile
+      // screens (qualification/subjects/teachingExperienceYears/
+      // preferredLanguage/bio/availability/sessionFee/updatedAt) and both
+      // platforms' push-registration hooks (webPushToken/pushToken).
+      // name/profilePic/tutorRole/phone are included too — SAFE_FIELDS in
+      // tutorMarketplace.ts already treats name/profilePic/tutorRole as
+      // legitimately owner-editable public profile fields, and phone
+      // mirrors what registerTutorAccount seeds at signup.
+      // Onboarding (Step 2-5, functions/src/tutorAccounts.ts's
+      // submitTutorOnboarding header has the full design) adds plain
+      // profile-data fields to this same allowlist below — phoneNumber,
+      // pinCode, city, state, gender, tutorType, studentLevels,
+      // streams, curriculumBoards, teachingMode, offlineServiceAreas,
+      // experience, highestQualification, degreeName, institutionName,
+      // completionYear, specialization, qualificationDocuments,
+      // experienceDocuments, additionalCertificates, onboardingStep,
+      // profileCompletionPercentage. These are exactly as
+      // trust-sensitive as name/subjects/bio already are above (the tutor
+      // just describes themselves) — none of them gate eligibility.
+      //
+      // Deliberately EXCLUDED, same protection `verified` already has:
+      // profileStatus, onboardingVerificationStatus, submittedAt,
+      // reviewedAt, rejectionReason, onboardingCompleted. Those are the
+      // entire output of the review workflow — settable only by
+      // submitTutorOnboarding / a future admin-review callable via the
+      // Admin SDK, never by the tutor's own client. phoneVerified is
+      // ALSO on the allowlist below, but only because OTP verification is
+      // currently a client-side UI stub with no real backing (see
+      // onboarding/page.tsx) — it carries no real trust today. Move it
+      // into this excluded list the moment real Firebase Phone Auth
+      // replaces that stub, so a tutor can no longer just assert it.
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          "name", "bio", "subjects", "qualification", "teachingExperienceYears",
+          "preferredLanguage", "profilePic", "tutorRole", "sessionFee",
+          "availability", "phone", "webPushToken", "pushToken", "updatedAt",
+          "phoneNumber", "phoneVerified", "pinCode", "city", "state",
+          "gender", "tutorType", "studentLevels", "streams", "curriculumBoards",
+          "teachingMode", "offlineServiceAreas", "experience",
+          "highestQualification", "degreeName", "institutionName",
+          "completionYear", "specialization", "qualificationDocuments",
+          "experienceDocuments", "additionalCertificates", "onboardingStep",
+          "profileCompletionPercentage", "profileStrength"
+        ])
+        && (!("sessionFee" in request.resource.data)
+          || (request.resource.data.sessionFee is int && request.resource.data.sessionFee > 0));
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "name", "bio", "subjects", "qualification", "teachingExperienceYears",
+          "preferredLanguage", "profilePic", "tutorRole", "sessionFee",
+          "availability", "phone", "webPushToken", "pushToken", "updatedAt",
+          "phoneNumber", "phoneVerified", "pinCode", "city", "state",
+          "gender", "tutorType", "studentLevels", "streams", "curriculumBoards",
+          "teachingMode", "offlineServiceAreas", "experience",
+          "highestQualification", "degreeName", "institutionName",
+          "completionYear", "specialization", "qualificationDocuments",
+          "experienceDocuments", "additionalCertificates", "onboardingStep",
+          "profileCompletionPercentage", "profileStrength"
+        ])
+        && (!("sessionFee" in request.resource.data)
+          || (request.resource.data.sessionFee is int && request.resource.data.sessionFee > 0));
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Verification workflow doc. The tutor never writes this directly —
+    // both the "Submitted" transition (submitTutorVerification) and the
+    // admin review outcome (reviewTutorVerification) go through the Admin
+    // SDK server-side, which bypasses these rules entirely, so this rule
+    // only needs to grant the owner read access for the status-timeline UI
+    // and otherwise stay closed to client writes.
+    match /tutorVerifications/{uid} {
+      allow read:  if request.auth != null && (request.auth.uid == uid || request.auth.token.admin == true);
+      allow write: if request.auth != null && request.auth.token.admin == true;
+    }
+
+    // 🎓 SHIKSHAHUB — public-safe mirror of verified tutor profiles, written
+    // only by syncTutorMarketplaceProfile (functions/src/tutorMarketplace.ts),
+    // which runs via the Admin SDK and bypasses these rules entirely. Never
+    // phone/email — see tutors/{uid} above for why that stays owner+admin-only.
+    match /tutorMarketplaceProfiles/{uid} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
+    // 🧑‍🎓 GLOOWS TUTOR — Phase 1b. A tutor's own manually-added roster
+    // entries. Auto-ID docs (a tutor has many students, no natural 1:1
+    // key), so ownership is checked via the tutorId field rather than the
+    // doc ID — same reasoning as prizeClaims/{claimId} above. No
+    // admin-read carve-out: a tutor's roster is private, admin has no
+    // product reason to browse it in this phase.
+    match /tutorStudents/{studentId} {
+      allow read:   if request.auth != null && resource.data.tutorId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.tutorId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.tutorId == request.auth.uid
+        && request.resource.data.tutorId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.tutorId == request.auth.uid;
+    }
+
+    // 📚 GLOOWS TUTOR — Phase 1c. A tutor's own batches (named groupings
+    // of their tutorStudents). Same owner-scoped-via-field shape as
+    // tutorStudents above — this is the "batches" collection that
+    // Phase 1a's comment (above, on the custom-claim block) already
+    // anticipated. Membership lives on tutorStudents.batchIds, not here;
+    // this rule only governs the batch doc itself.
+    match /tutorBatches/{batchId} {
+      allow read:   if request.auth != null && resource.data.tutorId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.tutorId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.tutorId == request.auth.uid
+        && request.resource.data.tutorId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.tutorId == request.auth.uid;
+    }
+
+    // 🗓️ GLOOWS TUTOR — Phase 1d. A tutor's scheduled class sessions, each
+    // belonging to one tutorBatch (batchId field, not enforced here — the
+    // batch reference is just data, ownership is still checked the same
+    // tutorId-field way as tutorBatches/tutorStudents above). "Cancel" is
+    // a status update (allow update covers it), not a delete — no
+    // hard-delete path this phase.
+    match /tutorClasses/{classId} {
+      allow read:   if request.auth != null && resource.data.tutorId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.tutorId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.tutorId == request.auth.uid
+        && request.resource.data.tutorId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.tutorId == request.auth.uid;
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 1 minimum viable tutor booking. A booking
+    // request between one student and one verified tutor — deliberately
+    // NOT connected to tutorStudents/tutorBatches/tutorClasses above
+    // (those are the tutor's own private CRM for students they already
+    // teach; this is the public-marketplace booking relationship — see
+    // the Phase 1 architecture audit for why keeping them separate
+    // matters). Auto-ID docs, ownership checked via the studentUid/
+    // tutorUid fields, same shape as tutorStudents/tutorBatches above.
+    //
+    // `allow write: if false` is deliberate, not a placeholder — every
+    // write (create via requestBooking, the requested->accepted/declined
+    // transition via respondToBooking) goes through
+    // functions/src/tutorBooking.ts's two callables over the Admin SDK,
+    // which bypasses these rules entirely. This is what stops a client
+    // from ever posting an arbitrary "accepted" status directly, editing
+    // someone else's booking, or reassigning studentUid/tutorUid after
+    // the fact — none of that is expressible as a rule a client write
+    // could satisfy, so the client path is closed altogether instead.
+    match /bookings/{bookingId} {
+      allow read: if request.auth != null
+        && (resource.data.studentUid == request.auth.uid || resource.data.tutorUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 3 tutor services. Owner-only read (the "My
+    // Services" management screen) — students never read this collection
+    // directly, they read tutorServicesMarketplace below instead, same
+    // owner-doc/public-mirror split as tutors/{uid} vs
+    // tutorMarketplaceProfiles/{uid}. `allow write: if false` for the same
+    // reason bookings/{id} is closed: every field here needs real
+    // validation (positive fee, valid enum, valid date range) that
+    // functions/src/tutorServices.ts's createService/updateService/
+    // deleteService callables enforce — see that file's header comment.
+    match /tutorServices/{serviceId} {
+      allow read:  if request.auth != null
+        && (resource.data.tutorUid == request.auth.uid || request.auth.token.admin == true);
+      allow write: if false;
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 3 public-safe mirror of published services
+    // belonging to verified tutors, written only by
+    // syncTutorServiceMarketplace (functions/src/tutorServices.ts), which
+    // runs via the Admin SDK and bypasses these rules entirely. Same
+    // read-open/write-closed shape as tutorMarketplaceProfiles/{uid}.
+    match /tutorServicesMarketplace/{serviceId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 4 Instant Help credits. Same shape/reasoning as
+    // aiGuruCredits/{uid} above: balance + ledger are Admin-SDK-only, every
+    // mutation goes through functions/src/tutorCredits.ts (purchases) or
+    // functions/src/instantHelp.ts (per-minute spend) so a client can never
+    // grant or spend its own credits.
+    match /tutorCredits/{uid} {
+      allow read:  if request.auth.uid == uid || request.auth.token.admin == true;
+      allow write: if false;
+      match /transactions/{txId} {
+        allow read:                   if request.auth.uid == uid || request.auth.token.admin == true;
+        allow create, update, delete: if false;
+      }
+    }
+    match /tutorCreditPacks/{packId} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth.token.admin == true;
+    }
+    // Server-only — same purchase-tamper-proofing reasoning as
+    // aiGuruCreditOrders/{orderId} above.
+    match /tutorCreditOrders/{orderId} {
+      allow read, write: if false;
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 4 a tutor's Instant Help earnings. Owner+admin
+    // read, Admin-SDK-only write — credited exclusively by
+    // functions/src/instantHelp.ts's settleInstantHelpSession().
+    match /tutorEarnings/{uid} {
+      allow read:  if request.auth.uid == uid || request.auth.token.admin == true;
+      allow write: if false;
+      match /transactions/{txId} {
+        allow read:                   if request.auth.uid == uid || request.auth.token.admin == true;
+        allow create, update, delete: if false;
+      }
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 4 Instant Help matching. Same closed-write
+    // shape as bookings/{id} — every write (create via requestInstantHelp,
+    // the pending->accepted/declined/expired transition via
+    // respondToInstantHelpRequest / the scheduled tickInstantHelp) goes
+    // through functions/src/instantHelp.ts's Admin-SDK callables, which
+    // bypass these rules entirely.
+    match /instantHelpRequests/{requestId} {
+      allow read: if request.auth != null
+        && (resource.data.studentUid == request.auth.uid || resource.data.tutorUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    // Same closed-write shape — created by respondToInstantHelpRequest,
+    // updated only by endInstantHelpSession / the scheduled
+    // tickInstantHelp's billing settlement, both Admin-SDK.
+    match /instantHelpSessions/{sessionId} {
+      allow read: if request.auth != null
+        && (resource.data.studentUid == request.auth.uid || resource.data.tutorUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 5 tutor earnings payout. A tutor's saved bank/
+    // UPI details — owner+admin read only (contains a bank account
+    // number), Admin-SDK-only write via saveTutorPayoutDetails.
+    match /tutorPayoutDetails/{uid} {
+      allow read:  if request.auth.uid == uid || request.auth.token.admin == true;
+      allow write: if false;
+    }
+
+    // Same closed-write shape as bookings/{id} — every write (create via
+    // requestPayout, pending->approved/rejected via reviewPayoutRequest,
+    // approved->paid via markPayoutPaid, pending->cancelled via
+    // cancelPayoutRequest) goes through functions/src/tutorPayouts.ts's
+    // Admin-SDK callables. Admin read is unrestricted (the review queue
+    // needs to see every tutor's requests); tutor read is scoped to their
+    // own.
+    match /payoutRequests/{requestId} {
+      allow read: if request.auth != null
+        && (resource.data.tutorUid == request.auth.uid || request.auth.token.admin == true);
+      allow write: if false;
+    }
+
+    // Admin-managed commission-rate / minimum-payout / enabled config.
+    // Read stays open to any authenticated user — apps/tutor's and
+    // apps/tutor-mobile's payouts screens read this directly to show a
+    // tutor the current minimum/commission before they request a payout.
+    // Write is closed (Phase 5 operational feature): updatePayoutConfig
+    // (admin-only callable, functions/src/tutorPayouts.ts) is the only way
+    // this doc is ever changed, so input is always server-validated and
+    // audited (updatedAt/updatedBy) rather than an unrestricted direct
+    // admin client write.
+    match /payoutConfig/{docId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
+    // 🎓 SHIKSHAHUB — Phase 6 tutor ratings & reviews. Public read (any
+    // authenticated user browsing a tutor's marketplace profile) —
+    // hidden:true reviews are still readable via a direct/admin query
+    // (useTutorReviews' own where(hidden==false) is what actually keeps
+    // them out of the public list, same "moderate don't destroy" pattern
+    // as everywhere else in this app), Admin-SDK-only write via
+    // submitTutorReview/hideTutorReview.
+    match /tutorReviews/{reviewId} {
+      allow read:  if request.auth != null;
+      allow write: if false;
+    }
+
+    // 🎓 SHIKSHAHUB — tutor-student messaging phase. One conversation per
+    // student-tutor pair: tutorConversations/{studentUid}_{tutorUid} — read
+    // scoped to the two participants only (unlike tutorReviews, this is
+    // private, not a public marketplace listing). Admin-SDK-only write via
+    // sendTutorMessage (create/append)/markConversationRead (unread reset),
+    // same closed-write shape every ShikshaHub collection uses. messages is
+    // a subcollection, not a top-level one, so its read rule looks up the
+    // parent conversation doc's participants via get() rather than
+    // duplicating studentUid/tutorUid onto every message.
+    match /tutorConversations/{conversationId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == resource.data.studentUid || request.auth.uid == resource.data.tutorUid);
+      allow write: if false;
+
+      match /messages/{messageId} {
+        allow read: if request.auth != null
+          && (request.auth.uid == get(/databases/$(database)/documents/tutorConversations/$(conversationId)).data.studentUid
+              || request.auth.uid == get(/databases/$(database)/documents/tutorConversations/$(conversationId)).data.tutorUid);
+        allow write: if false;
+      }
     }
 
   }

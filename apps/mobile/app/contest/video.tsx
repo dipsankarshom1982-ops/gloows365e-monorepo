@@ -18,18 +18,44 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
 
+// Prizes live only in VidyaStar Config (vidyastarConfig/{periodKey}.prizeRows)
+// — Create Contest's old free-text Prize field was removed since it
+// duplicated this. This teaser shows the top (lowest rankMin) tier.
+type PrizeType = "gift_voucher" | "physical" | "vcoin";
+interface PrizeRow { rankMin: number; rankMax: number; prizeType: PrizeType; prizeValue: string; medalEmoji: string; badge: string; }
+
+function formatPrize(row: PrizeRow): string {
+  return row.prizeType === "vcoin" ? `${row.prizeValue} V-Coins` : row.prizeValue;
+}
+function topPrize(rows: PrizeRow[] | undefined): PrizeRow | null {
+  if (!rows?.length) return null;
+  return [...rows].sort((a, b) => a.rankMin - b.rankMin)[0];
+}
+
 export default function ContestVideoScreen() {
   const { contestId } = useLocalSearchParams<{ contestId: string }>();
   const router = useRouter();
 
   const [contest, setContest] = useState<any>(null);
+  const [prize, setPrize] = useState<PrizeRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [videoEnded, setVideoEnded] = useState(false);
 
   useEffect(() => {
     if (!contestId) return;
-    getDoc(doc(db, "contests", contestId as string)).then((snap) => {
-      if (snap.exists()) setContest({ id: snap.id, ...snap.data() });
+    getDoc(doc(db, "contests", contestId as string)).then(async (snap) => {
+      if (snap.exists()) {
+        const data = { id: snap.id, ...snap.data() } as any;
+        setContest(data);
+        if (data.periodKey) {
+          try {
+            const configSnap = await getDoc(doc(db, "vidyastarConfig", data.periodKey));
+            if (configSnap.exists()) {
+              setPrize(topPrize(configSnap.data().prizeRows as PrizeRow[]));
+            }
+          } catch { /* prize teaser is non-critical */ }
+        }
+      }
       setLoading(false);
     });
   }, [contestId]);
@@ -98,10 +124,10 @@ export default function ContestVideoScreen() {
           {contest?.description && (
             <Text style={styles.desc}>{contest.description}</Text>
           )}
-          {contest?.prizePool && (
+          {prize && (
             <View style={styles.prizeRow}>
               <Ionicons name="trophy" size={18} color="#f59e0b" />
-              <Text style={styles.prizeText}>Prize Pool: ₹{contest.prizePool}</Text>
+              <Text style={styles.prizeText}>Prize: {formatPrize(prize)}</Text>
             </View>
           )}
         </View>

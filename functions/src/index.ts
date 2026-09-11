@@ -10,6 +10,7 @@
  */
 
 import * as admin from "firebase-admin";
+import * as crypto from "crypto";
 import * as functionsV1 from "firebase-functions/v1";
 import {
   Change,
@@ -25,6 +26,7 @@ import {
   incrementFollowUpUsage,
   incrementGenerationUsage,
 } from "./usageCheck";
+import { refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { validateLessonJson } from "./validateLesson";
 
 admin.initializeApp();
@@ -50,6 +52,28 @@ export { getHomeFeed, getReelsFeed } from "./feed";
 
 // ── VCoins ─────────────────────────────────────────────────────────────────
 export { claimVCoinReward, getVCoinBalance } from "./vcoins";
+export { creditSignupBonus, creditWatchReward, claimSkillBattleReward, getMySkillBattleStanding } from "./vcoins";
+export { submitSkillBattleReel } from "./skillBattleSubmission";
+export { transitionBattleState } from "./skillBattleDomain";
+
+// ── Battle Engine (Phase 2C) — new canonical submissions/scoring/ranking/
+// finalization/rewards pipeline. Parallel to, and independent of, the
+// legacy posts-based SkillBattle flow above — see battleSubmissions.ts's
+// header for why. Nothing in the mobile app calls any of these yet.
+export { createBattleSubmission, withdrawBattleSubmission, reviewBattleSubmission } from "./battleSubmissions";
+export { engageBattleSubmission } from "./battleEngagement";
+export { onBattleSubmissionWritten, onBattleEngagementWritten, getMyBattleRank, getBattleLeaderboardPage } from "./battleRanking";
+export { finalizeBattleResults } from "./battleFinalization";
+export { claimBattleReward } from "./battleRewards";
+export { joinVidyastarContest, deleteContest } from "./vidyastarContest";
+export { submitVidyastarContestQuiz } from "./submitVidyastarContestQuiz";
+export { finalizeContestRanking, autoFinalizeEndedContests } from "./contestLeaderboard";
+
+// ── Daily Streak Quiz ──────────────────────────────────────────────────────
+export {
+  getTodaysStreakQuizQuestion, submitDailyStreakQuizAnswer,
+  applyForAmbassadorProgram, dailyStreakQuizReminder,
+} from "./dailyStreakQuiz";
 
 // ── AI Personalized Dashboard ───────────────────────────────────────────────
 export { getPersonalizedDashboard } from "./personalDashboard";
@@ -72,20 +96,100 @@ export { voiceTutorAnswer } from "./voiceTutor";
 // ── AI Guru Subscription (Razorpay) ────────────────────────────────────────────
 export { aiGuruCheckoutPage, aiGuruCreateSubscription, aiGuruPaymentSuccess } from "./aiGuruSubscription";
 
+// ── AI Guru Credits — pay-as-you-go (Razorpay) — functions/src/aiGuruCredits.ts
+// exists on disk but is NOT YET COMMITTED (see the Phase D.6/D.7 deployment-
+// readiness audit); this export is removed for now so the predeploy build
+// isn't blocked on an unresolved import. Re-add once that feature batch is
+// reviewed and committed on its own. ─────────────────────────────────────────
+
 // ── Unified Ads System ─────────────────────────────────────────────────────────
 export { aggregateAdAnalytics, claimAdReward, getAds, recordAdEvent } from "./ads";
 
 // ── Admin Management ───────────────────────────────────────────────────────────
 export { approveContent, createAdmin, createComboPlan, createCoupon, getUserSubscriptionHistory, removeAdmin } from "./adminManagement";
 
-// ── Contest Lesson Generation ──────────────────────────────────────────────────
-export { generateContestLesson } from "./contestLesson";
+// ── Contest Lesson Generation (lazy, per student language) ─────────────────────
+export { getContestLesson } from "./contestLesson";
 
 // ── VidyaStar Board Aggregation ───────────────────────────────────────────────
 export { onContestParticipantWrite } from "./vidyastarBoard";
 
+// ── Starboard period reset/payout — functions/src/starboardReset.ts and
+// starboardPayouts.ts exist on disk but are NOT YET COMMITTED (see the
+// Phase D.6/D.7 deployment-readiness audit); these exports are removed for
+// now so the predeploy build isn't blocked on an unresolved import. Re-add
+// once that feature batch is reviewed and committed on its own. ────────────
+export { processRefund, resolveRefundReconciliation, reconcileRefundStatuses } from "./refunds";
+export { searchPaymentOrders, getPaymentDetail } from "./refundSearch";
+
+// ── Financial domain — Phase B: shared Razorpay webhook (verify + record
+// only this phase; does not yet drive confirmation for any existing flow
+// or any future booking payment — see razorpayWebhook.ts's header) ────────
+export { razorpayWebhook } from "./razorpayWebhook";
+
+// ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
+export { registerTutorAccount, submitTutorVerification, reviewTutorVerification, submitTutorOnboarding, reviewTutorOnboarding } from "./tutorAccounts";
+
+// ── ShikshaHub — public tutor marketplace mirror ────────────────────────────────
+export { syncTutorMarketplaceProfile } from "./tutorMarketplace";
+
+// ── ShikshaHub — Phase 1 minimum viable tutor booking ───────────────────────────
+export { requestBooking, respondToBooking, cancelBooking, tickBookingCompletion, tickBookingReminders } from "./tutorBooking";
+
+// ── Financial domain — Phase C+D: booking payment order creation. The
+// matching confirmation logic (confirmBookingPaymentFromWebhook) is called
+// from razorpayWebhook.ts, not exported as its own callable — the webhook
+// is the only path that confirms a booking payment. ──────────────────────
+export { createBookingPaymentOrder } from "./bookingPayment";
+
+// ── ShikshaHub — Phase 3 tutor services (multi-service, online/offline,
+// one-time/short-term/long-term, instant-help config-only) ─────────────────────
+export { createService, updateService, deleteService, syncTutorServiceMarketplace } from "./tutorServices";
+
+// ── ShikshaHub — Phase 4 Instant Help credits (pay-as-you-go, funds
+// per-minute billing — see tutorCredits.ts) ─────────────────────────────────────
+export {
+  createTutorCreditOrder,
+  tutorCreditPaymentSuccess,
+  reconcileTutorCreditOrders,
+} from "./tutorCredits";
+
+// ── ShikshaHub — Phase 4 Instant Help real-time matching/session/billing ───────
+export {
+  setInstantHelpOnlineStatus,
+  requestInstantHelp,
+  respondToInstantHelpRequest,
+  cancelInstantHelpRequest,
+  endInstantHelpSession,
+  tickInstantHelp,
+} from "./instantHelp";
+
+// ── ShikshaHub — tutor earnings payout (Phase 5 manual flow, automated via
+//    RazorpayX in the automated payouts phase — see markPayoutPaid) ────────
+export {
+  saveTutorPayoutDetails,
+  requestPayout,
+  cancelPayoutRequest,
+  reviewPayoutRequest,
+  markPayoutPaid,
+  updatePayoutConfig,
+  reconcilePayoutStatuses,
+} from "./tutorPayouts";
+
+// ── ShikshaHub — Phase 6 tutor ratings & reviews (Instant Help sessions) ───────
+export { submitTutorReview, hideTutorReview, replyToTutorReview } from "./tutorReviews";
+
+// ── ShikshaHub — tutor-student messaging phase ─────────────────────────────────
+export { sendTutorMessage, markConversationRead } from "./tutorMessaging";
+
 // ── Referral System ───────────────────────────────────────────────────────────  ← NEW
 export { applyReferral, getReferralLeaderboard } from "./referral";
+
+// ── Data Rights (DPDP Act 2023) ─────────────────────────────────────────────────
+export { exportMyData, eraseMyAccount, adminEraseStudent } from "./dataRights";
+
+// ── Student ID (auto-assigned, human-readable) ─────────────────────────────────
+export { ensureStudentId } from "./studentId";
 
 // ───────────────────────────────────────────────────────────
 // TYPES
@@ -101,6 +205,7 @@ interface PostData {
   isSkillBattle?: boolean;
   battleId?: string;
   month?: string;
+  status?: string;
   likes?: number;
   views?: number;
   watchTime?: number;
@@ -133,6 +238,7 @@ interface RanksMap {
 
 interface SkillboardDoc {
   userId: string;
+  battleId: string;
   name: string;
   profilePic: string;
   school: string;
@@ -160,6 +266,20 @@ interface SkillboardDoc {
 // Triggers on any post write — updates skillboard + ranks
 // ───────────────────────────────────────────────────────────
 
+// SECURITY FIX (SkillBattle trust-boundary remediation — SB-P0-04/SB-P1-02):
+// this pipeline previously scoped everything by `month` alone, with no
+// `battleId` and no `status=="approved"` filter at all — so (a) two
+// concurrent battles targeting the same class in the same month would have
+// had their submissions' scores merged into one corrupted leaderboard for
+// both, and (b) pending/rejected posts' engagement would have counted
+// toward a score before any moderation ever happened, had this pipeline
+// been wired up as-is. It was never actually consumed by the client (the
+// audit's SB-P0-04 finding) — apps/mobile's SkillBoard/SkillBattle screens
+// recomputed everything themselves from raw posts reads instead, via a
+// DIFFERENT, drifted score formula. This is now the single authoritative
+// scoring/ranking pipeline; the client (Createreelscreen.tsx onward) is
+// being migrated to read from it via getMySkillBattleStanding
+// (functions/src/vcoins.ts) instead of recomputing locally.
 export const updateSkillboard = onDocumentWritten(
   { document: "posts/{postId}", secrets: ["REDIS_URL", "REDIS_TOKEN"] },
   async (
@@ -177,12 +297,12 @@ export const updateSkillboard = onDocumentWritten(
       return null;
     }
 
-    const userId = after.userId;
-    const month  = after.month;
-    const cls    = after.class !== undefined ? String(after.class) : "";
+    const userId   = after.userId;
+    const battleId = after.battleId;
+    const cls      = after.class !== undefined ? String(after.class) : "";
 
-    if (!userId || !month || !cls) {
-      console.warn("⚠️ Missing userId, month or class — skipping");
+    if (!userId || !battleId || !cls) {
+      console.warn("⚠️ Missing userId, battleId or class — skipping");
       return null;
     }
 
@@ -213,13 +333,16 @@ export const updateSkillboard = onDocumentWritten(
       }
     }
 
-    // ── Aggregate all qualifying posts for this user+month ─
+    // ── Aggregate this user's APPROVED posts for THIS battle only ──
+    // status=="approved" — a pending/rejected submission's engagement must
+    // never count toward a score. battleId (not month) — the scoping unit.
     const postsSnap = await db
       .collection("posts")
       .where("userId",        "==", userId)
-      .where("month",         "==", month)
+      .where("battleId",      "==", battleId)
       .where("postType",      "==", "reel")
       .where("isSkillBattle", "==", true)
+      .where("status",        "==", "approved")
       .get();
 
     let totalLikes     = 0;
@@ -245,16 +368,20 @@ export const updateSkillboard = onDocumentWritten(
       totalWatchtime * 2;
 
     console.log(
-      `📊 Score for ${userId}: ${totalScore} | ` +
+      `📊 Score for ${userId} (battle ${battleId}): ${totalScore} | ` +
       `likes=${totalLikes} comments=${totalComments} ` +
       `shares=${totalShares} views=${totalViews} watchtime=${totalWatchtime}`
     );
 
-    const skillboardId  = `${userId}_${cls}_${month}`;
+    // Doc ID is battleId+class+userId — the authoritative "battleId +
+    // studentId + scope" shape (class stands in for the per-class
+    // leaderboard dimension the product already had; see recalculateRank).
+    const skillboardId  = `${battleId}_${cls}_${userId}`;
     const skillboardRef = db.collection("skillboard").doc(skillboardId);
 
     const docData: SkillboardDoc = {
       userId,
+      battleId,
       name:       after.name       ?? "",
       profilePic: after.profilePic ?? "",
       school:     after.school     ?? "",
@@ -266,7 +393,7 @@ export const updateSkillboard = onDocumentWritten(
         pincode,
         country: "India",
       },
-      month,
+      month: after.month ?? "",
       totalLikes,
       totalViews,
       totalWatchtime,
@@ -287,10 +414,10 @@ export const updateSkillboard = onDocumentWritten(
     console.log(`✅ Skillboard doc written: ${skillboardId} | score: ${totalScore}`);
 
     await Promise.all([
-      recalculateRank("india",    { class: cls, month }),
-      recalculateRank("state",    { class: cls, month, "location.state":    state    }),
-      recalculateRank("district", { class: cls, month, "location.district": district }),
-      recalculateRank("local",    { class: cls, month, "location.pincode":  pincode  }),
+      recalculateRank("india",    battleId, { class: cls }),
+      recalculateRank("state",    battleId, { class: cls, "location.state":    state    }),
+      recalculateRank("district", battleId, { class: cls, "location.district": district }),
+      recalculateRank("local",    battleId, { class: cls, "location.pincode":  pincode  }),
     ]);
 
     return null;
@@ -358,6 +485,26 @@ function setCorsHeaders(res: functionsV1.Response): void {
   res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
+// Shared cache key for generateLesson, mirroring contestLesson.ts's per-
+// (contest, language) cache: two requests for the identical board+class+
+// subject+chapter+topic+language+difficulty+style(+pasted text) are the
+// same lesson, so the second one should reuse the first's Gemini output
+// instead of paying for it again. Values are trimmed/lowercased before
+// hashing so incidental whitespace/casing differences still hit the cache.
+function buildLessonCacheKey(params: {
+  board: string; classLevel: string; subject: string; chapter: string;
+  topic: string; language: string; difficulty: string; lessonStyle: string;
+  inputText: string;
+}): string {
+  const norm = (s: string) => (s ?? "").trim().toLowerCase();
+  const canonical = [
+    norm(params.board), norm(params.classLevel), norm(params.subject),
+    norm(params.chapter), norm(params.topic), norm(params.language),
+    norm(params.difficulty), norm(params.lessonStyle), norm(params.inputText),
+  ].join("|");
+  return crypto.createHash("sha256").update(canonical).digest("hex");
+}
+
 function buildLessonPromptInline(body: Record<string, string>): string {
   const { board, classLevel, subject, chapter, topic, language, difficulty, lessonStyle, inputText } = body;
   return `You are AI Guru, a friendly Indian AI teacher for school students.\nConvert the content into an interactive self-learning lesson.\nRules: Teach at Class ${classLevel} level, ${board} board. Use ${language}. Style: ${lessonStyle}. Difficulty: ${difficulty}.\nKeep each narration under 120 words. Use Indian examples. Return ONLY valid JSON, no markdown.\n\nBoard: ${board}, Class: ${classLevel}, Subject: ${subject}, Chapter: ${chapter}, Topic: ${topic ?? "Full Chapter"}\n\nStudent Content:\n${inputText || `Create a comprehensive lesson on "${chapter}" for Class ${classLevel} ${subject} (${board}).`}\n\nReturn exactly this JSON (populate ALL fields, minimum 5 scenes, 8 quiz, 8 flashcards, 5 keyConcepts):\n{"lessonTitle":"","shortIntro":"","estimatedDurationMinutes":0,"learningObjectives":[""],"prerequisites":[""],"storyHook":{"title":"","narration":"","studentMission":""},"scenes":[{"sceneNumber":1,"sceneTitle":"","visualType":"animation","visualDescription":"","narration":"","keyConcept":"","example":"","studentAction":"","checkQuestion":{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":""}}],"keyConcepts":[{"term":"","simpleMeaning":"","realLifeExample":""}],"practicalActivity":{"title":"","instructions":[""],"expectedOutput":"","aiEvaluationCriteria":[""]},"flashcards":[{"front":"","back":""}],"quickRevisionNotes":[""],"quiz":[{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":"","difficulty":"easy","concept":""}],"finalMission":{"title":"","task":"","successCriteria":[""],"rewardText":""},"commonMistakes":[{"mistake":"","correction":""}],"examTips":[""],"followUpPrompts":["Explain this chapter again in simpler way","Give me real-life examples","Take my test","Create revision notes"]}`;
@@ -372,42 +519,76 @@ export const generateLesson = functionsV1
 
     let uid: string;
     let lessonId: string | undefined;
+    let creditTxId: string | null = null;
 
     try { uid = await verifyAuthToken(req); }
     catch { res.status(401).json({ error: "Unauthorized" }); return; }
 
     try {
-      await checkGenerationLimit(uid, db);
+      const quota = await checkGenerationLimit(uid, db);
+      creditTxId = quota.creditTxId;
 
       const { board, classLevel, subject, chapter, topic = "", language,
               difficulty, lessonStyle, inputText = "", imageBase64, imageMimeType } = req.body;
       const inputType = imageBase64 ? "image" : inputText.trim() ? "text" : "topic";
+
+      // An image upload is unique content every time, so only topic/text
+      // requests are cacheable.
+      const cacheKey = inputType === "image" ? null : buildLessonCacheKey({
+        board, classLevel, subject, chapter, topic, language,
+        difficulty, lessonStyle, inputText: inputType === "text" ? inputText : "",
+      });
+      const cacheRef = cacheKey ? db.doc(`aiGuruLessonCache/${cacheKey}`) : null;
+      const cacheSnap = cacheRef ? await cacheRef.get() : null;
+      const cachedData = cacheSnap?.exists && cacheSnap.data()?.status === "completed"
+        ? cacheSnap.data()!
+        : null;
 
       const lessonRef = await db.collection("aiGuruLessons").add({
         uid, board, classLevel, subject, chapter, topic, language,
         difficulty, lessonStyle, inputType,
         inputText: inputType === "text" ? inputText : "",
         status: "generating", aiModel: "gemini-2.5-flash", progress: 0,
+        cacheKey: cacheKey ?? null, cached: !!cachedData,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       lessonId = lessonRef.id;
 
-      const prompt = buildLessonPromptInline(req.body);
-      const rawResponse = imageBase64 && imageMimeType
-        ? await callGeminiWithImage(prompt, imageBase64, imageMimeType)
-        : await callGeminiText(prompt);
+      let lessonJson: unknown;
+      if (cachedData) {
+        lessonJson = cachedData.lessonJson;
+      } else {
+        const prompt = buildLessonPromptInline(req.body);
+        const rawResponse = imageBase64 && imageMimeType
+          ? await callGeminiWithImage(prompt, imageBase64, imageMimeType)
+          : await callGeminiText(prompt);
 
-      const lessonJson = parseJsonFromResponse(rawResponse);
-      validateLessonJson(lessonJson);
+        lessonJson = parseJsonFromResponse(rawResponse);
+        validateLessonJson(lessonJson);
+
+        if (cacheRef) {
+          await cacheRef.set({
+            lessonJson, status: "completed",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      }
 
       await lessonRef.update({
         status: "completed", lessonJson, progress: 0,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      await incrementGenerationUsage(uid, db);
-      res.status(200).json({ lessonId, lessonJson });
+      if (cachedData) {
+        // Reused an already-generated lesson — no Gemini call happened, so
+        // don't burn the student's daily free slot and hand back any
+        // credit that was already spent by checkGenerationLimit above.
+        if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "LESSON_GENERATION", db);
+      } else {
+        await incrementGenerationUsage(uid, db);
+      }
+      res.status(200).json({ lessonId, lessonJson, cached: !!cachedData });
     } catch (err: any) {
       const msg: string = err?.message ?? "Unknown error";
       console.error("generateLesson error:", msg);
@@ -416,8 +597,19 @@ export const generateLesson = functionsV1
           status: "failed", errorMessage: msg,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         }).catch(() => {});
+        // Only refund on a failure AFTER the credit was already spent —
+        // lessonId only gets set once checkGenerationLimit (and therefore
+        // any debit) already succeeded, so this is exactly that window.
+        if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "LESSON_GENERATION", db);
       }
-      if (msg.startsWith("FREE_LIMIT_REACHED:")) {
+      if (msg.startsWith("CREDITS_EXHAUSTED:")) {
+        res.status(429).json({
+          error: msg.replace("CREDITS_EXHAUSTED:", ""),
+          code: "CREDITS_EXHAUSTED",
+          creditBalance:   err?.creditBalance   ?? 0,
+          creditsRequired: err?.creditsRequired ?? 1,
+        });
+      } else if (msg.startsWith("FREE_LIMIT_REACHED:")) {
         res.status(429).json({ error: msg.replace("FREE_LIMIT_REACHED:", ""), code: "FREE_LIMIT_REACHED" });
       } else if (msg.includes("GEMINI_API_KEY")) {
         res.status(500).json({ error: "AI service not configured. Contact support.", code: "CONFIG_ERROR" });
@@ -439,16 +631,24 @@ export const followUp = functionsV1
     if (req.method !== "POST")    { res.status(405).json({ error: "Method not allowed" }); return; }
 
     let uid: string;
+    let creditTxId: string | null = null;
     try { uid = await verifyAuthToken(req); }
     catch { res.status(401).json({ error: "Unauthorized" }); return; }
 
     try {
-      await checkFollowUpLimit(uid, db);
+      const quota = await checkFollowUpLimit(uid, db);
+      creditTxId = quota.creditTxId;
       const { lessonId, question, language = "English", mode = "ask_doubt" } = req.body;
-      if (!lessonId || !question) { res.status(400).json({ error: "lessonId and question required" }); return; }
+      if (!lessonId || !question) {
+        // Validation failure, not an AI/system failure — refund rather
+        // than charge a credit for a request that never actually ran.
+        if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "LESSON_FOLLOWUP", db);
+        res.status(400).json({ error: "lessonId and question required" }); return;
+      }
 
       const lessonSnap = await db.doc(`aiGuruLessons/${lessonId}`).get();
       if (!lessonSnap.exists || lessonSnap.data()?.uid !== uid) {
+        if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "LESSON_FOLLOWUP", db);
         res.status(403).json({ error: "Lesson not found or access denied" }); return;
       }
       const lesson = lessonSnap.data()!;
@@ -471,9 +671,21 @@ export const followUp = functionsV1
       res.status(200).json(parsed);
     } catch (err: any) {
       console.error("followUp error:", err.message);
-      if (err.message?.startsWith("FREE_LIMIT_REACHED:")) {
+      if (err.message?.startsWith("CREDITS_EXHAUSTED:")) {
+        res.status(429).json({
+          error: err.message.replace("CREDITS_EXHAUSTED:", ""),
+          code: "CREDITS_EXHAUSTED",
+          creditBalance:   err?.creditBalance   ?? 0,
+          creditsRequired: err?.creditsRequired ?? 1,
+        });
+      } else if (err.message?.startsWith("FREE_LIMIT_REACHED:")) {
         res.status(429).json({ error: err.message.replace("FREE_LIMIT_REACHED:", ""), code: "FREE_LIMIT_REACHED" });
       } else {
+        // Reached only after checkFollowUpLimit already succeeded (a
+        // CREDITS_EXHAUSTED/FREE_LIMIT_REACHED throw from that check is
+        // handled above and never reaches here), so any credit spent for
+        // this request was for a call that then failed — refund it.
+        if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "LESSON_FOLLOWUP", db);
         res.status(500).json({ error: "Failed to process your question." });
       }
     }
@@ -483,8 +695,13 @@ export const followUp = functionsV1
 // HELPER: recalculateRank
 // ───────────────────────────────────────────────────────────
 
+// SECURITY FIX (SB-P1-02): scoped by battleId (required, first-class param)
+// + class(+location) now, instead of month alone — see updateSkillboard's
+// header comment for why an ambiguous time-period scope let two concurrent
+// battles' rankings bleed into each other.
 async function recalculateRank(
   scopeKey: keyof RanksMap,
+  battleId: string,
   filters: Record<string, string>
 ): Promise<void> {
 
@@ -504,7 +721,8 @@ async function recalculateRank(
   }
 
   try {
-    let q: admin.firestore.Query = db.collection("skillboard");
+    let q: admin.firestore.Query = db.collection("skillboard")
+      .where("battleId", "==", battleId);
 
     for (const [field, value] of Object.entries(filters)) {
       if (value && value.trim() !== "") {
@@ -536,13 +754,13 @@ async function recalculateRank(
 
     if (scopeKey === "india") {
       const top50 = snap.docs.slice(0, 50).map((d) => ({ id: d.id, ...d.data() }));
-      const cacheKey = RK.leaderboard("india", filters.class ?? "", filters.month ?? "");
+      const cacheKey = RK.leaderboard("india", filters.class ?? "", battleId);
       getRedis().set(cacheKey, top50, { ex: TTL.leaderboard }).catch(() => {});
     }
 
     console.log(
       `✅ ${scopeKey} ranks updated for ${snap.size} students ` +
-      `(class=${filters.class}, month=${filters.month})`
+      `(battle=${battleId}, class=${filters.class})`
     );
   } catch (err) {
     console.error(`❌ recalculateRank(${scopeKey}) failed:`, err);

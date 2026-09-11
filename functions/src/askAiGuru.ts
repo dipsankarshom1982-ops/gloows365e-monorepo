@@ -3,7 +3,9 @@ import { onRequest } from "firebase-functions/v2/https";
 import { createHash } from "crypto";
 import { getRedis, RK, TTL } from "./redish";
 import { checkAskGuruLimit, incrementAskGuruUsage } from "./usageCheck";
+import { refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { callGeminiText } from "./gemini";
+import { resolveStudentLanguage, getDetectOrFallbackInstruction } from "./aiLanguage";
 
 const db = admin.firestore();
 const FREE_ASK_GURU_DAILY = 5;
@@ -24,29 +26,32 @@ async function verifyAuthToken(req: any): Promise<string> {
 
 // Mode-aware prompt builder
 // mode: "doubt" | "explain" | "notes" | "exam" | "summarize" | "tip" | "language"
+//
+// FIX (production, 2026-09-06 — "Prepare for Exam" not consistently
+// answering in Hindi): the language rule below used to fold the fallback
+// case ("English/ambiguous question → use the student's preferredLanguage")
+// into the same bullet list as the language-detection rules — a conditional
+// instruction an LLM follows far less reliably than a direct, unconditional
+// one. That's exactly the failure mode this task reported: "exam" mode's
+// own sample prompt ("Help me prepare for the Chapter 3 Science exam") is
+// itself English, so a Hindi-preference student typing something similar
+// hit that fallback branch on every request — and it just wasn't
+// consistently obeyed. getDetectOrFallbackInstruction() (functions/src/
+// aiLanguage.ts) keeps the same detect-the-question's-language behavior for
+// genuinely non-English input, but makes the fallback sentence the
+// strongest, most explicit part of the instruction instead of a buried
+// bullet. See that file's header comment for the full architecture this is
+// now shared across every Ask AI Guru feature.
 function buildPrompt(
   question: string,
   classLevel: string | number,
   board: string,
-  mode: string
+  mode: string,
+  preferredLanguage: string
 ): string {
   const base = `You are an expert AI tutor for Indian school students (${board}, Class ${classLevel}).
 
-CRITICAL LANGUAGE RULE: Detect the language of the student's question and respond in the EXACT SAME language.
-- Bengali question → Bengali answer
-- Hindi question → Hindi answer
-- Tamil question → Tamil answer
-- Telugu question → Telugu answer
-- Marathi question → Marathi answer
-- Gujarati question → Gujarati answer
-- Assamese question → Assamese answer
-- Odia question → Odia answer
-- Malayalam question → Malayalam answer
-- Kannada question → Kannada answer
-- Punjabi question → Punjabi answer
-- Urdu question → Urdu answer
-- English question → simple English answer
-Do NOT translate. Write naturally in the student's language as a real teacher would.
+${getDetectOrFallbackInstruction(preferredLanguage)}
 Do NOT start with "Sure," "Great question!" or "Of course!" — go directly to the content.
 Do NOT use markdown symbols like **, ##, or bullet points — plain text only.`;
 
@@ -72,7 +77,7 @@ Keep it sharp and exam-focused.`,
 
     tip: `Give one personalised daily study tip for a Class ${classLevel} ${board} student asking about: "${question}". Make it specific, actionable, and encouraging. 2–3 sentences maximum.`,
 
-    language: `The student wants to understand this in their own language. Detect their language from the question. Give a warm, teacher-like explanation in that language. Use simple everyday words — avoid technical jargon. 4–6 sentences.`,
+    language: `The student wants to understand this in their own language. Detect their language from the question — if the question is in English or the language isn't clear, use ${preferredLanguage}, the student's chosen app language, instead. Give a warm, teacher-like explanation in that language. Use simple everyday words — avoid technical jargon. 4–6 sentences.`,
   };
 
   const modeText = modeInstructions[mode] ?? modeInstructions.doubt;
@@ -117,12 +122,33 @@ export const askAiGuruQuestion = onRequest(
       return;
     }
 
-    // Usage check
+    // Looked up server-side (not trusted from the client) so the fallback
+    // language for English/ambiguous questions always matches whatever the
+    // student actually has set in Settings → Language, even if their local
+    // client state is stale. See functions/src/aiLanguage.ts for the shared
+    // priority order (request → saved preference → English default) used
+    // by every Ask AI Guru feature.
+    const preferredLanguage = await resolveStudentLanguage(uid, db);
+
+    // Usage check — pays with an AI Guru credit once the free daily limit
+    // is exceeded (unless already premium, which bypasses this entirely).
+    // creditTxId is non-null only when this specific request was paid for;
+    // refund it below if the request fails after this point.
+    let creditTxId: string | null = null;
     try {
-      await checkAskGuruLimit(uid, db);
+      const quota = await checkAskGuruLimit(uid, db);
+      creditTxId = quota.creditTxId;
     } catch (err: any) {
       const msg: string = err?.message ?? "";
-      if (msg.startsWith("FREE_LIMIT_REACHED:")) {
+      if (msg.startsWith("CREDITS_EXHAUSTED:")) {
+        res.status(429).json({
+          error: msg.slice("CREDITS_EXHAUSTED:".length),
+          code:  "CREDITS_EXHAUSTED",
+          limit: FREE_ASK_GURU_DAILY,
+          creditBalance:   err?.creditBalance   ?? 0,
+          creditsRequired: err?.creditsRequired ?? 1,
+        });
+      } else if (msg.startsWith("FREE_LIMIT_REACHED:")) {
         res.status(429).json({
           error: msg.slice("FREE_LIMIT_REACHED:".length),
           code:  "LIMIT_REACHED",
@@ -138,14 +164,17 @@ export const askAiGuruQuestion = onRequest(
       const questionStr = String(question).trim();
       const modeStr     = String(mode).trim() || "doubt";
 
-      // Cache key includes mode so different modes don't collide
+      // Cache key includes mode + preferredLanguage so different modes/fallback
+      // languages don't collide — two students asking the same English
+      // question with different chosen languages must not share a cached
+      // answer in the wrong language.
       let cached: string | null = null;
       let cacheKey = "";
       let redis;
       try {
         redis = getRedis();
         const cacheHash = createHash("sha256")
-          .update(`${questionStr.toLowerCase()}:${classLevel}:${board}:${modeStr}`)
+          .update(`${questionStr.toLowerCase()}:${classLevel}:${board}:${modeStr}:${preferredLanguage}`)
           .digest("hex")
           .slice(0, 16);
         cacheKey = RK.askGuruAnswer(cacheHash);
@@ -161,7 +190,7 @@ export const askAiGuruQuestion = onRequest(
         return;
       }
 
-      const prompt = buildPrompt(questionStr, classLevel, board, modeStr);
+      const prompt = buildPrompt(questionStr, classLevel, board, modeStr, preferredLanguage);
       const raw    = await callGeminiText(prompt);
       const answer = raw.replace(/^Answer:\s*/i, "").trim();
 
@@ -173,6 +202,7 @@ export const askAiGuruQuestion = onRequest(
       res.json({ answer, mode: modeStr });
     } catch (err: any) {
       console.error("[AskAiGuru] error:", err?.message);
+      if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "ASK_GURU", db);
       res.status(500).json({ error: "Could not get an answer. Please try again." });
     }
   }

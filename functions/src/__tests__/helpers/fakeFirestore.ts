@@ -1,0 +1,396 @@
+// PATH: functions/src/__tests__/helpers/fakeFirestore.ts
+//
+// In-memory Firestore fake used to unit-test real Cloud Functions business
+// logic (refunds.ts, aiGuruSubscription.ts, etc.) WITHOUT a live emulator.
+// This machine's Java is 17; firebase-tools now requires 21+ for the
+// Firestore/Auth emulators, so the emulator-backed suite
+// (rules-tests/firestore.rules.test.ts) is written and ready but parked
+// until a JDK upgrade — see that file's header. This fake unblocks
+// function-logic coverage in the meantime by mocking `firebase-admin`
+// itself (see mockFirebaseAdmin.ts), never by touching the real rules or
+// business logic.
+//
+// Supports exactly the Admin SDK surface the tested code actually calls:
+// doc/collection/get/set/update, single-field equality + limit queries,
+// subcollections, and transactions. Transaction writes are applied
+// synchronously (matching real Firestore's tx.set/tx.update, which buffer
+// but don't await) — only tx.get is async, also matching the real SDK.
+// This is NOT a general-purpose Firestore emulator: no security rules, no
+// real query planning, no true multi-transaction concurrency control.
+
+export const SERVER_TIMESTAMP = Symbol("SERVER_TIMESTAMP");
+
+interface Increment {
+  __increment: number;
+}
+
+export function isIncrement(v: unknown): v is Increment {
+  return !!v && typeof v === "object" && "__increment" in (v as Record<string, unknown>);
+}
+
+export class FakeTimestamp {
+  constructor(public millis: number) {}
+  toMillis() {
+    return this.millis;
+  }
+  toDate() {
+    return new Date(this.millis);
+  }
+  static now() {
+    return new FakeTimestamp(Date.now());
+  }
+  static fromMillis(ms: number) {
+    return new FakeTimestamp(ms);
+  }
+  static fromDate(d: Date) {
+    return new FakeTimestamp(d.getTime());
+  }
+}
+
+type DocData = Record<string, unknown>;
+
+interface FakeDocRef {
+  id: string;
+  path: string;
+  get(): Promise<{ exists: boolean; id: string; ref: FakeDocRef; data: () => DocData | undefined }>;
+  set(data: DocData, opts?: { merge?: boolean }): Promise<void>;
+  update(data: DocData): Promise<void>;
+  delete(): Promise<void>;
+  collection(sub: string): FakeCollectionRef;
+}
+
+// The operators real code under test actually uses — not a general
+// query-operator emulator. "in" (skillBattleSubmission.ts's duplicate-
+// submission count query) and ">" (battleRanking.ts's getMyBattleRank,
+// "how many entries outscore mine") are both load-bearing, not
+// speculative additions.
+type FakeWhereOp = "==" | "in" | ">" | ">=" | "<" | "<=";
+
+interface FakeAggregateQuery {
+  get(): Promise<{ data: () => { count: number } }>;
+}
+
+interface FakeCollectionRef {
+  doc(id?: string): FakeDocRef;
+  add(data: DocData): Promise<FakeDocRef>;
+  where(field: string, op: FakeWhereOp, value: unknown): FakeQueryRef;
+  orderBy(field: string, direction?: "asc" | "desc"): FakeQueryRef;
+  // A real CollectionReference IS a Query — get() works unfiltered too
+  // (e.g. `db.collection(path).get()` with no where()/orderBy() first).
+  get(): ReturnType<FakeQueryRef["get"]>;
+  count(): FakeAggregateQuery;
+}
+
+interface FakeQueryRef {
+  // Distinguishes a query object from a FakeDocRef for runTransaction's
+  // get() below — FakeDocRef has no such marker.
+  __isQuery: true;
+  where(field: string, op: FakeWhereOp, value: unknown): FakeQueryRef;
+  // Chainable — real Firestore supports multi-field composite ordering
+  // (battleFinalization.ts's tie-break chain needs it: score, then
+  // rawEngagement, then approvedAt, then studentId, each its own
+  // .orderBy() call). Each call ADDS a sort key, doesn't replace the
+  // previous one.
+  orderBy(field: string, direction?: "asc" | "desc"): FakeQueryRef;
+  limit(n: number): FakeQueryRef;
+  // Bounds apply against the field from the MOST RECENT orderBy() call —
+  // same semantics as real Firestore's single-field cursor convenience.
+  // Accepts a raw value or a FakeTimestamp.
+  startAfter(value: unknown): FakeQueryRef;
+  startAt(value: unknown): FakeQueryRef;
+  endAt(value: unknown): FakeQueryRef;
+  get(): Promise<{ empty: boolean; size: number; docs: Array<{ id: string; data: () => DocData; ref: FakeDocRef }> }>;
+  count(): FakeAggregateQuery;
+}
+
+function whereFilter(field: string, op: FakeWhereOp, value: unknown): (d: DocData) => boolean {
+  if (op === "in") {
+    const values = value as unknown[];
+    return (d) => values.includes(d[field]);
+  }
+  if (op === ">" || op === ">=" || op === "<" || op === "<=") {
+    const bound = sortableValue(value);
+    return (d) => {
+      const v = sortableValue(d[field]);
+      if (op === ">") return v > bound;
+      if (op === ">=") return v >= bound;
+      if (op === "<") return v < bound;
+      return v <= bound;
+    };
+  }
+  return (d) => d[field] === value;
+}
+
+// Extracts a comparable primitive from a stored field value — handles
+// FakeTimestamp (via toMillis) alongside plain numbers/strings, matching
+// what orderBy() on a real Firestore timestamp field needs to sort by.
+function sortableValue(v: unknown): number | string {
+  if (v && typeof (v as FakeTimestamp).toMillis === "function") return (v as FakeTimestamp).toMillis();
+  if (typeof v === "number" || typeof v === "string") return v;
+  return 0;
+}
+
+export class FakeFirestore {
+  store = new Map<string, DocData>();
+
+  // Applies FieldValue sentinels (serverTimestamp/increment) against
+  // whatever was already stored at this path, same as the real SDK
+  // resolves them at write time relative to the pre-write document.
+  private resolveFieldValues(existing: DocData | undefined, data: DocData): DocData {
+    const out: DocData = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (v === SERVER_TIMESTAMP) {
+        out[k] = FakeTimestamp.now();
+      } else if (isIncrement(v)) {
+        const current = Number((existing?.[k] as number | undefined) ?? 0);
+        out[k] = current + v.__increment;
+      } else {
+        out[k] = v;
+      }
+    }
+    return out;
+  }
+
+  private writeSync(path: string, data: DocData, merge: boolean) {
+    const existing = this.store.get(path);
+    const resolved = this.resolveFieldValues(existing, data);
+    this.store.set(path, merge && existing ? { ...existing, ...resolved } : resolved);
+  }
+
+  private updateSync(path: string, data: DocData) {
+    const existing = this.store.get(path);
+    if (!existing) throw new Error(`FakeFirestore: update() on missing doc "${path}"`);
+    const resolved = this.resolveFieldValues(existing, data);
+    this.store.set(path, { ...existing, ...resolved });
+  }
+
+  private docRef(path: string): FakeDocRef {
+    const self = this;
+    const segs = path.split("/");
+    const id = segs[segs.length - 1];
+    return {
+      id,
+      path,
+      async get() {
+        const data = self.store.get(path);
+        return { exists: data !== undefined, id, ref: self.docRef(path), data: () => (data ? { ...data } : undefined) };
+      },
+      async set(data, opts) {
+        self.writeSync(path, data, !!opts?.merge);
+      },
+      async update(data) {
+        self.updateSync(path, data);
+      },
+      async delete() {
+        self.store.delete(path);
+      },
+      collection(sub: string) {
+        return self.collectionRef(`${path}/${sub}`);
+      },
+    };
+  }
+
+  private collectionRef(path: string): FakeCollectionRef {
+    const self = this;
+    return {
+      doc(id?: string) {
+        const docId = id ?? `auto_${Math.random().toString(36).slice(2)}`;
+        return self.docRef(`${path}/${docId}`);
+      },
+      // add() = real Firestore's auto-id create shorthand — doc(<auto-id>).set(data)
+      // then resolve with the new ref, matching the real Admin SDK's return shape.
+      async add(data: DocData) {
+        const ref = this.doc();
+        await ref.set(data);
+        return ref;
+      },
+      where(field, op, value) {
+        return self.queryRef(path, [whereFilter(field, op, value)]);
+      },
+      orderBy(field, direction) {
+        return self.queryRef(path, [], undefined, [{ field, direction: direction ?? "asc" }]);
+      },
+      get() {
+        return self.queryRef(path, []).get();
+      },
+      count() {
+        return self.queryRef(path, []).count();
+      },
+    };
+  }
+
+  private queryRef(
+    path: string,
+    filters: Array<(d: DocData) => boolean>,
+    limitN?: number,
+    orders: Array<{ field: string; direction: "asc" | "desc" }> = [],
+    bounds?: { startAfter?: unknown; startAt?: unknown; endAt?: unknown }
+  ): FakeQueryRef {
+    const self = this;
+    // Bounds (startAfter/startAt/endAt) apply against the LAST orderBy
+    // field, matching real Firestore's single-cursor-value convenience API.
+    const lastOrder = orders[orders.length - 1];
+
+    const matchingDocs = () => {
+      const prefix = `${path}/`;
+      let docs = [...self.store.entries()]
+        .filter(([p]) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/"))
+        .filter(([, data]) => filters.every((f) => f(data)))
+        .map(([p, data]) => {
+          const id = p.slice(prefix.length);
+          return { id, data: () => ({ ...data }), ref: self.docRef(p) };
+        });
+
+      if (orders.length > 0) {
+        docs.sort((a, b) => {
+          for (const { field, direction } of orders) {
+            const av = sortableValue(a.data()[field]);
+            const bv = sortableValue(b.data()[field]);
+            const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+            if (cmp !== 0) return direction === "desc" ? -cmp : cmp;
+          }
+          return 0;
+        });
+      }
+
+      if (lastOrder) {
+        const { field, direction } = lastOrder;
+        if (bounds?.startAfter !== undefined) {
+          const boundV = sortableValue(bounds.startAfter);
+          docs = docs.filter((d) => {
+            const v = sortableValue(d.data()[field]);
+            return direction === "desc" ? v < boundV : v > boundV;
+          });
+        }
+        if (bounds?.startAt !== undefined) {
+          const boundV = sortableValue(bounds.startAt);
+          docs = docs.filter((d) => {
+            const v = sortableValue(d.data()[field]);
+            return direction === "desc" ? v <= boundV : v >= boundV;
+          });
+        }
+        if (bounds?.endAt !== undefined) {
+          const boundV = sortableValue(bounds.endAt);
+          docs = docs.filter((d) => {
+            const v = sortableValue(d.data()[field]);
+            return direction === "desc" ? v >= boundV : v <= boundV;
+          });
+        }
+      }
+
+      return docs;
+    };
+
+    return {
+      __isQuery: true,
+      where(field, op, value) {
+        return self.queryRef(path, [...filters, whereFilter(field, op, value)], limitN, orders, bounds);
+      },
+      orderBy(field, direction) {
+        return self.queryRef(path, filters, limitN, [...orders, { field, direction: direction ?? "asc" }], bounds);
+      },
+      limit(n) {
+        return self.queryRef(path, filters, n, orders, bounds);
+      },
+      startAfter(value) {
+        return self.queryRef(path, filters, limitN, orders, { ...bounds, startAfter: value });
+      },
+      startAt(value) {
+        return self.queryRef(path, filters, limitN, orders, { ...bounds, startAt: value });
+      },
+      endAt(value) {
+        return self.queryRef(path, filters, limitN, orders, { ...bounds, endAt: value });
+      },
+      async get() {
+        let docs = matchingDocs();
+        if (limitN !== undefined) docs = docs.slice(0, limitN);
+        return { empty: docs.length === 0, size: docs.length, docs };
+      },
+      count() {
+        return {
+          async get() {
+            // count() ignores limit()/orderBy() ordering (matches real
+            // Firestore — an aggregation query counts matches regardless
+            // of any requested ordering), but does respect where()
+            // filters and cursor bounds, same as the real SDK.
+            return { data: () => ({ count: matchingDocs().length }) };
+          },
+        };
+      },
+    };
+  }
+
+  doc(path: string): FakeDocRef {
+    return this.docRef(path);
+  }
+  collection(path: string): FakeCollectionRef {
+    return this.collectionRef(path);
+  }
+
+  // Matches the real Admin SDK's WriteBatch: operations buffer until
+  // commit(), applied in call order — same as runTransaction's writes
+  // above, just without the paired reads.
+  batch(): {
+    set: (ref: FakeDocRef, data: DocData, opts?: { merge?: boolean }) => void;
+    update: (ref: FakeDocRef, data: DocData) => void;
+    delete: (ref: FakeDocRef) => void;
+    commit: () => Promise<void>;
+  } {
+    const self = this;
+    const ops: Array<() => void> = [];
+    return {
+      set(ref, data, opts) {
+        ops.push(() => self.writeSync(ref.path, data, !!opts?.merge));
+      },
+      update(ref, data) {
+        ops.push(() => self.updateSync(ref.path, data));
+      },
+      delete(ref) {
+        ops.push(() => self.store.delete(ref.path));
+      },
+      async commit() {
+        ops.forEach((op) => op());
+      },
+    };
+  }
+
+  async runTransaction<T>(fn: (tx: {
+    get: (ref: FakeDocRef | FakeQueryRef) => Promise<any>;
+    set: (ref: FakeDocRef, data: DocData, opts?: { merge?: boolean }) => void;
+    update: (ref: FakeDocRef, data: DocData) => void;
+    delete: (ref: FakeDocRef) => void;
+  }) => Promise<T>): Promise<T> {
+    const self = this;
+    const tx = {
+      // A real transaction.get() accepts either a DocumentReference or a
+      // Query — dispatches on the __isQuery marker FakeQueryRef carries
+      // (a FakeDocRef has no such property).
+      get: (ref: FakeDocRef | FakeQueryRef) =>
+        "__isQuery" in ref ? (ref as FakeQueryRef).get() : self.docRef((ref as FakeDocRef).path).get(),
+      set: (ref: FakeDocRef, data: DocData, opts?: { merge?: boolean }) => {
+        self.writeSync(ref.path, data, !!opts?.merge);
+      },
+      update: (ref: FakeDocRef, data: DocData) => {
+        self.updateSync(ref.path, data);
+      },
+      delete: (ref: FakeDocRef) => {
+        self.store.delete(ref.path);
+      },
+    };
+    return fn(tx);
+  }
+
+  reset() {
+    this.store.clear();
+  }
+
+  /** Test convenience: seed a doc bypassing FieldValue resolution/merge semantics. */
+  seed(path: string, data: DocData) {
+    this.store.set(path, { ...data });
+  }
+  /** Test convenience: inspect the raw stored doc. */
+  peek(path: string): DocData | undefined {
+    const d = this.store.get(path);
+    return d ? { ...d } : undefined;
+  }
+}

@@ -1,26 +1,24 @@
 import Header from "@/components/header";
 import { useTheme } from "@/context/ThemeContext";
-import { auth, db } from "@/lib/firebase";
-import { claimSkillBattleRewards } from "@/services/vCoinsService";
+import { auth, db, functions } from "@/lib/firebase";
 import { getVCoinForRank, VCOIN_DIST_PCT } from "@/utils/formatVCoins";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   collection,
   doc,
   getDoc,
   getDocs,
-  orderBy,
   query,
   where,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
   FlatList,
   Image,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -32,64 +30,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 // ─── Types ────────────────────────────────────────────────────
 type LocationScope = "local" | "district" | "state" | "india";
 type MonthKey      = string; // "2026-05"
-type BoardMode     = "skillbattle" | "vidyastar";
-type VsPeriodType  = "daily" | "weekly" | "monthly" | "yearly";
-
-// ─── VidyaStar period helpers ──────────────────────────────────
-const vspad = (n: number) => String(n).padStart(2, "0");
-function vsWeekNum(d: Date) {
-  const oneJan = new Date(d.getFullYear(), 0, 1);
-  return Math.ceil(((d.getTime() - oneJan.getTime()) / 86400000 + oneJan.getDay() + 1) / 7);
-}
-function vsBuildPeriodKey(type: VsPeriodType, offset = 0): string {
-  const d = new Date();
-  if (type === "daily") {
-    d.setDate(d.getDate() - offset);
-    return `daily_${d.getFullYear()}-${vspad(d.getMonth()+1)}-${vspad(d.getDate())}`;
-  }
-  if (type === "weekly") {
-    d.setDate(d.getDate() - offset * 7);
-    return `weekly_${d.getFullYear()}-W${vspad(vsWeekNum(d))}`;
-  }
-  if (type === "monthly") {
-    d.setMonth(d.getMonth() - offset);
-    return `monthly_${d.getFullYear()}-${vspad(d.getMonth()+1)}`;
-  }
-  return `yearly_${d.getFullYear() - offset}`;
-}
-function vsPeriodLabel(key: string): string {
-  if (key.startsWith("daily_"))   return key.replace("daily_",   "");
-  if (key.startsWith("weekly_"))  return key.replace("weekly_",  "");
-  if (key.startsWith("monthly_")) {
-    const [y, m] = key.replace("monthly_", "").split("-");
-    return new Date(Number(y), Number(m) - 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
-  }
-  return key.replace("yearly_", "");
-}
-
-interface VsBoardEntry {
-  userId: string; name: string; profilePic: string;
-  school: string; class: string;
-  period: string; totalScore: number; contestCount: number; rank: number;
-}
-
-interface VsPrizeRow {
-  rankMin: number; rankMax: number;
-  prizeType: "gift_voucher" | "physical" | "vcoin";
-  prizeValue: string; medalEmoji: string; badge: string;
-}
-
-interface VsConfig {
-  period: VsPeriodType; periodKey: string;
-  entryFee: number; totalPool: number; prizeRows: VsPrizeRow[];
-}
-
-const VS_PERIOD_TYPES: { key: VsPeriodType; label: string; icon: string }[] = [
-  { key: "daily",   label: "Daily",   icon: "📅" },
-  { key: "weekly",  label: "Weekly",  icon: "🗓️" },
-  { key: "monthly", label: "Monthly", icon: "📆" },
-  { key: "yearly",  label: "Yearly",  icon: "🏆" },
-];
 
 interface RanksMap {
   local: number; district: number; state: number; india: number;
@@ -262,17 +202,11 @@ const getCashPrize = (prizes: CashPrizeRow[], rank: number): string => {
 export default function SkillboardScreen() {
   const { colors } = useTheme();
   const router = useRouter();
-
-  // ── Board mode toggle ─────────────────────────────────────
-  const [boardMode,      setBoardMode]      = useState<BoardMode>("skillbattle");
-
-  // ── VidyaStar state ───────────────────────────────────────
-  const [vsPeriodType,   setVsPeriodType]   = useState<VsPeriodType>("monthly");
-  const [vsPeriodKey,    setVsPeriodKey]    = useState(vsBuildPeriodKey("monthly"));
-  const [vsEntries,      setVsEntries]      = useState<VsBoardEntry[]>([]);
-  const [vsConfig,       setVsConfig]       = useState<VsConfig | null>(null);
-  const [vsLoading,      setVsLoading]      = useState(false);
-  const [vsRefreshing,   setVsRefreshing]   = useState(false);
+  // battleId is passed from skillbattle.tsx's "View Full Skillboard" button
+  // — used to resolve my own rank/reward server-side (SB-P0-04). If missing
+  // (e.g. a direct deep link), falls back to whatever sponsored battle is
+  // loaded for the active month, same as before this fix.
+  const routeParams = useLocalSearchParams<{ battleId?: string; month?: string }>();
 
   const [activeScope,    setActiveScope]    = useState<LocationScope>("india");
   const [activeMonth,    setActiveMonth]    = useState<MonthKey>(getAvailableMonths()[0]);
@@ -291,6 +225,12 @@ export default function SkillboardScreen() {
   const claimToastAnim   = useRef(new Animated.Value(0)).current;
 
   const availableMonths = getAvailableMonths();
+
+  // battleId scoping (SB-P0-04/SB-P1-02): prefer the route param
+  // (skillbattle.tsx's "View Full Skillboard" button always passes one),
+  // falling back to whatever sponsored battle is loaded for the active
+  // month so a direct deep-link with neither still resolves something.
+  const effectiveBattleId = routeParams.battleId || battle?.battleId || null;
 
   // Accent — sponsored orange always
   const accent  = "#ff9f43";
@@ -397,13 +337,22 @@ export default function SkillboardScreen() {
         }
       })();
 
+      // battleId scoping (SB-P1-02 foundation): without this, two
+      // concurrent battles for the same class in the same month would have
+      // their submissions merged into one corrupted leaderboard. Only
+      // added when known (route param or the loaded month's battle) so a
+      // direct deep-link with neither still degrades to the old
+      // month+class-only view rather than showing nothing.
+      const battleConstraint = effectiveBattleId ? where("battleId", "==", effectiveBattleId) : null;
+
       const snap = await getDocs(query(
         collection(db, "posts"),
         where("isSkillBattle", "==", true),
         where("status",        "==", "approved"),
         where("class",         "==", cls),
         where("month",         "==", activeMonth),
-        ...(scopeConstraint ? [scopeConstraint] : [])
+        ...(scopeConstraint ? [scopeConstraint] : []),
+        ...(battleConstraint ? [battleConstraint] : [])
       ));
 
       const userMap = new Map<string, BoardEntry & { postCount: number }>();
@@ -439,136 +388,101 @@ export default function SkillboardScreen() {
       const myUid = auth.currentUser?.uid;
       const myIdx = sorted.findIndex((e) => e.userId === myUid);
       setMyEntry(myIdx >= 0 ? sorted[myIdx] : null);
-      setMyRanks((prev) => ({ ...prev, [activeScope]: myIdx >= 0 ? myIdx + 1 : 0 }));
+      // SECURITY FIX (SB-P0-04): this used to also self-report rank here
+      // (setMyRanks from this same client-side scan), silently overwriting
+      // the server-resolved value fetchMyStanding sets below — meaning the
+      // value actually sent into the reward claim was still whatever the
+      // client computed last. myRanks is now written ONLY by
+      // fetchMyStanding (getMySkillBattleStanding); this list stays
+      // display-only (podium + the ranked-4+ list), which is why it isn't
+      // itself battleId-status-authoritative-critical the way myRanks is.
     } catch (e) {
       console.log("leaderboard:", e);
       setEntries([]);
     } finally {
       setLoading(false);
     }
-  }, [studentMeta, activeScope, activeMonth]);
+  }, [studentMeta, activeScope, activeMonth, effectiveBattleId]);
 
   useEffect(() => {
     if (studentMeta) buildLeaderboard();
   }, [buildLeaderboard]);
 
-  // ── 4. Build all 4 ranks simultaneously ───────────────────
-  const buildAllRanks = useCallback(async () => {
-    if (!studentMeta) return;
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    const cls = studentMeta.class;
+  // ── 4. My rank — SERVER-RESOLVED (SB-P0-04) ────────────────
+  // Used to recompute this by scanning raw `posts` client-side (4 full
+  // unpaginated queries) and self-report the result — including into the
+  // reward claim below. Now reads getMySkillBattleStanding
+  // (functions/src/vcoins.ts), which derives rank/score from the
+  // server-written skillboard/{battleId}_{class}_{uid} doc
+  // (functions/src/index.ts's updateSkillboard) instead. Falls back to the
+  // route-passed battleId when the month-based `battle` lookup hasn't
+  // resolved one (e.g. arriving here for a month with no active sponsored
+  // battle doc, but a valid battleId in the URL). See its declaration
+  // above (near the other derived state) for why it must be defined
+  // before buildLeaderboard, which also depends on it.
+  const fetchMyStanding = useCallback(async () => {
+    if (!auth.currentUser?.uid || !effectiveBattleId) return;
+    try {
+      const { data } = await httpsCallable<
+        { battleId: string },
+        {
+          ranks: RanksMap; totalScore: number;
+          participants: RanksMap;
+          battleEnded: boolean;
+        }
+      >(functions, "getMySkillBattleStanding")({ battleId: effectiveBattleId });
 
-    const scopes: { scope: LocationScope; extra: any }[] = [
-      { scope: "local",    extra: where("location.pincode",  "==", studentMeta.location.pincode)  },
-      { scope: "district", extra: where("location.district", "==", studentMeta.location.district) },
-      { scope: "state",    extra: where("location.state",    "==", studentMeta.location.state)    },
-      { scope: "india",    extra: null },
-    ];
-
-    const newRanks:  RanksMap                      = { local: 0, district: 0, state: 0, india: 0 };
-    const newCounts: Record<LocationScope, number> = { local: 0, district: 0, state: 0, india: 0 };
-
-    await Promise.all(scopes.map(async ({ scope, extra }) => {
-      try {
-        const snap = await getDocs(query(
-          collection(db, "posts"),
-          where("isSkillBattle", "==", true),
-          where("status",        "==", "approved"),
-          where("class",         "==", cls),
-          where("month",         "==", activeMonth),
-          ...(extra ? [extra] : [])
-        ));
-        const scoreMap = new Map<string, number>();
-        snap.docs.forEach((d) => {
-          const p = d.data();
-          if (!p.userId) return;
-          scoreMap.set(p.userId, (scoreMap.get(p.userId) ?? 0) + computeScore(p));
-        });
-        const sorted     = [...scoreMap.entries()].sort((a, b) => b[1] - a[1]);
-        const idx        = sorted.findIndex(([u]) => u === uid);
-        newRanks[scope]  = idx >= 0 ? idx + 1 : 0;
-        newCounts[scope] = sorted.length;
-      } catch (e) { console.log(`rank[${scope}]:`, e); }
-    }));
-
-    setMyRanks(newRanks);
-    setParticipantCounts(newCounts);
-  }, [studentMeta, activeMonth]);
+      setMyRanks(data.ranks);
+      setParticipantCounts(data.participants);
+    } catch (e) { console.log("standing:", e); }
+  }, [effectiveBattleId]);
 
   useEffect(() => {
-    if (studentMeta) buildAllRanks();
-  }, [buildAllRanks]);
+    if (studentMeta) fetchMyStanding();
+  }, [studentMeta, fetchMyStanding]);
 
-  // ── 5. Auto-credit V-Coins when battle has ended ──────────
+  // ── 5. Claim V-Coins when battle has ended ─────────────────
+  // SECURITY FIX (SB-P0-03): used to send this screen's own self-computed
+  // myRanks + the battle config's vcoin_* pool values straight to
+  // claimSkillBattleReward, which trusted both completely — a caller could
+  // invoke that Cloud Function directly with a fabricated rank AND a
+  // fabricated pool amount for any battleId, no app UI required. The
+  // client now sends only battleId; the function resolves rank, pool,
+  // reward %, and the credited amount itself from trusted server-side
+  // reads (see functions/src/vcoins.ts's claimSkillBattleReward /
+  // resolveSkillBattleStanding), and records an immutable
+  // skillBattleAwards/{battleId}_{uid} doc so a retried/duplicate call
+  // can't credit twice.
   useEffect(() => {
     const uid = auth.currentUser?.uid;
-    if (!uid || !battle || !battle.battleId || !battle.endDate) return;
+    if (!uid || !effectiveBattleId || !battle?.endDate) return;
 
     // Only proceed if battle has actually ended
     if (new Date(battle.endDate) >= new Date()) return;
 
     // Skip if already attempted for this battleId this session
-    if (claimAttemptRef.current === battle.battleId) return;
-    claimAttemptRef.current = battle.battleId;
+    if (claimAttemptRef.current === effectiveBattleId) return;
+    claimAttemptRef.current = effectiveBattleId;
 
     // Skip if user has no rank in any scope
     if (!Object.values(myRanks).some((r) => r > 0)) return;
 
-    claimSkillBattleRewards({
-      uid,
-      battleId:    battle.battleId,
-      battleMonth: activeMonth,
-      ranks:       myRanks,
-      vcoins: {
-        vcoin_india:    battle.vcoin_india,
-        vcoin_state:    battle.vcoin_state,
-        vcoin_district: battle.vcoin_district,
-        vcoin_local:    battle.vcoin_local,
-      },
-    }).then((totalCredited) => {
-      if (totalCredited <= 0) return;
-      setClaimedCoins(totalCredited);
-      // Animate toast in, hold, then fade out
-      Animated.sequence([
-        Animated.timing(claimToastAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
-        Animated.delay(3000),
-        Animated.timing(claimToastAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
-      ]).start();
-    }).catch(() => { /* silent — user can claim next time */ });
-  }, [battle, myRanks, activeMonth, claimToastAnim]);
-
-  // ── 6. VidyaStar data loading ─────────────────────────────
-  const loadVidyastar = useCallback(async () => {
-    setVsLoading(true);
-    try {
-      const [boardSnap, configSnap] = await Promise.all([
-        getDocs(query(
-          collection(db, "vidyastarBoard"),
-          where("period", "==", vsPeriodKey),
-          orderBy("totalScore", "desc")
-        )),
-        getDoc(doc(db, "vidyastarConfig", vsPeriodKey)),
-      ]);
-      setVsEntries(boardSnap.docs.map((d) => ({ ...d.data() } as VsBoardEntry)));
-      setVsConfig(configSnap.exists() ? (configSnap.data() as VsConfig) : null);
-    } catch (e) {
-      console.log("loadVidyastar:", e);
-      setVsEntries([]);
-    } finally {
-      setVsLoading(false);
-    }
-  }, [vsPeriodKey]);
-
-  useEffect(() => {
-    if (boardMode === "vidyastar") loadVidyastar();
-  }, [boardMode, loadVidyastar]);
-
-  const onVsRefresh = async () => {
-    setVsRefreshing(true);
-    await loadVidyastar();
-    setVsRefreshing(false);
-  };
+    httpsCallable<
+      { battleId: string },
+      { totalCredited: number; alreadyClaimed: boolean }
+    >(functions, "claimSkillBattleReward")({ battleId: effectiveBattleId })
+      .then(({ data }) => {
+        const totalCredited = data.totalCredited;
+        if (totalCredited <= 0 || data.alreadyClaimed) return;
+        setClaimedCoins(totalCredited);
+        // Animate toast in, hold, then fade out
+        Animated.sequence([
+          Animated.timing(claimToastAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+          Animated.delay(3000),
+          Animated.timing(claimToastAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
+        ]).start();
+      }).catch(() => { /* silent — user can claim next time */ });
+  }, [battle, effectiveBattleId, myRanks, claimToastAnim]);
 
   // ─── Render helpers ───────────────────────────────────────
 
@@ -1060,225 +974,6 @@ export default function SkillboardScreen() {
           <Text style={styles.spRibbonText}>SP</Text>
         </View>
       </View>
-    );
-  };
-
-  // ── VidyaStar tab renderer ────────────────────────────────
-  const renderVidyaStarTab = () => {
-    const myUid    = auth.currentUser?.uid;
-    const myEntry  = vsEntries.find((e) => e.userId === myUid) ?? null;
-    const top3     = vsEntries.slice(0, 3);
-    const rest     = vsEntries.slice(3);
-
-    const getPrize = (rank: number): string => {
-      if (!vsConfig?.prizeRows?.length || rank === 0) return "";
-      const row = vsConfig.prizeRows.find((r) => rank >= r.rankMin && rank <= r.rankMax);
-      if (!row) return "";
-      if (row.prizeType === "vcoin")        return `🪙 ${row.prizeValue}`;
-      if (row.prizeType === "gift_voucher") return `🎁 ${row.prizeValue}`;
-      return `📦 ${row.prizeValue}`;
-    };
-
-    return (
-      <ScrollView
-        contentContainerStyle={styles.listContent}
-        refreshControl={<RefreshControl refreshing={vsRefreshing} onRefresh={onVsRefresh} tintColor="#7c3aed" />}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Period type tabs */}
-        <View style={styles.vsTabRow}>
-          {VS_PERIOD_TYPES.map((pt) => (
-            <TouchableOpacity key={pt.key}
-              style={[styles.vsTab, vsPeriodType === pt.key && styles.vsTabActive]}
-              onPress={() => { setVsPeriodType(pt.key); setVsPeriodKey(vsBuildPeriodKey(pt.key)); }}
-            >
-              <Text style={styles.vsTabIcon}>{pt.icon}</Text>
-              <Text style={[styles.vsTabLabel, { color: vsPeriodType === pt.key ? "#a5b4fc" : colors.textSecondary }]}>{pt.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Period chips */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-          {[0, 1, 2].map((offset) => {
-            const k = vsBuildPeriodKey(vsPeriodType, offset);
-            return (
-              <TouchableOpacity key={k}
-                style={[styles.monthChip, { borderColor: vsPeriodKey === k ? "#7c3aed" : "rgba(124,58,237,0.2)", backgroundColor: vsPeriodKey === k ? "rgba(124,58,237,0.3)" : "rgba(255,255,255,0.04)", marginLeft: offset === 0 ? 0 : 8 }]}
-                onPress={() => setVsPeriodKey(k)}
-              >
-                <Text style={[styles.monthChipText, { color: vsPeriodKey === k ? "#fff" : colors.textSecondary }]}>{vsPeriodLabel(k)}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        {/* Config / prize card */}
-        {vsConfig ? (
-          <View style={styles.vsPrizeCard}>
-            <View style={styles.vsPrizeHeader}>
-              <View>
-                <Text style={styles.vsPrizeTitle}>🏆 VidyaStar Prizes · {vsPeriodLabel(vsPeriodKey)}</Text>
-                {vsConfig.totalPool > 0 && (
-                  <Text style={styles.vsPrizeSub}>Pool: ₹{vsConfig.totalPool} (gift vouchers)</Text>
-                )}
-              </View>
-              {vsConfig.entryFee > 0 && (
-                <View style={styles.vsEntryBadge}>
-                  <Text style={styles.vsEntryText}>₹{vsConfig.entryFee} Entry</Text>
-                </View>
-              )}
-            </View>
-            {vsConfig.prizeRows?.map((row, i) => {
-              const myRank = myEntry?.rank ?? 0;
-              const isMe   = myRank > 0 && myRank >= row.rankMin && myRank <= row.rankMax;
-              return (
-                <View key={i} style={[styles.vsPrizeRow, isMe && { backgroundColor: "rgba(124,58,237,0.12)" }]}>
-                  <Text style={styles.vsMedal}>{row.medalEmoji}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.vsRankLabel, { color: colors.text }]}>
-                      {row.rankMin === row.rankMax ? `Rank ${row.rankMin}` : `Rank ${row.rankMin}–${row.rankMax}`}
-                      {isMe ? <Text style={styles.vsYouTag}> ← YOU</Text> : null}
-                    </Text>
-                    {!!row.badge && <Text style={styles.vsBadge}>{row.badge}</Text>}
-                  </View>
-                  <Text style={[styles.vsPrizeValue,
-                    row.prizeType === "gift_voucher" && { color: "#10b981" },
-                    row.prizeType === "physical"     && { color: "#f59e0b" },
-                    row.prizeType === "vcoin"        && { color: "#63b3ed" },
-                  ]}>
-                    {row.prizeType === "gift_voucher" ? `🎁 ${row.prizeValue}`
-                      : row.prizeType === "physical" ? `📦 ${row.prizeValue}`
-                      : `🪙 ${row.prizeValue}`}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        ) : (
-          <View style={[styles.vsPrizeCard, { paddingVertical: 16, alignItems: "center" }]}>
-            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>No prize config for this period yet</Text>
-          </View>
-        )}
-
-        {/* My card */}
-        {myEntry && (
-          <View style={[styles.vsMyCard, { borderColor: "#7c3aed55" }]}>
-            <Text style={styles.vsMyName}>🎯 {myEntry.name || "You"}</Text>
-            <View style={styles.vsMyRow}>
-              <View style={styles.vsMyBox}>
-                <Text style={styles.vsMyVal}>{myEntry.totalScore}</Text>
-                <Text style={styles.vsMyLbl}>Total Pts</Text>
-              </View>
-              <View style={styles.vsMyBox}>
-                <Text style={styles.vsMyVal}>#{myEntry.rank}</Text>
-                <Text style={styles.vsMyLbl}>Rank</Text>
-              </View>
-              <View style={styles.vsMyBox}>
-                <Text style={styles.vsMyVal}>{myEntry.contestCount}</Text>
-                <Text style={styles.vsMyLbl}>Contests</Text>
-              </View>
-              {!!getPrize(myEntry.rank) && (
-                <View style={styles.vsMyBox}>
-                  <Text style={[styles.vsMyVal, { fontSize: 11, color: "#10b981" }]}>{getPrize(myEntry.rank)}</Text>
-                  <Text style={styles.vsMyLbl}>Prize</Text>
-                </View>
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* Loading */}
-        {vsLoading && (
-          <View style={styles.centered}>
-            <ActivityIndicator size="large" color="#7c3aed" />
-            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading rankings…</Text>
-          </View>
-        )}
-
-        {/* Empty */}
-        {!vsLoading && vsEntries.length === 0 && (
-          <View style={styles.centered}>
-            <Text style={{ fontSize: 44 }}>⭐</Text>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>No rankings yet</Text>
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-              Complete VidyaStar quizzes{"\n"}to appear on this board!
-            </Text>
-          </View>
-        )}
-
-        {/* Podium top 3 */}
-        {!vsLoading && top3.length > 0 && (
-          <View style={styles.podiumRow}>
-            {[top3[1], top3[0], top3[2]].filter(Boolean).map((entry, i) => {
-              const r = [2, 1, 3][i];
-              const medals = ["🥈", "🥇", "🥉"];
-              const heights = [90, 120, 72];
-              const barColors = ["#a8a8c0CC", "#FFD700DD", "#cd7f32CC"];
-              const prize = getPrize(r);
-              return (
-                <View key={entry.userId} style={styles.podiumItem}>
-                  <View style={styles.podiumAvatarWrap}>
-                    {r === 1 && <Text style={styles.crown}>👑</Text>}
-                    {entry.profilePic ? (
-                      <Image source={{ uri: entry.profilePic }} style={[styles.podiumAvatar, r === 1 && styles.podiumAvatarLarge, { borderColor: getMedalColor(r) }]} />
-                    ) : (
-                      <View style={[styles.podiumAvatarPlaceholder, r === 1 && styles.podiumAvatarLarge, { borderColor: getMedalColor(r), backgroundColor: "rgba(124,58,237,0.25)" }]}>
-                        <Text style={[styles.podiumInitial, { color: "#a78bfa" }]}>{(entry.name || "S").charAt(0).toUpperCase()}</Text>
-                      </View>
-                    )}
-                    <Text style={styles.podiumMedal}>{medals[i]}</Text>
-                  </View>
-                  <Text style={[styles.podiumName, { color: colors.text }]} numberOfLines={1}>{entry.name || "Student"}</Text>
-                  <Text style={[styles.podiumScore, { color: "#a78bfa" }]}>{entry.totalScore} pts</Text>
-                  {!!prize && <Text style={[styles.podiumReward, { color: "#10b981", backgroundColor: "rgba(16,185,129,0.1)" }]}>{prize}</Text>}
-                  <View style={[styles.podiumBar, { height: heights[i], backgroundColor: barColors[i] }]} />
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        {/* Rest of list */}
-        {!vsLoading && rest.map((entry, i) => {
-          const rank  = i + 4;
-          const isMe  = entry.userId === myUid;
-          const prize = getPrize(rank);
-          return (
-            <View key={entry.userId} style={[styles.row, { backgroundColor: colors.card, borderColor: colors.border }, isMe && { backgroundColor: "rgba(124,58,237,0.1)", borderColor: "rgba(124,58,237,0.5)" }]}>
-              <View style={styles.rowAvatarCol}>
-                {entry.profilePic ? (
-                  <Image source={{ uri: entry.profilePic }} style={styles.rowAvatar} />
-                ) : (
-                  <View style={[styles.rowAvatarPlaceholder, { backgroundColor: "rgba(124,58,237,0.2)" }]}>
-                    <Text style={[styles.rowAvatarInitial, { color: "#a78bfa" }]}>{(entry.name || "S").charAt(0).toUpperCase()}</Text>
-                  </View>
-                )}
-              </View>
-              <View style={styles.rowInfoCol}>
-                <Text style={[styles.rowName, { color: colors.text }]} numberOfLines={1}>
-                  {entry.name || "Student"}{isMe ? <Text style={styles.youTag}> YOU</Text> : null}
-                </Text>
-                <Text style={[styles.rowSub, { color: colors.textSecondary }]}>{entry.school} · Class {entry.class}</Text>
-                <Text style={[styles.rowSub, { color: colors.textSecondary }]}>{entry.contestCount} contest{entry.contestCount !== 1 ? "s" : ""}</Text>
-              </View>
-              <View style={styles.rowScoreCol}>
-                <Text style={[styles.rowScore, { color: "#a78bfa" }]}>{entry.totalScore}</Text>
-                <Text style={[styles.rowScoreLbl, { color: colors.textSecondary }]}>pts</Text>
-              </View>
-              <View style={styles.rowRankCol}>
-                {rank <= 3 ? <Text style={styles.rowRankEmoji}>{getMedalEmoji(rank)}</Text>
-                  : <Text style={[styles.rowRankNum, { color: colors.textSecondary }]}>#{rank}</Text>}
-              </View>
-              <View style={styles.rowRewardCol}>
-                {!!prize && <Text style={[styles.rowReward, { color: "#10b981", backgroundColor: "rgba(16,185,129,0.08)" }]}>{prize}</Text>}
-              </View>
-            </View>
-          );
-        })}
-
-        <View style={{ height: 40 }} />
-      </ScrollView>
     );
   };
 
