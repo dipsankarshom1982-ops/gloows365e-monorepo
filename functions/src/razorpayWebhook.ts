@@ -39,6 +39,15 @@
 // bookingPaymentOrders/bookings' own updated fields remain this phase's
 // complete trail.
 //
+// 6. Razorpay subscription/invoice work (2026-09-11 audit): for
+//    subscription.activated/charged/cancelled and invoice.paid events,
+//    ask razorpaySubscriptions.ts's confirmSubscriptionInvoiceFromWebhook
+//    whether the event's subscription_id belongs to a subscription this
+//    app created. Same "record regardless, act only if recognized"
+//    pattern as the booking-payment dispatch above — today this is
+//    inert on every real delivery, since nothing yet calls
+//    createRazorpaySubscription (see that file's header).
+//
 // ── firestore.rules ──────────────────────────────────────────────────────
 // webhookEvents is not declared in firestore.rules — same as
 // financialAuditLogs (see audit.ts's header): the rules file has no
@@ -51,6 +60,7 @@ import * as admin from "firebase-admin";
 import { verifyRazorpayWebhookSignature } from "./financial/webhookVerification";
 import { parseRazorpayWebhookEvent } from "./financial/webhookEvent";
 import { confirmBookingPaymentFromWebhook } from "./bookingPayment";
+import { confirmSubscriptionInvoiceFromWebhook } from "./razorpaySubscriptions";
 
 const db = admin.firestore();
 
@@ -128,11 +138,13 @@ export const razorpayWebhook = onRequest(
       orderId: parsed.orderId ?? null,
       paymentId: parsed.paymentId ?? null,
       paymentStatus: parsed.paymentStatus ?? null,
+      subscriptionId: parsed.subscriptionId ?? null,
       razorpayCreatedAt: parsed.razorpayCreatedAtMs ?? null,
       verified: true,
       receivedAt: admin.firestore.FieldValue.serverTimestamp(),
       // Flipped to true just below if this event turns out to be a
-      // booking payment event this endpoint actually acted on.
+      // booking payment / subscription event this endpoint actually
+      // acted on.
       processed: false,
     });
 
@@ -149,6 +161,22 @@ export const razorpayWebhook = onRequest(
         // of. Logged loudly; `processed` stays false, which is itself the
         // signal that this event still needs attention.
         console.error(`razorpayWebhook: confirmBookingPaymentFromWebhook threw for event ${parsed.eventId}`, e);
+      }
+    }
+
+    if (
+      parsed.eventType === "subscription.activated" ||
+      parsed.eventType === "subscription.charged" ||
+      parsed.eventType === "subscription.cancelled" ||
+      parsed.eventType === "invoice.paid"
+    ) {
+      try {
+        const result = await confirmSubscriptionInvoiceFromWebhook(parsed);
+        if (result.acted) {
+          await eventRef.update({ processed: true });
+        }
+      } catch (e) {
+        console.error(`razorpayWebhook: confirmSubscriptionInvoiceFromWebhook threw for event ${parsed.eventId}`, e);
       }
     }
 

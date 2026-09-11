@@ -4,6 +4,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import axios from "axios";
 import { getRedis, todayIST, TTL, RK } from "./redish";
 import { verifyRazorpayCheckoutSignature } from "./financial/checkoutSignature";
+import { writeSyntheticInvoice } from "./financial/invoice";
 
 const db = admin.firestore();
 
@@ -253,6 +254,7 @@ export const seekhoCreateSubscription = functionsV1
         }
 
         const now = admin.firestore.FieldValue.serverTimestamp();
+        const periodStart = admin.firestore.Timestamp.now();
         const expiresAt = admin.firestore.Timestamp.fromMillis(Date.now() + 30 * 24 * 3600 * 1000);
 
         tx.set(db.doc(`seekho_subscriptions/${userId}`), {
@@ -263,6 +265,16 @@ export const seekhoCreateSubscription = functionsV1
           updatedAt: now,
         });
         tx.update(orderRef, { status: "paid", razorpayPaymentId, paidAt: now });
+        writeSyntheticInvoice(tx, db, {
+          source: "seekho_subscription",
+          uid: userId,
+          razorpayOrderId,
+          razorpayPaymentId,
+          amountPaise: Number(order.amountPaise),
+          planId: order.plan,
+          billingPeriodStart: periodStart,
+          billingPeriodEnd: expiresAt,
+        });
 
         return { alreadyActivated: false as const, plan: order.plan, classAccess };
       });

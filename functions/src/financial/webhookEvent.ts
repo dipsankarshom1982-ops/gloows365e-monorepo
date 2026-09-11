@@ -27,6 +27,15 @@
 // flow care about) — Phase B's endpoint records and verifies every
 // delivery; deciding which event types to actually ACT on is out of this
 // phase's scope (see razorpayWebhook.ts's header).
+//
+// subscriptionId / invoiceEntity (added for the native-Subscriptions +
+// invoice work — see ../razorpaySubscriptions.ts): Razorpay's
+// subscription.* events carry payload.subscription.entity.id, and
+// invoice.* events carry the full invoice object at
+// payload.invoice.entity — the latter is intentionally passed through
+// as-is (not re-typed field by field) so the invoice handler can persist
+// exactly what Razorpay sent without this parser having to duplicate
+// Razorpay's own invoice schema.
 
 import { assertNonEmptyString, FinancialValidationError } from "./validation";
 
@@ -41,6 +50,11 @@ export interface ParsedRazorpayWebhookEvent {
   orderId?: string;
   paymentId?: string;
   paymentStatus?: string;
+  /** payload.subscription.entity.id — present on subscription.* events. */
+  subscriptionId?: string;
+  /** payload.invoice.entity, passed through verbatim — present on
+   *  invoice.* events. Not re-typed; see this file's header. */
+  invoiceEntity?: Record<string, unknown>;
   /** epoch ms — converted from Razorpay's unix-seconds `created_at`. */
   razorpayCreatedAtMs?: number;
 }
@@ -82,6 +96,11 @@ export function parseRazorpayWebhookEvent(body: unknown, eventIdHeader: unknown)
     string,
     unknown
   >;
+  const subscriptionEntity = ((payload["subscription"] as Record<string, unknown> | undefined)?.["entity"] ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const invoiceEntityRaw = (payload["invoice"] as Record<string, unknown> | undefined)?.["entity"];
 
   const paymentId = safeString(paymentEntity["id"]);
   // order_id normally comes off the payment entity (present on every
@@ -89,6 +108,12 @@ export function parseRazorpayWebhookEvent(body: unknown, eventIdHeader: unknown)
   // order.* event that carries no payment sub-object yet.
   const orderId = safeString(paymentEntity["order_id"]) ?? safeString(orderEntity["id"]);
   const paymentStatus = safeString(paymentEntity["status"]);
+  // subscription_id normally comes off the subscription entity directly
+  // (subscription.* events); fall back to the payment entity's own
+  // subscription_id for a payment.* event tied to a subscription charge.
+  const subscriptionId = safeString(subscriptionEntity["id"]) ?? safeString(paymentEntity["subscription_id"]);
+  const invoiceEntity =
+    invoiceEntityRaw && typeof invoiceEntityRaw === "object" ? (invoiceEntityRaw as Record<string, unknown>) : undefined;
 
   const createdAtRaw = b["created_at"];
   const razorpayCreatedAtMs = typeof createdAtRaw === "number" && Number.isFinite(createdAtRaw) ? createdAtRaw * 1000 : undefined;
@@ -99,6 +124,8 @@ export function parseRazorpayWebhookEvent(body: unknown, eventIdHeader: unknown)
     ...(orderId !== undefined ? { orderId } : {}),
     ...(paymentId !== undefined ? { paymentId } : {}),
     ...(paymentStatus !== undefined ? { paymentStatus } : {}),
+    ...(subscriptionId !== undefined ? { subscriptionId } : {}),
+    ...(invoiceEntity !== undefined ? { invoiceEntity } : {}),
     ...(razorpayCreatedAtMs !== undefined ? { razorpayCreatedAtMs } : {}),
   };
 }

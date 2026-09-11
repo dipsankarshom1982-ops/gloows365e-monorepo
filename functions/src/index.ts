@@ -127,6 +127,16 @@ export { searchPaymentOrders, getPaymentDetail } from "./refundSearch";
 // or any future booking payment — see razorpayWebhook.ts's header) ────────
 export { razorpayWebhook } from "./razorpayWebhook";
 
+// ── Billing / invoices (2026-09-11 audit) — billing history for the
+// existing Order-based aiGuru/Seekho subscription flows' synthetic
+// invoices (see ./financial/invoice.ts). ───────────────────────────────────
+export { getMyInvoices } from "./billingHistory";
+
+// ── Native Razorpay Subscriptions — additive, NOT yet called from any
+// client UI (see razorpaySubscriptions.ts's header for why). Exported so
+// it exists as a real, deployable Cloud Function once a plan adopts it. ───
+export { createRazorpaySubscription } from "./razorpaySubscriptions";
+
 // ── Gloows Tutor — Phase 1a accounts/verification ──────────────────────────────
 export { registerTutorAccount, submitTutorVerification, reviewTutorVerification, submitTutorOnboarding, reviewTutorOnboarding } from "./tutorAccounts";
 

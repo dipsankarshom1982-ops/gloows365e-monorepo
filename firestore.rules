@@ -794,6 +794,30 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // 🧾 INVOICES — immutable billing records (2026-09-11 audit). Written
+    // exclusively via Admin SDK — synthetic invoices from
+    // functions/src/financial/invoice.ts (Order-based aiGuru/Seekho
+    // subscription flows) and real Razorpay invoices from
+    // functions/src/razorpaySubscriptions.ts (native Subscriptions, not
+    // yet wired to any client). Owner can read their own; nobody, not even
+    // the owner, can create/update/delete — see PHASE 5 of the audit
+    // (accounting-record immutability). Billing-history LISTING goes
+    // through the getMyInvoices callable, never a direct client query.
+    match /invoices/{invoiceId} {
+      allow read:  if request.auth != null &&
+                      (resource.data.uid == request.auth.uid || request.auth.token.admin == true);
+      allow write: if false;
+    }
+
+    // Server-only mapping from a Razorpay native subscription_id back to
+    // uid/planId, written by createRazorpaySubscription and read by the
+    // webhook handler — see razorpaySubscriptions.ts's header for why this
+    // path is currently inert (nothing calls createRazorpaySubscription
+    // from a client yet).
+    match /razorpaySubscriptions/{subscriptionId} {
+      allow read, write: if false;
+    }
+
     // 💸 REFUNDS — admin-controlled refund/reconciliation system (launch
     // audit Task 7). Every write happens via functions/src/refunds.ts's
     // Cloud Functions (Admin SDK) — processRefund verifies the original

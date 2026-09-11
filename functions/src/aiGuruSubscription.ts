@@ -1,5 +1,6 @@
 import axios from "axios";
 import { verifyRazorpayCheckoutSignature } from "./financial/checkoutSignature";
+import { writeSyntheticInvoice } from "./financial/invoice";
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { onRequest } from "firebase-functions/v2/https";
@@ -99,18 +100,30 @@ export const aiGuruCreateSubscription = functionsV1
           ? 365 * 24 * 3600 * 1000
           : 30  * 24 * 3600 * 1000;
         const now = admin.firestore.FieldValue.serverTimestamp();
+        const periodStart = admin.firestore.Timestamp.now();
+        const periodEnd = admin.firestore.Timestamp.fromMillis(Date.now() + durationMs);
 
         tx.set(db.doc(`subscriptions/${uid}`), {
           planId:   order.planId,
           cycle:    order.cycle,
           status:   "active",
-          endDate:  admin.firestore.Timestamp.fromMillis(Date.now() + durationMs),
+          endDate:  periodEnd,
           razorpayPaymentId,
           razorpayOrderId,
           createdAt: now,
           updatedAt: now,
         });
         tx.update(orderRef, { status: "paid", razorpayPaymentId, paidAt: now });
+        writeSyntheticInvoice(tx, db, {
+          source: "aiguru_subscription",
+          uid,
+          razorpayOrderId,
+          razorpayPaymentId,
+          amountPaise: Number(order.amountPaise),
+          planId: order.planId,
+          billingPeriodStart: periodStart,
+          billingPeriodEnd: periodEnd,
+        });
 
         return { alreadyActivated: false as const, planId: order.planId, cycle: order.cycle };
       });
@@ -366,18 +379,30 @@ export const aiGuruPaymentSuccess = onRequest(
           ? 365 * 24 * 3600 * 1000
           : 30  * 24 * 3600 * 1000;
         const now = admin.firestore.FieldValue.serverTimestamp();
+        const periodStart = admin.firestore.Timestamp.now();
+        const periodEnd = admin.firestore.Timestamp.fromMillis(Date.now() + durationMs);
 
         tx.set(db.doc(`subscriptions/${order.uid}`), {
           planId:            order.planId,
           cycle:             order.cycle,
           status:            "active",
-          endDate:           admin.firestore.Timestamp.fromMillis(Date.now() + durationMs),
+          endDate:           periodEnd,
           razorpayPaymentId: razorpay_payment_id,
           razorpayOrderId:   razorpay_order_id,
           createdAt:         now,
           updatedAt:         now,
         });
         tx.update(orderRef, { status: "paid", razorpayPaymentId: razorpay_payment_id, paidAt: now });
+        writeSyntheticInvoice(tx, db, {
+          source: "aiguru_subscription",
+          uid: order.uid,
+          razorpayOrderId: razorpay_order_id,
+          razorpayPaymentId: razorpay_payment_id,
+          amountPaise: Number(order.amountPaise),
+          planId: order.planId,
+          billingPeriodStart: periodStart,
+          billingPeriodEnd: periodEnd,
+        });
 
         return { activated: true as const, uid: order.uid, planId: order.planId, cycle: order.cycle };
       });

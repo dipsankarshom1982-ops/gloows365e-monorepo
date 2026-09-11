@@ -83,4 +83,48 @@ describe("parseRazorpayWebhookEvent", () => {
   test("rejects a body missing the event field", () => {
     expect(() => parseRazorpayWebhookEvent({ payload: {} }, EVENT_ID)).toThrow(FinancialValidationError);
   });
+
+  // ── Added for the Razorpay Subscriptions + invoice work (2026-09-11) ──
+  test("parses a subscription.charged event's subscription_id", () => {
+    const body = {
+      event: "subscription.charged",
+      payload: {
+        subscription: { entity: { id: "sub_abc123", status: "active" } },
+        payment: { entity: { id: "pay_xyz", order_id: "order_xyz" } },
+      },
+    };
+    const parsed = parseRazorpayWebhookEvent(body, EVENT_ID);
+    expect(parsed.subscriptionId).toBe("sub_abc123");
+  });
+
+  test("falls back to the payment entity's own subscription_id when no subscription sub-object is present", () => {
+    const body = {
+      event: "payment.captured",
+      payload: { payment: { entity: { id: "pay_xyz", subscription_id: "sub_from_payment" } } },
+    };
+    const parsed = parseRazorpayWebhookEvent(body, EVENT_ID);
+    expect(parsed.subscriptionId).toBe("sub_from_payment");
+  });
+
+  test("parses an invoice.paid event's full invoice entity verbatim", () => {
+    const body = {
+      event: "invoice.paid",
+      payload: {
+        subscription: { entity: { id: "sub_abc123" } },
+        invoice: { entity: { id: "inv_xyz789", amount: 49900, currency: "INR", status: "paid" } },
+      },
+    };
+    const parsed = parseRazorpayWebhookEvent(body, EVENT_ID);
+    expect(parsed.subscriptionId).toBe("sub_abc123");
+    expect(parsed.invoiceEntity).toEqual({ id: "inv_xyz789", amount: 49900, currency: "INR", status: "paid" });
+  });
+
+  test("omits subscriptionId/invoiceEntity for an event that carries neither", () => {
+    const parsed = parseRazorpayWebhookEvent(
+      { event: "payment.captured", payload: { payment: { entity: { id: "pay_1", order_id: "order_1" } } } },
+      EVENT_ID,
+    );
+    expect("subscriptionId" in parsed).toBe(false);
+    expect("invoiceEntity" in parsed).toBe(false);
+  });
 });
