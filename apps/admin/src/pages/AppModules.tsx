@@ -36,6 +36,17 @@ export default function AppModules() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
+    // BUGFIX ("previous module not showing"): this used to run once with
+    // an empty dependency array, filtering by whatever `canManage` was at
+    // that first render. AuthContext resolves admin claims asynchronously
+    // (onAuthStateChanged → await getIdTokenResult()), so on a fresh page
+    // load/reload this effect can fire while canManage is still false —
+    // permanently baking the moderator-only (enabled-only) filter into
+    // state and never refetching once claims actually resolve. Any
+    // disabled/coming-soon module then silently vanishes from the admin's
+    // own view for the rest of the session. Depending on `canManage` here
+    // re-runs the fetch once claims land, so the full list shows up as
+    // soon as admin access is actually confirmed.
     getDocs(collection(db, "appModules")).then((snap) => {
       const data = snap.docs
         .map((d) => ({ id: d.id, ...d.data() } as AppModule))
@@ -44,7 +55,7 @@ export default function AppModules() {
       setModules(canManage ? data : data.filter((m) => m.isEnabled));
       setLoading(false);
     });
-  }, []);
+  }, [canManage]);
 
   const toggle = async (id: string, field: "isEnabled" | "isComingSoon", current: boolean) => {
     await updateDoc(doc(db, "appModules", id), { [field]: !current });

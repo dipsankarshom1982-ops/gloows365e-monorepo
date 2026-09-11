@@ -97,8 +97,20 @@ export async function checkUsage(uid: string): Promise<AiGuruUsage> {
   return snap.data() as AiGuruUsage;
 }
 
+// FIX (tester access): testers/admins (users/{uid}.role — same field
+// admin's "Grant Tester Access" button on Students.tsx sets, and the one
+// FeatureFlagsContext/AppConfigContext already read to bypass disabled
+// modules/features) get treated as subscribed here too, so premium AI
+// Guru features and lesson quotas never block them without requiring a
+// real subscriptions/{uid} doc. Self-contained (checked internally) so
+// every existing caller of isSubscribed()/getRemainingLessons() picks
+// this up automatically with no call-site changes.
 export async function isSubscribed(uid: string): Promise<boolean> {
   try {
+    const userSnap = await getDoc(doc(db, "users", uid));
+    const role = userSnap.exists() ? userSnap.data().role : undefined;
+    if (role === "tester" || role === "admin") return true;
+
     const snap = await getDoc(doc(db, "subscriptions", uid));
     if (!snap.exists()) return false;
     const data = snap.data();
