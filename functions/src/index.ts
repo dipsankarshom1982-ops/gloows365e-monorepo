@@ -132,6 +132,11 @@ export { razorpayWebhook } from "./razorpayWebhook";
 // invoices (see ./financial/invoice.ts). ───────────────────────────────────
 export { getMyInvoices } from "./billingHistory";
 
+// ── Admin Billing & Invoice Panel V1 (2026-09-11) — superAdmin-only
+// search across all invoices, modeled on refundSearch.ts's
+// searchPaymentOrders (see ./invoiceSearch.ts's header). ───────────────────
+export { searchInvoices } from "./invoiceSearch";
+
 // ── Native Razorpay Subscriptions — additive, NOT yet called from any
 // client UI (see razorpaySubscriptions.ts's header for why). Exported so
 // it exists as a real, deployable Cloud Function once a plan adopts it. ───

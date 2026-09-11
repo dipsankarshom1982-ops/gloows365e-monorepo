@@ -804,8 +804,15 @@ service cloud.firestore {
     // (accounting-record immutability). Billing-history LISTING goes
     // through the getMyInvoices callable, never a direct client query.
     match /invoices/{invoiceId} {
+      // Tightened to superAdmin (was: admin) — Admin Billing & Invoice
+      // Panel V1 (2026-09-11): the new admin UI reads invoices exclusively
+      // through the searchInvoices callable (functions/src/invoiceSearch.ts,
+      // itself superAdmin-gated), never a direct client read, and nothing
+      // else in the codebase depends on the broader `admin` claim having
+      // direct read access here — see that audit's Firestore security
+      // section. A student can still always read their own invoice.
       allow read:  if request.auth != null &&
-                      (resource.data.uid == request.auth.uid || request.auth.token.admin == true);
+                      (resource.data.uid == request.auth.uid || request.auth.token.superAdmin == true);
       allow write: if false;
     }
 

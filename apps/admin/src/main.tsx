@@ -65,6 +65,7 @@ const Students             = lazy(() => import("./pages/Students"));
 const Subscriptions        = lazy(() => import("./pages/Subscriptions"));
 const RefundManagement     = lazy(() => import("./pages/RefundManagement"));
 const PaymentManagement    = lazy(() => import("./pages/PaymentManagement"));
+const Invoices             = lazy(() => import("./pages/Invoices"));
 const AiUsage              = lazy(() => import("./pages/AiUsage"));
 const RestartLeads         = lazy(() => import("./pages/RestartLeads"));
 const Waitlist             = lazy(() => import("./pages/Waitlist"));   // ← NEW
@@ -215,6 +216,7 @@ function ProtectedRoutes() {
           <Route path="/subscriptions"   element={<Subscriptions />} />
           <Route path="/refunds"         element={<RefundManagement />} />
           <Route path="/payments"        element={<SuperAdminOnly><PaymentManagement /></SuperAdminOnly>} />
+          <Route path="/invoices"        element={<SuperAdminOnly><Invoices /></SuperAdminOnly>} />
           <Route path="/ai-usage"        element={<AiUsage />} />
           <Route path="/restart-leads"   element={<RestartLeads />} />
           <Route path="/waitlist"        element={<Waitlist />} />  {/* ← NEW */}

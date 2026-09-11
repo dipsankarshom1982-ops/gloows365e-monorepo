@@ -35,6 +35,7 @@ export const ALL_PERMISSIONS: PermissionModule[] = [
   { key: "subscriptions",       label: "💰 Subscriptions",       section: "Users"         },
   { key: "refunds",             label: "💳 Refunds",             section: "Users"         },
   { key: "payments",            label: "💰 Payment Management",  section: "Users"         },
+  { key: "invoices",            label: "🧾 Invoices",            section: "Users"         },
   { key: "ai-usage",            label: "🤖 AI Usage",            section: "Users"         },
   { key: "data-rights",         label: "🔐 Data Rights",         section: "Compliance"    },
   { key: "grievances",          label: "📮 Grievances",          section: "Compliance"    },
@@ -73,6 +74,11 @@ export function hasPermission(
   // superAdmin-only treatment IS backed by a real, unbypassable backend
   // boundary, not just nav visibility. Kept in this same hardcoded list
   // for UI consistency with "refunds"/"admins", not because it needs to be.
-  if (key === "admins" || key === "refunds" || key === "payments") return false;
+  //
+  // "invoices" (Admin Billing & Invoice Panel V1, 2026-09-11) is the same
+  // case as "payments": searchInvoices checks request.auth.token.superAdmin
+  // specifically (functions/src/invoiceSearch.ts), so this is a real
+  // backend boundary too, not just nav visibility.
+  if (key === "admins" || key === "refunds" || key === "payments" || key === "invoices") return false;
   return permissions.includes(key) || permissions.includes("all");
 }

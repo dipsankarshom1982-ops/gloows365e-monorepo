@@ -55,7 +55,10 @@ import { FLOW_CONFIG, Flow } from "./refunds";
 
 const db = admin.firestore();
 
-function requireSuperAdmin(context: functionsV1.https.CallableContext) {
+// Exported for reuse by other superAdmin-only, read-only admin lookups
+// (see functions/src/invoiceSearch.ts) that need the exact same
+// authorization bar and student-display resolution — never duplicated.
+export function requireSuperAdmin(context: functionsV1.https.CallableContext) {
   if (!context.auth?.token?.superAdmin) {
     throw new functionsV1.https.HttpsError("permission-denied", "Super admins only");
   }
@@ -66,7 +69,7 @@ function requireSuperAdmin(context: functionsV1.https.CallableContext) {
 // callable-functions client shows for an unhandled throw -- this surface
 // previously returned exactly that opaque error with no way to diagnose it
 // further, so making the real cause visible here is deliberate.
-async function guarded<T>(label: string, fn: () => Promise<T>): Promise<T> {
+export async function guarded<T>(label: string, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err: any) {
@@ -83,9 +86,9 @@ async function guarded<T>(label: string, fn: () => Promise<T>): Promise<T> {
 // (e.g. a tutor buying tutor credits, whose profile lives in tutors/{uid}
 // instead) -- a documented V1 simplification, not a claim that every payer
 // is a student.
-interface StudentDisplay { studentId: string | null; name: string | null; email: string | null }
+export interface StudentDisplay { studentId: string | null; name: string | null; email: string | null }
 
-async function resolveStudentDisplay(uids: string[]): Promise<Map<string, StudentDisplay>> {
+export async function resolveStudentDisplay(uids: string[]): Promise<Map<string, StudentDisplay>> {
   const out = new Map<string, StudentDisplay>();
   await Promise.all(uids.map(async (uid) => {
     try {
