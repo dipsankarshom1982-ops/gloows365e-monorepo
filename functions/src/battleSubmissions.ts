@@ -3,30 +3,38 @@
 // Phase 2C — Battle Engine: the new canonical `submissions` collection.
 // This is deliberately SEPARATE from the legacy posts-based SkillBattle
 // flow (Createreelscreen.tsx → submitSkillBattleReel → posts, Phase 1) —
-// see this file's own note under "LEGACY COMPATIBILITY" below. Nothing in
-// the mobile app calls any function in this file yet; this phase builds
-// the engine, not the UI that would route students into it.
+// see this file's own note under "LEGACY COMPATIBILITY" below.
+// Createreelscreen.tsx now calls createBattleSubmission for
+// canonical-engine (state-bearing) battles.
 //
-// MEDIA OWNERSHIP — DO NOT TREAT AS SOLVED. Phase 1 confirmed (live probe)
-// that the Cloudflare Stream Worker (vidya-stream.<account>.workers.dev)
-// accepts unauthenticated upload requests and does not stamp the
-// resulting video ID with any verified uid. That means: THIS FUNCTION
-// CANNOT CRYPTOGRAPHICALLY VERIFY that a submitted mediaRef was actually
-// produced by the calling student's own upload. Every submission created
-// here is stored with mediaOwnershipVerified:false — a real, honest,
-// queryable flag, not a comment — so nothing downstream (moderation, the
-// admin panel, a future audit) can mistake an unverified submission for a
-// verified one. The exact external action required: the Worker needs to
-// require a Firebase ID token on its /upload endpoint and bind the
-// resulting video ID to that verified uid server-side, so this function
-// can eventually check the binding instead of trusting the client's
-// claimed mediaRef. Until that ships, this gap stays open and documented,
-// not silently assumed away.
+// MEDIA OWNERSHIP (2026-09-11 audit P0, fixed): the Cloudflare Stream
+// Worker (apps/mobile/cloudflare-worker.js) used to accept unauthenticated
+// upload requests and never stamped the resulting video ID with any
+// verified uid — this function had no way to cryptographically verify a
+// submitted mediaRef was actually produced by the calling student's own
+// upload. The Worker now requires a verified Firebase ID token before
+// issuing an upload authorization, and mints a short-lived, HMAC-signed
+// ownership token binding {uid, videoUid} — see functions/src/
+// mediaOwnership.ts's header for the full design. `ownershipToken` is now
+// a REQUIRED field on this callable's input, verified against the
+// AUTHENTICATED caller's own uid (never a client-supplied one) and
+// against the submitted mediaRef, before a submission is ever created.
+// mediaOwnershipVerified is only ever set true when that check actually
+// passed — never a hardcoded/assumed value.
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { verifyMediaOwnershipToken } from "./mediaOwnership";
 
 const db = admin.firestore();
+
+// Client-facing message for every ownership-check failure — deliberately
+// the SAME message regardless of the specific internal reason (expired,
+// bad signature, uid mismatch, media mismatch, ...), so a caller probing
+// this endpoint can't learn which check it tripped. The real reason is
+// still logged server-side (console.warn below).
+const OWNERSHIP_ERROR_MESSAGE =
+  "Media ownership could not be verified. Please upload your video again and resubmit.";
 
 export type SubmissionStatus =
   | "PENDING_MODERATION"
@@ -60,22 +68,32 @@ interface StudentDoc {
 // loser sees it already exists and fails cleanly) rather than relying on a
 // count-then-write pattern that has a window for a duplicate.
 export const createBattleSubmission = functionsV1
-  .runWith({ timeoutSeconds: 20, memory: "128MB" })
+  .runWith({ timeoutSeconds: 20, memory: "128MB", secrets: ["WORKER_OWNERSHIP_SECRET"] })
   .https.onCall(async (
-    data: { battleId?: string; mediaRef?: string; title?: string; description?: string },
+    data: { battleId?: string; mediaRef?: string; title?: string; description?: string; ownershipToken?: string },
     context
   ) => {
     if (!context.auth) {
       throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
     }
     const uid = context.auth.uid;
-    const { battleId, mediaRef, title, description } = data ?? {};
+    const { battleId, mediaRef, title, description, ownershipToken } = data ?? {};
 
     if (!battleId || typeof battleId !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "battleId is required");
     }
     if (!mediaRef || typeof mediaRef !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "mediaRef is required — upload the media first");
+    }
+
+    // ── Media ownership (2026-09-11 audit P0 fix) — verified BEFORE any
+    // battle/state reads, same "reject cheaply first" posture as the
+    // argument checks above. `uid` here is context.auth.uid — never a
+    // client-supplied value — so this can't be satisfied by a forged UID.
+    const ownership = verifyMediaOwnershipToken(ownershipToken, uid, mediaRef, process.env.WORKER_OWNERSHIP_SECRET ?? "");
+    if (!ownership.valid) {
+      console.warn(`createBattleSubmission: media ownership check failed (uid=${uid} reason=${ownership.reason ?? "unknown"})`);
+      throw new functionsV1.https.HttpsError("failed-precondition", OWNERSHIP_ERROR_MESSAGE);
     }
 
     const battleSnap = await db.doc(`skillBattles/${battleId}`).get();
@@ -127,9 +145,9 @@ export const createBattleSubmission = functionsV1
         battleId,
         skillId: battle.skillId,
         mediaRef,
-        // See this file's header — always false until the Cloudflare
-        // Worker fix ships. Never set true by this code path.
-        mediaOwnershipVerified: false,
+        // Real, verified true — the ownership check above already
+        // rejected this request otherwise. Never hardcoded/assumed.
+        mediaOwnershipVerified: true,
         title: (title ?? "").trim(),
         description: (description ?? "").trim(),
         status: "PENDING_MODERATION" as SubmissionStatus,

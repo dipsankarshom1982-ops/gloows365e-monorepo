@@ -378,9 +378,11 @@ export default function CreateReelScreen() {
     try {
       // ── Step 1: Get one-time upload URL from Cloudflare Worker ──
       // Identical for both engines — media upload is engine-agnostic;
-      // only the record-creation step (Step 4) differs. See this file's
-      // header note on the Cloudflare Worker's known, unresolved
-      // authentication/ownership gap — unchanged, not addressed here.
+      // only the record-creation step (Step 4) differs. The Worker now
+      // requires the caller's Firebase ID token (2026-09-11 audit P0
+      // fix, see lib/cloudflareStream.ts) and Step 4 forwards the
+      // resulting signed ownershipToken — see this function's Step 4
+      // comments below.
       setPhase("getting_url");
       console.log("[Upload] Step 1: getting Cloudflare upload URL...");
 
@@ -485,11 +487,17 @@ export default function CreateReelScreen() {
         // Submission goes through submitSkillBattleReel, which forces
         // status/engagement/review fields server-side and enforces the
         // per-battle submission cap inside one transaction.
+        //
+        // ownershipToken (2026-09-11 audit P0 fix) — the Worker-signed
+        // token from uploadToStream()'s response, forwarded UNMODIFIED.
+        // submitSkillBattleReel independently verifies it (mediaOwnership.ts)
+        // before accepting mediaUrl; a missing/invalid token is rejected
+        // server-side regardless of what this client sends.
         await httpsCallable<
           {
             battleId: string; battleTitle?: string; battleType?: string; month?: string;
             caption: string; targetState: string[]; targetLanguage: string[];
-            mediaUrl: string; thumbnail: string;
+            mediaUrl: string; thumbnail: string; ownershipToken: string;
           },
           { postId: string }
         >(functions, "submitSkillBattleReel")({
@@ -502,6 +510,7 @@ export default function CreateReelScreen() {
           targetLanguage: [detectedLanguage],
           mediaUrl:  finalPlaybackUrl,
           thumbnail: thumbUrl ?? "",
+          ownershipToken: uploadResult.ownershipToken,
         });
       } else {
         // CANONICAL — Phase 2C's createBattleSubmission
@@ -515,14 +524,17 @@ export default function CreateReelScreen() {
         // caption maps to the canonical model's `description` field (the
         // closest real equivalent — brief §10: don't invent a new field
         // for something the backend doesn't have).
+        // ownershipToken — same Worker-signed token, same independent
+        // server-side verification, as the legacy branch above.
         try {
           await httpsCallable<
-            { battleId: string; mediaRef: string; description?: string },
+            { battleId: string; mediaRef: string; description?: string; ownershipToken: string },
             { submissionId: string }
           >(functions, "createBattleSubmission")({
             battleId: params.battleId,
             mediaRef: finalPlaybackUrl,
             description: caption.trim(),
+            ownershipToken: uploadResult.ownershipToken,
           });
         } catch (err: any) {
           // "already-exists" (brief §20/§21 — duplicate/concurrent

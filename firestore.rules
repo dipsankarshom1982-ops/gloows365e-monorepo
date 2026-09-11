@@ -82,7 +82,8 @@ service cloud.firestore {
               'caption', 'targetState', 'targetLanguage',
               'location', 'mediaUrl', 'thumbnail',
               'status', 'rejectionReason', 'reviewedAt', 'reviewedBy',
-              'likes', 'views', 'shares', 'comments', 'watchTime', 'createdAt'
+              'likes', 'views', 'shares', 'comments', 'watchTime', 'createdAt',
+              'mediaOwnershipVerified'
             ])
             // Every server-authoritative field must start in its one safe
             // initial state — the moderation queue (an admin, or a future
@@ -98,6 +99,13 @@ service cloud.firestore {
             && request.resource.data.shares == 0
             && request.resource.data.comments == 0
             && request.resource.data.watchTime == 0
+            // SECURITY FIX (2026-09-11 audit P0 — Cloudflare media
+            // ownership): a direct client write can never claim its media
+            // ownership was verified — only submitSkillBattleReel
+            // (Admin SDK, bypasses this rule entirely) can, after actually
+            // checking the Worker-issued ownership token. See
+            // functions/src/mediaOwnership.ts.
+            && (!('mediaOwnershipVerified' in request.resource.data) || request.resource.data.mediaOwnershipVerified == false)
           )
         );
 

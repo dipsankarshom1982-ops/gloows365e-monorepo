@@ -20,13 +20,27 @@
 // rules currently reject a different value". The direct-client-write path
 // through firestore.rules' allowlist remains as defense-in-depth (e.g. if
 // this function is ever bypassed by a client bug), not the intended route.
+//
+// MEDIA OWNERSHIP (2026-09-11 audit P0, fixed): mediaUrl used to be
+// trusted verbatim from the client with no proof it was this student's
+// own upload — see functions/src/mediaOwnership.ts's header for the full
+// fix (Cloudflare Worker now requires a verified Firebase ID token before
+// issuing an upload, and mints a short-lived signed ownership token this
+// function verifies below). `ownershipToken` is now a required field.
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { verifyMediaOwnershipToken } from "./mediaOwnership";
 
 const db = admin.firestore();
 
 const MAX_SUBMISSIONS_PER_BATTLE = 4;
+
+// Same generic, reason-hiding message as battleSubmissions.ts's
+// createBattleSubmission — see mediaOwnership.ts's header for why the
+// two callables share one verification module instead of duplicating it.
+const OWNERSHIP_ERROR_MESSAGE =
+  "Media ownership could not be verified. Please upload your video again and resubmit.";
 
 interface SkillBattleDoc {
   isActive?: boolean;
@@ -57,22 +71,34 @@ interface SubmitSkillBattleReelInput {
   // only ever writes the resulting URLs, it doesn't touch either upload.
   mediaUrl?:  string;
   thumbnail?: string;
+  // Short-lived, HMAC-signed token minted by the Cloudflare Worker after
+  // it verified this student's Firebase ID token — see mediaOwnership.ts.
+  ownershipToken?: string;
 }
 
 export const submitSkillBattleReel = functionsV1
-  .runWith({ timeoutSeconds: 30, memory: "128MB" })
+  .runWith({ timeoutSeconds: 30, memory: "128MB", secrets: ["WORKER_OWNERSHIP_SECRET"] })
   .https.onCall(async (data: SubmitSkillBattleReelInput, context) => {
     if (!context.auth) {
       throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
     }
     const uid = context.auth.uid;
-    const { battleId, battleTitle, battleType, month, caption, targetState, targetLanguage, mediaUrl, thumbnail } = data ?? {};
+    const { battleId, battleTitle, battleType, month, caption, targetState, targetLanguage, mediaUrl, thumbnail, ownershipToken } = data ?? {};
 
     if (!battleId || typeof battleId !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "battleId is required");
     }
     if (!mediaUrl || typeof mediaUrl !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "mediaUrl is required — upload the video first");
+    }
+
+    // ── Media ownership (2026-09-11 audit P0 fix) — verified before any
+    // battle reads, same "reject cheaply first" posture as the argument
+    // checks above. `uid` is context.auth.uid — never client-supplied.
+    const ownership = verifyMediaOwnershipToken(ownershipToken, uid, mediaUrl, process.env.WORKER_OWNERSHIP_SECRET ?? "");
+    if (!ownership.valid) {
+      console.warn(`submitSkillBattleReel: media ownership check failed (uid=${uid} reason=${ownership.reason ?? "unknown"})`);
+      throw new functionsV1.https.HttpsError("failed-precondition", OWNERSHIP_ERROR_MESSAGE);
     }
 
     const battleSnap = await db.doc(`skillBattles/${battleId}`).get();
@@ -146,6 +172,9 @@ export const submitSkillBattleReel = functionsV1
         // different value for any of these.
         status: "pending", rejectionReason: "", reviewedAt: null, reviewedBy: "",
         likes: 0, views: 0, shares: 0, comments: 0, watchTime: 0,
+        // Real, verified true — the ownership check above already
+        // rejected this request otherwise. Never hardcoded/assumed.
+        mediaOwnershipVerified: true,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
