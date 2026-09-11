@@ -192,7 +192,7 @@ export async function fetchMyBattleHistoryPage(
     let score: number | null = null;
     let isWinner = false;
     if (resultsSnap.exists()) {
-      const entries = (resultsSnap.data()?.entries as Array<{ studentId: string; score: number; isWinner: boolean }> | undefined) ?? [];
+      const entries = (resultsSnap.data()?.entries as { studentId: string; score: number; isWinner: boolean }[] | undefined) ?? [];
       const mine = entries.find((e) => e.studentId === uid);
       if (mine) { score = mine.score; isWinner = mine.isWinner; }
     }
