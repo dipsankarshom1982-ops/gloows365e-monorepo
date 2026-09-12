@@ -23,7 +23,7 @@ function copyright(overrides: Partial<CopyrightCheckResult> = {}): CopyrightChec
 }
 function similarity(overrides: Partial<SimilarityCheckResult> = {}): SimilarityCheckResult {
   return {
-    provider: "none", fingerprintVersion: null, status: "NOT_CHECKED", similarityScore: null,
+    provider: "none", fingerprintVersion: null, fingerprint: null, status: "NOT_CHECKED", similarityScore: null,
     matchedSubmissionId: null, processedAt: Date.now(), error: null,
     ...overrides,
   };

@@ -22,6 +22,7 @@
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { recordModerationAuditEvent } from "./auditLog";
+import { triggerReModerationAfterReport } from "./reModeration";
 
 const db = admin.firestore();
 
@@ -136,6 +137,17 @@ export const reportSkillBattleContent = functionsV1
         newStatus: null,
         reason: category,
       }).catch((e) => console.warn("reportSkillBattleContent: audit log write failed (non-fatal):", e));
+
+      // Phase C §16 — a severe-category quarantine is also a good moment
+      // to re-run the automated checks (the report itself is evidence
+      // something may be wrong that the original pass missed). Strictly
+      // best-effort: the quarantine above has ALREADY taken effect
+      // synchronously and reliably regardless of what happens here — see
+      // reModeration.ts's header.
+      if (result.quarantined) {
+        await triggerReModerationAfterReport(contentType === "post" ? "legacy" : "canonical", contentId);
+      }
+
       return result;
     });
   });

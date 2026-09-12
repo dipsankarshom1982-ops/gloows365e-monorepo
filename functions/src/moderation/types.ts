@@ -32,7 +32,14 @@ export type ModerationStatus =
   | "APPEALED";             // student requested re-review after REJECTED
 
 // ── Automated safety/content moderation (e.g. AWS Rekognition) ─────────
-export type VideoModerationRunStatus = "COMPLETED" | "FAILED" | "NOT_CONFIGURED";
+// PROCESSING (Phase C): the job was submitted to an async provider
+// (Sightengine's stream_url submission returns instantly; the actual
+// analysis arrives later via webhook) — NOT a pass, NOT configured-off.
+// decisionEngine.ts's riskFromModeration() already treats anything other
+// than COMPLETED as unresolved, so PROCESSING routes to
+// PENDING_HUMAN_REVIEW through the EXISTING engine with no engine change
+// needed — see decisionEngine.ts's header.
+export type VideoModerationRunStatus = "COMPLETED" | "FAILED" | "NOT_CONFIGURED" | "PROCESSING";
 
 export interface VideoModerationLabel {
   name: string;
@@ -82,6 +89,12 @@ export type SimilarityStatus =
 export interface SimilarityCheckResult {
   provider: string;
   fingerprintVersion: string | null;
+  // Phase C — the actual computed fingerprint (opaque hash string, see
+  // hashUtils.ts), stored so a LATER submission's check can compare
+  // against this one. Never a raw video/frame payload (brief §3-equivalent
+  // for similarity: don't store unnecessary raw provider data) — just the
+  // small hash. null until a provider that actually produces one runs.
+  fingerprint: string | null;
   status: SimilarityStatus;
   similarityScore: number | null; // 0-1
   matchedSubmissionId: string | null;

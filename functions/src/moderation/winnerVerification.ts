@@ -41,6 +41,12 @@ interface EligibilityChecklist {
   hasApprovedContent: boolean;
   declarationAccepted: boolean;
   noUnresolvedReports: boolean;
+  // Phase C §14 — false while the approved content's automated safety
+  // check is mid-re-run (safetyModeration.status === "PROCESSING", e.g.
+  // triggered by a report or an admin-requested recheck AFTER the
+  // original approval). An old "APPROVED" read must never authorize a
+  // prize while a newer automated result could still overturn it.
+  noStaleModeration: boolean;
 }
 
 interface WinnerVerificationDoc {
@@ -77,6 +83,7 @@ async function computeEligibilityChecklist(engine: VerificationEngine, battleId:
       hasApprovedContent: sub?.status === "APPROVED",
       declarationAccepted: sub?.declarationAccepted === true,
       noUnresolvedReports: reportsSnap.empty,
+      noStaleModeration: sub?.safetyModeration?.status !== "PROCESSING",
     };
   }
 
@@ -89,6 +96,9 @@ async function computeEligibilityChecklist(engine: VerificationEngine, battleId:
     .where("isSkillBattle", "==", true)
     .get();
   const approvedDeclared = postsSnap.docs.some((d) => d.data().status === "approved" && d.data().declarationAccepted === true);
+  const anyApprovedPostStale = postsSnap.docs.some(
+    (d) => d.data().status === "approved" && d.data().safetyModeration?.status === "PROCESSING"
+  );
 
   let noUnresolvedReports = true;
   if (!postsSnap.empty) {
@@ -106,7 +116,12 @@ async function computeEligibilityChecklist(engine: VerificationEngine, battleId:
     noUnresolvedReports = reportChecks.every((snap) => snap.empty);
   }
 
-  return { hasApprovedContent: approvedDeclared, declarationAccepted: approvedDeclared, noUnresolvedReports };
+  return {
+    hasApprovedContent: approvedDeclared,
+    declarationAccepted: approvedDeclared,
+    noUnresolvedReports,
+    noStaleModeration: !anyApprovedPostStale,
+  };
 }
 
 /**
@@ -191,12 +206,16 @@ export const verifyBattleWinner = functionsV1
     }
 
     const checklist = await computeEligibilityChecklist(engine, battleId, uid);
-    const allObjectiveChecksPass = checklist.hasApprovedContent && checklist.declarationAccepted && checklist.noUnresolvedReports;
+    const allObjectiveChecksPass = checklist.hasApprovedContent && checklist.declarationAccepted
+      && checklist.noUnresolvedReports && checklist.noStaleModeration;
 
     if (decision === "VERIFIED" && !allObjectiveChecksPass) {
       throw new functionsV1.https.HttpsError(
         "failed-precondition",
-        `Cannot verify: objective eligibility checks failed (${JSON.stringify(checklist)}).`
+        checklist.noStaleModeration
+          ? `Cannot verify: objective eligibility checks failed (${JSON.stringify(checklist)}).`
+          : "Cannot verify: this content's automated safety check is being re-run (STALE_MODERATION) — " +
+            "wait for it to finish before verifying, or check the moderation queue for the latest state."
       );
     }
 

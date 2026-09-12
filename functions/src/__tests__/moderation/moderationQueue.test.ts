@@ -73,6 +73,35 @@ describe("getModerationQueue — filters", () => {
     const result = await getModerationQueue.run({ filter: "copyright_flagged" }, ADMIN_CTX);
     expect(result.items.map((i: any) => i.contentId)).toEqual(["post_match"]);
   });
+
+  // Phase C §12 additions
+  test("provider_failed filter matches a FAILED safety check or ERROR similarity check", async () => {
+    seedPost("post_failed", { safetyModeration: { status: "FAILED" } });
+    seedPost("post_ok", { safetyModeration: { status: "COMPLETED" } });
+    const { getModerationQueue } = require("../../moderation/moderationQueue");
+    const result = await getModerationQueue.run({ filter: "provider_failed" }, ADMIN_CTX);
+    expect(result.items.map((i: any) => i.contentId)).toEqual(["post_failed"]);
+  });
+
+  test("processing filter matches a safety check mid-flight", async () => {
+    seedPost("post_processing", { safetyModeration: { status: "PROCESSING" } });
+    seedPost("post_done", { safetyModeration: { status: "COMPLETED" } });
+    const { getModerationQueue } = require("../../moderation/moderationQueue");
+    const result = await getModerationQueue.run({ filter: "processing" }, ADMIN_CTX);
+    expect(result.items.map((i: any) => i.contentId)).toEqual(["post_processing"]);
+  });
+
+  test("manual_review_required filter unions high/medium risk and reported items", async () => {
+    seedPost("post_high", { moderationRiskLevel: "HIGH_RISK" });
+    seedPost("post_reported", { reportCount: 1 });
+    seedPost("post_clean", { moderationRiskLevel: "LOW_RISK", reportCount: 0 });
+    const { getModerationQueue } = require("../../moderation/moderationQueue");
+    const result = await getModerationQueue.run({ filter: "manual_review_required" }, ADMIN_CTX);
+    const ids = result.items.map((i: any) => i.contentId);
+    expect(ids).toContain("post_high");
+    expect(ids).toContain("post_reported");
+    expect(ids).not.toContain("post_clean");
+  });
 });
 
 describe("getModerationQueue — never exposes unnecessary private student data", () => {

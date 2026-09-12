@@ -49,6 +49,16 @@ export interface MediaOwnershipCheckResult {
   // probing this endpoint can't learn WHY a forged token failed.
   reason?: "server_misconfigured" | "missing_token" | "malformed_token"
     | "bad_signature" | "expired" | "not_yet_valid" | "uid_mismatch" | "media_mismatch";
+  // Phase C addition — only ever populated when valid:true. This is the
+  // bare Cloudflare Stream video uid the Worker attested (the SAME value
+  // it embedded in the signed token, already proven authentic by the
+  // signature check above) — used to populate streamVideoUid on the
+  // submission doc so streamWebhook.ts can look it up later. Deliberately
+  // NOT derived by regex-parsing the mediaRef/mediaUrl elsewhere in the
+  // codebase — that URL's exact shape is a Cloudflare implementation
+  // detail this function has no business assuming; this value comes
+  // straight from the verified token payload instead.
+  videoUid?: string;
 }
 
 function base64UrlDecodeToString(input: string): string | null {
@@ -139,5 +149,5 @@ export function verifyMediaOwnershipToken(
     return { valid: false, reason: "media_mismatch" };
   }
 
-  return { valid: true };
+  return { valid: true, videoUid: payload.videoUid };
 }

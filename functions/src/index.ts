@@ -76,6 +76,15 @@ export { reviewSkillBattlePost } from "./moderation/legacyPostReview";
 export { reportSkillBattleContent, resolveSkillBattleReport } from "./moderation/reporting";
 export { verifyBattleWinner } from "./moderation/winnerVerification";
 
+// ── Phase C (2026-09-12) — real async provider pipeline. The two
+// webhook handlers below are unauthenticated HTTPS endpoints (Cloudflare
+// Stream / Sightengine are the only intended callers, verified via HMAC
+// signature inside each — see their own file headers); everything else
+// here is the same admin-only posture as the rest of this directory.
+export { handleCloudflareStreamWebhook } from "./moderation/streamWebhook";
+export { handleSightengineCallback } from "./moderation/sightengineWebhook";
+export { requestReModeration } from "./moderation/reModeration";
+
 export { joinVidyastarContest, deleteContest } from "./vidyastarContest";
 export { submitVidyastarContestQuiz } from "./submitVidyastarContestQuiz";
 export { finalizeContestRanking, autoFinalizeEndedContests } from "./contestLeaderboard";

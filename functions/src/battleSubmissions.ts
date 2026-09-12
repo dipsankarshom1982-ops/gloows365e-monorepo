@@ -161,12 +161,11 @@ export const createBattleSubmission = functionsV1
 
     const submissionRef = db.doc(`submissions/${battleId}_${uid}`);
 
-    // ── Automated moderation pipeline (Phase A) — a pure computation, no
-    // Firestore reads/writes of its own, so it runs once outside the
-    // transaction rather than being re-evaluated on every transaction
-    // retry. See moderation/pipeline.ts's header for why this stays
-    // synchronous only as long as every provider is an instant-resolving
-    // stub.
+    // ── Automated moderation pipeline — kicks off what CAN run now (see
+    // moderation/pipeline.ts's header for exactly why copyright/similarity
+    // can't run yet: the video is still uploading/encoding in Cloudflare
+    // Stream at this point). Runs once outside the transaction rather
+    // than being re-evaluated on every transaction retry.
     const moderationResult = await runModerationPipeline({
       submissionId: submissionRef.id,
       videoRef: mediaRef,
@@ -193,6 +192,14 @@ export const createBattleSubmission = functionsV1
         // Real, verified true — the ownership check above already
         // rejected this request otherwise. Never hardcoded/assumed.
         mediaOwnershipVerified: true,
+        // Phase C — the bare Cloudflare Stream video uid, straight from
+        // the verified ownership token payload (never regex-parsed out
+        // of mediaRef — see mediaOwnership.ts's header on videoUid).
+        // streamWebhook.ts looks submissions up by this field once
+        // Cloudflare reports the video ready to actually run copyright/
+        // similarity checks.
+        streamVideoUid: ownership.videoUid ?? null,
+        moderationProcessingVersion: 0,
         title: (title ?? "").trim(),
         description: (description ?? "").trim(),
         // Video moderation/copyright pipeline (Phase A) — status is the

@@ -1,34 +1,35 @@
 // PATH: functions/src/moderation/pipeline.ts
 //
-// Single shared entry point both submission callables
-// (battleSubmissions.ts's createBattleSubmission, skillBattleSubmission.ts's
-// submitSkillBattleReel) use to run the three automated checks and the
-// decision engine — so there is exactly one place that wires providers
-// together, not two slightly-different copies.
+// Single shared entry point every moderation call site uses to run the
+// three automated checks and the decision engine — so there is exactly
+// one place that wires providers together, not several slightly-different
+// copies. Phase A/B call sites (battleSubmissions.ts's
+// createBattleSubmission, skillBattleSubmission.ts's submitSkillBattleReel)
+// are UNCHANGED by Phase C — see below for why.
 //
-// PHASE A: every provider is the Unconfigured* stub (see each provider
-// file), so every call here resolves instantly with no network I/O and
-// every submission routes to PENDING_HUMAN_REVIEW via the decision
-// engine's fail-closed default. Running this inline (awaited within the
-// callable, not queued) is safe ONLY because of that — see this file's
-// own note below and battleSubmissions.ts's brief §16 reference for why
-// a REAL provider (Phase C) must move this to an async queued job
-// instead of blocking the callable.
-//
-// TODO (Phase C, once a real provider exists): once any of the three
-// providers can take longer than a trivial stub-resolve, this MUST
-// become a queued/async job (Cloud Tasks or a Firestore-triggered
-// function) rather than an inline await inside the callable — the
-// mobile client must never block on a real AI/vendor call (brief §16:
-// "Do not make the mobile client wait for every AI provider operation").
-// Phase A intentionally does not build that queue since there is nothing
-// slow to queue yet; building an untestable async pipeline now would be
-// exactly the kind of premature, unverifiable complexity this project
-// has avoided elsewhere.
+// PHASE C — WHY THIS IS STILL SAFE TO CALL INLINE AT SUBMISSION CREATION:
+// video moderation's "kickoff" (SightengineVideoModerationProvider.
+// analyzeVideo, videoModerationProvider.ts) is a fast synchronous HTTP
+// call that SUBMITS a job and returns immediately — it does not wait for
+// the actual analysis, which arrives later via sightengineWebhook.ts.
+// Copyright and similarity, however, physically CANNOT run yet at
+// submission-creation time: the video is still uploading/encoding in
+// Cloudflare Stream, so there is no audio to sample and no thumbnail to
+// hash. Rather than call those two providers with nothing to give them,
+// runModerationPipeline only calls them when the caller actually HAS
+// that data (input.audioSample / input.streamVideoUid) — i.e. from
+// streamWebhook.ts, AFTER Cloudflare Stream reports the video ready.
+// At submission-creation time (audioSample/streamVideoUid both absent),
+// copyright/similarity resolve to the same honest "not yet checked"
+// placeholders as Phase A's stubs did (UNKNOWN/NOT_CHECKED — both
+// already fail-closed/unresolved in decisionEngine.ts), so this
+// function's behavior for every EXISTING call site is byte-for-byte
+// unchanged. See streamWebhook.ts for the actual async re-run that
+// happens once the video is ready.
 
 import { getVideoModerationProvider } from "./videoModerationProvider";
-import { getCopyrightDetectionProvider } from "./copyrightDetectionProvider";
-import { getVideoSimilarityProvider } from "./videoSimilarityProvider";
+import { getCopyrightDetectionProvider, CopyrightCheckInput } from "./copyrightDetectionProvider";
+import { getVideoSimilarityProvider, SimilarityCheckInput } from "./videoSimilarityProvider";
 import { evaluateModerationDecision } from "./decisionEngine";
 import {
   CopyrightCheckResult,
@@ -41,6 +42,12 @@ export interface ModerationPipelineInput {
   submissionId: string;
   videoRef: string;
   battleId: string;
+  // Phase C — only populate these from streamWebhook.ts, once Cloudflare
+  // Stream has actually finished processing the video. See this file's
+  // header for why an absent value here is an honest "not yet", never an
+  // error.
+  streamVideoUid?: string;
+  audioSample?: CopyrightCheckInput["audioSample"];
 }
 
 export interface ModerationPipelineResult {
@@ -51,12 +58,22 @@ export interface ModerationPipelineResult {
 }
 
 export async function runModerationPipeline(input: ModerationPipelineInput): Promise<ModerationPipelineResult> {
-  const { submissionId, videoRef, battleId } = input;
+  const { submissionId, videoRef, battleId, streamVideoUid, audioSample } = input;
+
+  // Always call every provider — each one already knows how to answer
+  // honestly when it's unconfigured (NOT_CONFIGURED/NOT_CHECKED, ignoring
+  // input entirely) versus configured-but-missing-data-yet (UNKNOWN/
+  // NOT_CHECKED, see copyrightDetectionProvider.ts's/
+  // videoSimilarityProvider.ts's own "no audioSample"/"no streamVideoUid"
+  // branches). Pre-empting the call here as a shortcut would have (and
+  // did, before this fix) changed the UNCONFIGURED case's result too —
+  // this way every existing call site's behavior is genuinely unchanged.
+  const similarityInput: SimilarityCheckInput = { submissionId, videoRef, battleId, streamVideoUid };
 
   const [moderation, copyright, similarity] = await Promise.all([
     getVideoModerationProvider().analyzeVideo({ submissionId, videoRef }),
-    getCopyrightDetectionProvider().checkCopyright({ submissionId, videoRef }),
-    getVideoSimilarityProvider().checkSimilarity({ submissionId, videoRef, battleId }),
+    getCopyrightDetectionProvider().checkCopyright({ submissionId, videoRef, audioSample }),
+    getVideoSimilarityProvider().checkSimilarity(similarityInput),
   ]);
 
   const decision = evaluateModerationDecision(moderation, copyright, similarity);
@@ -96,10 +113,18 @@ export function moderationResultToFields(result: ModerationPipelineResult) {
     similarityCheck: {
       provider: result.similarity.provider,
       fingerprintVersion: result.similarity.fingerprintVersion,
+      fingerprint: result.similarity.fingerprint,
       similarityScore: result.similarity.similarityScore,
       matchedSubmissionId: result.similarity.matchedSubmissionId,
       processedAt: result.similarity.processedAt,
       error: result.similarity.error,
     },
+    // Denormalized (Phase C) — the ONLY reason a copy of this lives at
+    // the top level too: sightengineWebhook.ts needs to look a
+    // submission up by Sightengine's job id with a simple equality
+    // query, and neither real Firestore nor this repo's offline
+    // FakeFirestore test mock (see __tests__/helpers/fakeFirestore.ts)
+    // needs to support querying into a nested map field for that to work.
+    safetyModerationJobId: result.moderation.jobId,
   };
 }

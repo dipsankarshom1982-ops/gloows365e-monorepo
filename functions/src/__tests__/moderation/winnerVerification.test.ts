@@ -95,6 +95,26 @@ describe("verifyBattleWinner — objective eligibility gates (canonical engine)"
     expect(gate.allowed).toBe(true);
   });
 
+  test("Phase C §14: cannot mark VERIFIED while the safety check is mid-re-run (STALE_MODERATION)", async () => {
+    fakeDb.seed(`submissions/${BATTLE_ID}_${UID}`, {
+      status: "APPROVED", declarationAccepted: true,
+      safetyModeration: { status: "PROCESSING" },
+    });
+    const { verifyBattleWinner } = require("../../moderation/winnerVerification");
+    await expect(verifyBattleWinner.run({ engine: "canonical", battleId: BATTLE_ID, uid: UID, decision: "VERIFIED" }, ADMIN_CTX))
+      .rejects.toMatchObject({ code: "failed-precondition" });
+  });
+
+  test("Phase C §14: a COMPLETED safety check (no re-run in flight) does not block verification", async () => {
+    fakeDb.seed(`submissions/${BATTLE_ID}_${UID}`, {
+      status: "APPROVED", declarationAccepted: true,
+      safetyModeration: { status: "COMPLETED" },
+    });
+    const { verifyBattleWinner } = require("../../moderation/winnerVerification");
+    const result = await verifyBattleWinner.run({ engine: "canonical", battleId: BATTLE_ID, uid: UID, decision: "VERIFIED" }, ADMIN_CTX);
+    expect(result.winnerStatus).toBe("WINNER_VERIFIED");
+  });
+
   test("a moderator can always mark REJECTED regardless of the objective checklist", async () => {
     fakeDb.seed(`submissions/${BATTLE_ID}_${UID}`, { status: "PENDING_HUMAN_REVIEW", declarationAccepted: false });
     const { verifyBattleWinner } = require("../../moderation/winnerVerification");
@@ -114,6 +134,16 @@ describe("verifyBattleWinner — legacy engine (multiple posts per battle)", () 
 
   test("not eligible if none of the student's posts for this battle are approved", async () => {
     fakeDb.seed("posts/post_a", { userId: UID, battleId: BATTLE_ID, isSkillBattle: true, status: "rejected", declarationAccepted: true });
+    const { verifyBattleWinner } = require("../../moderation/winnerVerification");
+    await expect(verifyBattleWinner.run({ engine: "legacy", battleId: BATTLE_ID, uid: UID, decision: "VERIFIED" }, ADMIN_CTX))
+      .rejects.toMatchObject({ code: "failed-precondition" });
+  });
+
+  test("Phase C §14: an approved post mid-re-moderation blocks VERIFIED even though it's currently 'approved'", async () => {
+    fakeDb.seed("posts/post_a", {
+      userId: UID, battleId: BATTLE_ID, isSkillBattle: true, status: "approved", declarationAccepted: true,
+      safetyModeration: { status: "PROCESSING" },
+    });
     const { verifyBattleWinner } = require("../../moderation/winnerVerification");
     await expect(verifyBattleWinner.run({ engine: "legacy", battleId: BATTLE_ID, uid: UID, decision: "VERIFIED" }, ADMIN_CTX))
       .rejects.toMatchObject({ code: "failed-precondition" });

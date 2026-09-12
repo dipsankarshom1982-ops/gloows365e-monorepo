@@ -198,6 +198,10 @@ export const submitSkillBattleReel = functionsV1
         // Real, verified true — the ownership check above already
         // rejected this request otherwise. Never hardcoded/assumed.
         mediaOwnershipVerified: true,
+        // Phase C — see battleSubmissions.ts's identical field for why
+        // this comes from the verified token, not a URL regex.
+        streamVideoUid: ownership.videoUid ?? null,
+        moderationProcessingVersion: 0,
         // Video moderation/copyright pipeline (Phase A) — added
         // alongside the existing `status` field, not a replacement for
         // it: `status` stays "pending"/"approved"/"rejected" (unchanged,

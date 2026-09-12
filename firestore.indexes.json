@@ -736,6 +736,51 @@
       "density": "SPARSE_ALL"
     },
     {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "streamVideoUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isSkillBattle",
+          "order": "ASCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "battleId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isSkillBattle",
+          "order": "ASCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "safetyModerationJobId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isSkillBattle",
+          "order": "ASCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
       "collectionGroup": "achievementEvents",
       "queryScope": "COLLECTION",
       "fields": [

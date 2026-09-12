@@ -28,7 +28,9 @@ import { db, functions } from "../lib/firebase";
 
 type QueueFilter =
   | "pending" | "high_risk" | "copyright_flagged" | "duplicate_suspected"
-  | "reported" | "winner_review" | "recent";
+  | "reported" | "winner_review" | "recent"
+  // Phase C §12
+  | "provider_failed" | "processing" | "manual_review_required";
 type QueueSort = "priority" | "oldest" | "newest" | "risk" | "reports";
 
 interface QueueItem {
@@ -47,6 +49,14 @@ interface QueueItem {
   riskLevel: string | null;
   moderationReasons: string[];
   reportCount: number;
+  // Phase C §12 — provider/processing visibility (names/status only,
+  // never credentials — see moderationQueue.ts's identical comment).
+  safetyProvider: string | null;
+  safetyStatus: string | null;
+  copyrightProvider: string | null;
+  similarityProvider: string | null;
+  matchedSubmissionId: string | null;
+  moderationProcessingVersion: number;
 }
 
 interface ReportDoc {
@@ -90,6 +100,14 @@ const verifyBattleWinnerFn = httpsCallable<
   { winnerStatus: string; checklist: Record<string, boolean> }
 >(functions, "verifyBattleWinner");
 
+// Phase C §15 — admin-requested recheck (provider swap, policy change,
+// or "this looks stale"). Reuses the exact same async pipeline the
+// Cloudflare Stream webhook uses — never a second moderation path.
+const requestReModerationFn = httpsCallable<
+  { engine: "legacy" | "canonical"; docId: string; reason?: string },
+  { ok: boolean }
+>(functions, "requestReModeration");
+
 // ─── Small UI helpers ───────────────────────────────────────────────────────
 
 const RISK_CLS: Record<string, string> = {
@@ -110,6 +128,9 @@ const FILTERS: { key: QueueFilter; label: string }[] = [
   { key: "reported", label: "🚩 Reported" },
   { key: "winner_review", label: "🏆 Winner Review" },
   { key: "recent", label: "🕓 Recent" },
+  { key: "provider_failed", label: "⚠️ Provider Failed" },
+  { key: "processing", label: "⚙️ Processing" },
+  { key: "manual_review_required", label: "👀 Needs Review" },
 ];
 
 export default function SkillBattleModeration() {
@@ -266,15 +287,41 @@ function QueueTab() {
                       )}
                       {item.similarityStatus === "HIGH_SIMILARITY" && <Pill cls="bg-purple-500/20 text-purple-400">🪞 Duplicate suspected</Pill>}
                       {item.reportCount > 0 && <Pill cls="bg-red-500/20 text-red-400">🚩 {item.reportCount} report{item.reportCount === 1 ? "" : "s"}</Pill>}
+                      {/* Phase C §12 — provider/processing visibility */}
+                      {item.safetyStatus === "PROCESSING" && <Pill cls="bg-slate-700 text-slate-300">⚙️ Safety check in progress</Pill>}
+                      {item.safetyStatus === "FAILED" && <Pill cls="bg-red-500/20 text-red-400">⚠️ Safety provider failed</Pill>}
+                      {item.similarityStatus === "ERROR" && <Pill cls="bg-red-500/20 text-red-400">⚠️ Similarity check failed</Pill>}
                     </div>
                     <p className="text-slate-400 text-xs mt-1 truncate">{item.title || "(no caption)"}</p>
                     <p className="text-slate-500 text-xs">Battle {item.battleId} · {item.createdAt ? new Date(item.createdAt).toLocaleString("en-IN") : "—"}</p>
                     {item.moderationReasons?.length > 0 && (
                       <p className="text-slate-500 text-xs mt-1">Automated flags: {item.moderationReasons.join(", ")}</p>
                     )}
-                    {item.mediaUrl && (
-                      <a href={item.mediaUrl} target="_blank" rel="noreferrer" className="text-indigo-400 text-xs font-bold underline mt-1 inline-block">▶ View media</a>
+                    {item.matchedSubmissionId && (
+                      <p className="text-slate-500 text-xs mt-1">Possible match: {item.matchedSubmissionId}</p>
                     )}
+                    <div className="flex items-center gap-3 mt-1">
+                      {item.mediaUrl && (
+                        <a href={item.mediaUrl} target="_blank" rel="noreferrer" className="text-indigo-400 text-xs font-bold underline inline-block">▶ View media</a>
+                      )}
+                      {(item.safetyStatus === "FAILED" || item.similarityStatus === "ERROR" || item.copyrightStatus === "UNKNOWN") && (
+                        <button
+                          disabled={isProcessing}
+                          onClick={async () => {
+                            setProcessing(item.contentId);
+                            try {
+                              await requestReModerationFn({ engine: item.engine, docId: item.contentId, reason: "Provider failure — admin recheck" });
+                              await load();
+                            } catch (e: any) {
+                              alert(e?.message ?? "Recheck failed.");
+                            } finally { setProcessing(null); }
+                          }}
+                          className="text-amber-400 text-xs font-bold underline disabled:opacity-50"
+                        >
+                          🔁 Re-run automated check
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="flex flex-col gap-2 shrink-0">
                     {reviewable && (

@@ -20,7 +20,9 @@ const db = admin.firestore();
 
 export type QueueFilter =
   | "pending" | "high_risk" | "copyright_flagged" | "duplicate_suspected"
-  | "reported" | "winner_review" | "recent";
+  | "reported" | "winner_review" | "recent"
+  // Phase C §12 additions:
+  | "provider_failed" | "processing" | "manual_review_required";
 export type QueueSort = "priority" | "oldest" | "newest" | "risk" | "reports";
 
 interface ModerationQueueItem {
@@ -39,6 +41,16 @@ interface ModerationQueueItem {
   riskLevel: string | null;
   moderationReasons: string[];
   reportCount: number;
+  // Phase C §12 — provider/processing visibility. Deliberately just the
+  // provider NAME and status/job-id, never credentials or raw provider
+  // payloads (brief §12: "Do not expose provider API credentials or
+  // internal security information").
+  safetyProvider: string | null;
+  safetyStatus: string | null;
+  copyrightProvider: string | null;
+  similarityProvider: string | null;
+  matchedSubmissionId: string | null;
+  moderationProcessingVersion: number;
 }
 
 function toIso(v: unknown): string | null {
@@ -68,6 +80,12 @@ function fromPost(doc: FirebaseFirestore.QueryDocumentSnapshot): ModerationQueue
     riskLevel: d.moderationRiskLevel ?? null,
     moderationReasons: Array.isArray(d.moderationReasons) ? d.moderationReasons : [],
     reportCount: Number(d.reportCount) || 0,
+    safetyProvider: d.safetyModeration?.provider ?? null,
+    safetyStatus: d.safetyModeration?.status ?? null,
+    copyrightProvider: d.copyrightCheck?.provider ?? null,
+    similarityProvider: d.similarityCheck?.provider ?? null,
+    matchedSubmissionId: d.similarityCheck?.matchedSubmissionId ?? null,
+    moderationProcessingVersion: Number(d.moderationProcessingVersion) || 0,
   };
 }
 
@@ -89,6 +107,12 @@ function fromSubmission(doc: FirebaseFirestore.QueryDocumentSnapshot): Moderatio
     riskLevel: d.moderationRiskLevel ?? null,
     moderationReasons: Array.isArray(d.moderationReasons) ? d.moderationReasons : [],
     reportCount: Number(d.reportCount) || 0,
+    safetyProvider: d.safetyModeration?.provider ?? null,
+    safetyStatus: d.safetyModeration?.status ?? null,
+    copyrightProvider: d.copyrightCheck?.provider ?? null,
+    similarityProvider: d.similarityCheck?.provider ?? null,
+    matchedSubmissionId: d.similarityCheck?.matchedSubmissionId ?? null,
+    moderationProcessingVersion: Number(d.moderationProcessingVersion) || 0,
   };
 }
 
@@ -139,6 +163,29 @@ export const getModerationQueue = functionsV1
         break;
       case "reported":
         items = items.filter((i) => i.reportCount > 0);
+        break;
+      case "provider_failed":
+        // Any of the three checks came back an explicit failure/error —
+        // distinct from "not yet checked" (PROCESSING/NOT_CONFIGURED),
+        // which belongs in "processing"/"pending" instead.
+        items = items.filter((i) =>
+          i.safetyStatus === "FAILED" || i.similarityStatus === "ERROR"
+        );
+        break;
+      case "processing":
+        // A job is genuinely in flight (visual safety kicked off,
+        // awaiting Sightengine's callback) — distinct from "pending"
+        // (nothing has been attempted / no automated provider running).
+        items = items.filter((i) => i.safetyStatus === "PROCESSING");
+        break;
+      case "manual_review_required":
+        // Everything that unambiguously needs a human decision right
+        // now: high risk, any flag, or any report — a convenience union
+        // of the more specific filters above for a moderator who just
+        // wants "show me everything that needs me".
+        items = items.filter((i) =>
+          i.riskLevel === "HIGH_RISK" || i.riskLevel === "MEDIUM_RISK" || i.reportCount > 0
+        );
         break;
       case "winner_review":
         // Winner-review items live in winnerVerifications, not

@@ -215,6 +215,13 @@ service cloud.firestore {
         allow update, delete: if request.auth != null
           && request.auth.uid == resource.data.userId;
       }
+      // Phase C §15 — same posture as submissions/{id}/moderationHistory
+      // above: admin-only, append-only, written only by
+      // functions/src/moderation/streamWebhook.ts's processReadyVideo.
+      match /moderationHistory/{versionId} {
+        allow read:  if request.auth != null && request.auth.token.admin == true;
+        allow write: if false;
+      }
     }
 
     // 👤 USERS — all profile types (student, restartEducation, parent)
@@ -603,6 +610,16 @@ service cloud.firestore {
 
       match /engagements/{engagementId} {
         allow read:  if request.auth != null;
+        allow write: if false;
+      }
+      // Phase C §15 — append-only pre-re-moderation snapshots (see
+      // functions/src/moderation/streamWebhook.ts's processReadyVideo).
+      // Admin-only, same posture as moderationAuditLog — this is
+      // internal moderation history, not something a student needs to
+      // see about their own submission (they already see the CURRENT
+      // moderation-status UI; past risk-level detail is a moderator tool).
+      match /moderationHistory/{versionId} {
+        allow read:  if request.auth != null && request.auth.token.admin == true;
         allow write: if false;
       }
     }
