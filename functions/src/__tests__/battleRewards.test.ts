@@ -1,4 +1,10 @@
 // PATH: functions/src/__tests__/battleRewards.test.ts
+//
+// Phase B §9/§10: claimBattleReward now requires a prior moderator
+// winner verification (see ../moderation/winnerVerification.ts) before
+// any crediting happens — seedVerifiedWinner() below seeds that record
+// so the pre-existing reward-calculation tests keep exercising exactly
+// what they always did. A new describe block covers the gate itself.
 
 jest.mock("firebase-admin", () => require("./helpers/mockFirebaseAdmin").mockAdminModule);
 
@@ -20,14 +26,81 @@ function seedPool(vcoinsPool: number) {
 function seedUser(uid: string) {
   fakeDb.seed(`users/${uid}`, { role: "student", vCoinsBalance: 0 });
 }
+function seedVerifiedWinner(uid: string, battleId = BATTLE_ID) {
+  fakeDb.seed(`winnerVerifications/${battleId}_${uid}`, {
+    battleId, uid, engine: "canonical", winnerStatus: "WINNER_VERIFIED", prizeStatus: "PRIZE_PENDING",
+  });
+}
 
 beforeEach(() => { fakeDb.reset(); });
 
-describe("claimBattleReward — server-resolved amount", () => {
+describe("claimBattleReward — winner verification gate (Phase B §9/§10)", () => {
+  test("first claim attempt with no prior verification is rejected and creates a WINNER_PENDING_REVIEW record", async () => {
+    seedLockedResults([{ studentId: WINNER_UID, rank: 1, isWinner: true }]);
+    seedPool(1000);
+    seedUser(WINNER_UID);
+
+    const { claimBattleReward } = require("../battleRewards");
+    await expect(claimBattleReward.run({ battleId: BATTLE_ID }, { auth: { uid: WINNER_UID } }))
+      .rejects.toMatchObject({ code: "failed-precondition" });
+
+    // No VCoins were credited — the gate rejected before any crediting logic ran.
+    expect(fakeDb.peek(`users/${WINNER_UID}`)?.vCoinsBalance).toBe(0);
+    const verification = fakeDb.peek(`winnerVerifications/${BATTLE_ID}_${WINNER_UID}`);
+    expect(verification?.winnerStatus).toBe("WINNER_PENDING_REVIEW");
+  });
+
+  test("a claim while still WINNER_PENDING_REVIEW (moderator hasn't acted yet) keeps being rejected, never silently approved", async () => {
+    seedLockedResults([{ studentId: WINNER_UID, rank: 1, isWinner: true }]);
+    seedPool(1000);
+    seedUser(WINNER_UID);
+
+    const { claimBattleReward } = require("../battleRewards");
+    // First call also throws — it's the one that CREATES the
+    // WINNER_PENDING_REVIEW record (requireVerifiedWinner's "no doc yet"
+    // branch), and creating that record is itself a disallow, not a
+    // silent success. See winnerVerification.ts's requireVerifiedWinner.
+    await expect(claimBattleReward.run({ battleId: BATTLE_ID }, { auth: { uid: WINNER_UID } }))
+      .rejects.toMatchObject({ code: "failed-precondition" });
+    await expect(claimBattleReward.run({ battleId: BATTLE_ID }, { auth: { uid: WINNER_UID } }))
+      .rejects.toMatchObject({ code: "failed-precondition" });
+    expect(fakeDb.peek(`users/${WINNER_UID}`)?.vCoinsBalance).toBe(0);
+  });
+
+  test("a WINNER_REJECTED verification permanently blocks the claim", async () => {
+    seedLockedResults([{ studentId: WINNER_UID, rank: 1, isWinner: true }]);
+    seedPool(1000);
+    seedUser(WINNER_UID);
+    fakeDb.seed(`winnerVerifications/${BATTLE_ID}_${WINNER_UID}`, {
+      battleId: BATTLE_ID, uid: WINNER_UID, winnerStatus: "WINNER_REJECTED", prizeStatus: "PRIZE_REJECTED",
+    });
+
+    const { claimBattleReward } = require("../battleRewards");
+    await expect(claimBattleReward.run({ battleId: BATTLE_ID }, { auth: { uid: WINNER_UID } }))
+      .rejects.toMatchObject({ code: "failed-precondition" });
+    expect(fakeDb.peek(`users/${WINNER_UID}`)?.vCoinsBalance).toBe(0);
+  });
+
+  test("client cannot forge WINNER_VERIFIED — there is no field on this callable's input for it", async () => {
+    seedLockedResults([{ studentId: WINNER_UID, rank: 1, isWinner: true }]);
+    seedPool(1000);
+    seedUser(WINNER_UID);
+
+    const { claimBattleReward } = require("../battleRewards");
+    await expect(claimBattleReward.run(
+      { battleId: BATTLE_ID, winnerStatus: "WINNER_VERIFIED", prizeStatus: "PRIZE_APPROVED" } as any,
+      { auth: { uid: WINNER_UID } }
+    )).rejects.toMatchObject({ code: "failed-precondition" }); // forged fields are simply never read
+    expect(fakeDb.peek(`users/${WINNER_UID}`)?.vCoinsBalance).toBe(0);
+  });
+});
+
+describe("claimBattleReward — server-resolved amount (requires prior verification)", () => {
   test("a rank-1 winner is credited the correct VCOIN_DIST_PCT share of the configured pool", async () => {
     seedLockedResults([{ studentId: WINNER_UID, rank: 1, isWinner: true }]);
     seedPool(1000);
     seedUser(WINNER_UID);
+    seedVerifiedWinner(WINNER_UID);
 
     const { claimBattleReward } = require("../battleRewards");
     const result = await claimBattleReward.run({ battleId: BATTLE_ID }, { auth: { uid: WINNER_UID } });
@@ -40,6 +113,7 @@ describe("claimBattleReward — server-resolved amount", () => {
     seedLockedResults([{ studentId: WINNER_UID, rank: 1, isWinner: true }]);
     seedPool(1000);
     seedUser(WINNER_UID);
+    seedVerifiedWinner(WINNER_UID);
 
     const { claimBattleReward } = require("../battleRewards");
     const result = await claimBattleReward.run(
@@ -48,12 +122,15 @@ describe("claimBattleReward — server-resolved amount", () => {
     expect(result.totalCredited).toBe(500); // the forged fields are simply never read
   });
 
-  test("a student not present in the locked results gets nothing, no error", async () => {
+  test("a student not present in the locked results gets nothing, no error (and no verification doc is even created)", async () => {
     seedLockedResults([{ studentId: WINNER_UID, rank: 1, isWinner: true }]);
     seedPool(1000);
     const { claimBattleReward } = require("../battleRewards");
     const result = await claimBattleReward.run({ battleId: BATTLE_ID }, { auth: { uid: "never_submitted" } });
     expect(result.totalCredited).toBe(0);
+    // The gate only ever applies to an actual entry — a non-entrant
+    // returns early before reaching it, so no queue-clutter is created.
+    expect(fakeDb.peek(`winnerVerifications/${BATTLE_ID}_never_submitted`)).toBeUndefined();
   });
 
   test("rejects a claim before results are finalized", async () => {
@@ -75,6 +152,7 @@ describe("claimBattleReward — Attack 13: duplicate claim prevention", () => {
     seedLockedResults([{ studentId: WINNER_UID, rank: 1, isWinner: true }]);
     seedPool(1000);
     seedUser(WINNER_UID);
+    seedVerifiedWinner(WINNER_UID);
 
     const { claimBattleReward } = require("../battleRewards");
     const first = await claimBattleReward.run({ battleId: BATTLE_ID }, { auth: { uid: WINNER_UID } });
@@ -96,6 +174,8 @@ describe("claimBattleReward — Attack 14: cannot claim another student's reward
     seedPool(1000);
     seedUser(WINNER_UID);
     seedUser(OTHER_UID);
+    seedVerifiedWinner(WINNER_UID);
+    seedVerifiedWinner(OTHER_UID);
 
     const { claimBattleReward } = require("../battleRewards");
     // OTHER_UID calls the function — even if they somehow knew and tried

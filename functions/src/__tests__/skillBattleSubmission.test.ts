@@ -58,12 +58,17 @@ function tokenFor(mediaUrl: string, uid = UID) {
 
 // A fresh payload (fresh ownershipToken included) every call — see this
 // file's header on why the token must never be baked into a shared
-// module-level constant here.
+// module-level constant here. Phase B §6: declarationAccepted/
+// declarationVersion are now hard-required (see
+// ../moderation/originalityDeclaration.ts), so the default payload
+// always includes a valid one — tests exercising the declaration check
+// itself override/omit these two fields explicitly.
 function makeBasePayload() {
   return {
     battleId: BATTLE_ID, battleTitle: "Test Battle", battleType: "sponsored", month: "2026-08",
     caption: "my reel", mediaUrl: MEDIA_URL, thumbnail: "",
     ownershipToken: tokenFor(MEDIA_URL),
+    declarationAccepted: true, declarationVersion: "v1",
   };
 }
 
@@ -253,15 +258,16 @@ describe("submitSkillBattleReel — media ownership (2026-09-11 audit P0 fix)", 
   });
 });
 
-describe("submitSkillBattleReel — originality declaration (video moderation pipeline, Phase A)", () => {
-  test("omitted entirely is recorded honestly as not accepted, not rejected (pre-Phase-B mobile compatibility)", async () => {
+describe("submitSkillBattleReel — originality declaration (video moderation pipeline, Phase B tightening)", () => {
+  test("omitted entirely is now rejected outright (Phase B tightening — mobile always sends it now)", async () => {
     fakeDb.seed(`skillBattles/${BATTLE_ID}`, LIVE_BATTLE);
     seedStudent();
     const { submitSkillBattleReel } = require("../skillBattleSubmission");
-    const result = await submitSkillBattleReel.run(makeBasePayload(), CTX);
-    const post = fakeDb.peek(`posts/${result.postId}`);
-    expect(post?.declarationAccepted).toBe(false);
-    expect(post?.declarationVersion).toBeNull();
+    const payload: Record<string, unknown> = { ...makeBasePayload() };
+    delete payload.declarationAccepted;
+    delete payload.declarationVersion;
+    await expect(submitSkillBattleReel.run(payload as any, CTX))
+      .rejects.toMatchObject({ code: "invalid-argument" });
   });
 
   test("a present but invalid value is rejected outright", async () => {

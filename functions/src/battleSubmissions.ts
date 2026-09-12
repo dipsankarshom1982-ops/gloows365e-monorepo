@@ -27,6 +27,7 @@ import * as functionsV1 from "firebase-functions/v1";
 import { verifyMediaOwnershipToken } from "./mediaOwnership";
 import { checkOriginalityDeclaration } from "./moderation/originalityDeclaration";
 import { runModerationPipeline, moderationResultToFields } from "./moderation/pipeline";
+import { recordModerationAuditEvent } from "./moderation/auditLog";
 
 const db = admin.firestore();
 
@@ -106,11 +107,13 @@ export const createBattleSubmission = functionsV1
       throw new functionsV1.https.HttpsError("invalid-argument", "mediaRef is required — upload the media first");
     }
 
-    // ── Originality declaration — see moderation/originalityDeclaration.ts's
-    // header for the Phase A compatibility rule (omitted entirely = honestly
-    // recorded as not-accepted, never rejected outright; a PRESENT but
-    // invalid/tampered value is rejected outright, same as any other
-    // forged-field attempt).
+    // ── Originality declaration — Phase B §6 tightened this: the Phase A
+    // compatibility shim (omitted entirely = honestly recorded as
+    // not-accepted, never rejected outright) is now REMOVED for new
+    // submissions. Every new submission must explicitly send
+    // declarationAccepted:true + the current declarationVersion, mirroring
+    // the mobile declaration screen (Createreelscreen.tsx) added in this
+    // same phase. See moderation/originalityDeclaration.ts's header.
     const declarationCheck = checkOriginalityDeclaration({ declarationAccepted, declarationVersion });
     if (!declarationCheck.valid) {
       throw new functionsV1.https.HttpsError("invalid-argument", declarationCheck.reason ?? "Originality declaration invalid.");
@@ -266,10 +269,13 @@ export const withdrawBattleSubmission = functionsV1
 // submissions/{id}.status unconditionally, admin included; this callable
 // (Admin SDK) is the sole path, same posture as posts/{id}.status (Phase 1)
 // and skillBattles/{id}.state (Phase 2B).
+type ReviewAction = "APPROVE" | "REJECT" | "ESCALATE" | "REQUEST_CHANGES" | "REMOVE";
+const REVIEW_ACTIONS: ReviewAction[] = ["APPROVE", "REJECT", "ESCALATE", "REQUEST_CHANGES", "REMOVE"];
+
 export const reviewBattleSubmission = functionsV1
   .runWith({ timeoutSeconds: 15, memory: "128MB" })
   .https.onCall(async (
-    data: { battleId?: string; studentId?: string; action?: "APPROVE" | "REJECT" | "REMOVE"; reason?: string },
+    data: { battleId?: string; studentId?: string; action?: ReviewAction; reason?: string },
     context
   ) => {
     if (!context.auth) {
@@ -282,12 +288,12 @@ export const reviewBattleSubmission = functionsV1
     if (!battleId || !studentId) {
       throw new functionsV1.https.HttpsError("invalid-argument", "battleId and studentId are required");
     }
-    if (action !== "APPROVE" && action !== "REJECT" && action !== "REMOVE") {
-      throw new functionsV1.https.HttpsError("invalid-argument", 'action must be "APPROVE", "REJECT", or "REMOVE"');
+    if (!action || !REVIEW_ACTIONS.includes(action)) {
+      throw new functionsV1.https.HttpsError("invalid-argument", `action must be one of: ${REVIEW_ACTIONS.join(", ")}`);
     }
 
     const ref = db.doc(`submissions/${battleId}_${studentId}`);
-    return db.runTransaction(async (tx) => {
+    const result = await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       if (!snap.exists) {
         throw new functionsV1.https.HttpsError("not-found", "Submission not found.");
@@ -304,7 +310,7 @@ export const reviewBattleSubmission = functionsV1
           reviewedBy: context.auth!.uid, reviewedAt: now, updatedAt: now,
           rejectionReason: reason ?? "",
         });
-        return { ok: true, status: "REMOVED" };
+        return { status: "REMOVED" as SubmissionStatus, previousStatus: currentStatus };
       }
 
       // Reviewable states: PENDING_MODERATION (pre-pipeline, effectively
@@ -318,6 +324,22 @@ export const reviewBattleSubmission = functionsV1
           "failed-precondition",
           `Cannot ${action.toLowerCase()} a submission that is already ${currentStatus}.`
         );
+      }
+
+      if (action === "ESCALATE" || action === "REQUEST_CHANGES") {
+        // Neither approves nor rejects — keeps the submission out of the
+        // public feed/leaderboard (status stays PENDING_HUMAN_REVIEW) while
+        // recording the moderator's decision, same posture as
+        // legacyPostReview.ts's identical two actions.
+        tx.update(ref, {
+          status: "PENDING_HUMAN_REVIEW" as SubmissionStatus,
+          reviewedBy: context.auth!.uid, reviewedAt: now, updatedAt: now,
+          rejectionReason: reason ?? "",
+        });
+        return {
+          status: (action === "ESCALATE" ? "PENDING_HUMAN_REVIEW" : "PENDING_HUMAN_REVIEW") as SubmissionStatus,
+          previousStatus: currentStatus,
+        };
       }
 
       const newStatus: SubmissionStatus = action === "APPROVE" ? "APPROVED" : "REJECTED";
@@ -336,6 +358,20 @@ export const reviewBattleSubmission = functionsV1
       // RANKING_FINALIZATION has already started or the result is
       // RESULT_LOCKED — a late approval can't change an already-final
       // outcome, see that file's header comment.
-      return { ok: true, status: newStatus };
+      return { status: newStatus, previousStatus: currentStatus };
     });
+
+    await recordModerationAuditEvent({
+      engine: "canonical",
+      submissionId: ref.id,
+      battleId,
+      actorUid: context.auth.uid,
+      actorRole: "admin",
+      action,
+      previousStatus: result.previousStatus,
+      newStatus: result.status,
+      reason,
+    }).catch((e) => console.warn("reviewBattleSubmission: audit log write failed (non-fatal):", e));
+
+    return { ok: true, status: result.status };
   });

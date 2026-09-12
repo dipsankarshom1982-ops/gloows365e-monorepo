@@ -77,7 +77,14 @@ interface MyPost {
 // one type would be exactly the "second business-logic system" the
 // brief warns against; keeping them distinct keeps each engine's real
 // shape honest.
-type CanonicalSubmissionStatus = "PENDING_MODERATION" | "APPROVED" | "REJECTED" | "REMOVED" | "WITHDRAWN";
+// PENDING_HUMAN_REVIEW added (Phase B) — the decision engine
+// (functions/src/moderation/decisionEngine.ts) routes every submission
+// there today, since no automated provider is configured yet; a
+// submission is only ever briefly PENDING_MODERATION before the pipeline
+// runs (see battleSubmissions.ts's header), so this UI must treat both
+// as "under review", never leave PENDING_HUMAN_REVIEW unhandled.
+type CanonicalSubmissionStatus = "PENDING_MODERATION" | "PENDING_HUMAN_REVIEW" | "APPROVED" | "REJECTED" | "REMOVED" | "WITHDRAWN";
+const UNDER_REVIEW_STATUSES: CanonicalSubmissionStatus[] = ["PENDING_MODERATION", "PENDING_HUMAN_REVIEW"];
 interface CanonicalSubmission {
   status: CanonicalSubmissionStatus;
   rejectionReason: string;
@@ -117,6 +124,17 @@ const STATUS_CONFIG: Record<
 };
 
 const ELIGIBLE_CLASSES = ["6", "7", "8", "9", "10", "11", "12"];
+
+// Must match functions/src/moderation/types.ts's CURRENT_DECLARATION_VERSION
+// and ORIGINALITY_DECLARATION_TEXT exactly — see the state declaration
+// above for why this is a hardcoded constant, not fetched.
+const DECLARATION_VERSION = "v1";
+const ORIGINALITY_DECLARATION_TEXT =
+  "I confirm that this video is my original work, or that I have the " +
+  "necessary rights or permissions to use the content, music, images, " +
+  "and other material included in it. I understand that unauthorized " +
+  "copyrighted content may result in removal, disqualification, or loss " +
+  "of prize eligibility.";
 
 // ─── Post limit check ─────────────────────────────────────────
 // UX pre-check only (SB-P1-03) — lets the app show "limit reached" before
@@ -217,6 +235,21 @@ export default function CreateReelScreen() {
   // filter — see lib/reelScoring.ts).
   const [caption,    setCaption]    = useState("");
   const [scope,      setScope]      = useState<"pan_india" | "state">("pan_india");
+
+  // ── Phase B §6: originality declaration ─────────────────────
+  // Required for BOTH engines — checkOriginalityDeclaration
+  // (functions/src/moderation/originalityDeclaration.ts) gates
+  // createBattleSubmission (canonical) and submitSkillBattleReel
+  // (legacy) identically, and now REJECTS a submission outright if
+  // these fields are missing (Phase B tightening — the Phase A
+  // compatibility shim that silently recorded "not accepted" for an
+  // omitted declaration is gone). DECLARATION_VERSION must match the
+  // server's CURRENT_DECLARATION_VERSION (moderation/types.ts) exactly —
+  // it's hardcoded here, not fetched, because it's tied 1:1 to this
+  // exact wording being shown to the student below; bumping the
+  // server's version without updating this string and text together
+  // would be a product bug, not something to paper over with a fetch.
+  const [declarationAccepted, setDeclarationAccepted] = useState(false);
 
   const progressAnim = useRef(new Animated.Value(0)).current;
 
@@ -354,6 +387,7 @@ export default function CreateReelScreen() {
     if (notEligible)      { Alert.alert("Not eligible", "Only Class 6–12 students can upload skill reels."); return; }
     if (!params.battleId) { Alert.alert("No battle selected.");                                               return; }
     if (engine === "loading") { Alert.alert("Still loading this battle — try again in a moment."); return; }
+    if (!declarationAccepted) { Alert.alert("Originality declaration required", "Please read and accept the originality declaration before submitting."); return; }
 
     // Phase 2D-4: the pre-flight duplicate check is engine-specific —
     // legacy allows up to 4 (checkPostLimit, unchanged); canonical allows
@@ -498,6 +532,7 @@ export default function CreateReelScreen() {
             battleId: string; battleTitle?: string; battleType?: string; month?: string;
             caption: string; targetState: string[]; targetLanguage: string[];
             mediaUrl: string; thumbnail: string; ownershipToken: string;
+            declarationAccepted: boolean; declarationVersion: string;
           },
           { postId: string }
         >(functions, "submitSkillBattleReel")({
@@ -511,6 +546,8 @@ export default function CreateReelScreen() {
           mediaUrl:  finalPlaybackUrl,
           thumbnail: thumbUrl ?? "",
           ownershipToken: uploadResult.ownershipToken,
+          declarationAccepted,
+          declarationVersion: DECLARATION_VERSION,
         });
       } else {
         // CANONICAL — Phase 2C's createBattleSubmission
@@ -528,13 +565,18 @@ export default function CreateReelScreen() {
         // server-side verification, as the legacy branch above.
         try {
           await httpsCallable<
-            { battleId: string; mediaRef: string; description?: string; ownershipToken: string },
+            {
+              battleId: string; mediaRef: string; description?: string; ownershipToken: string;
+              declarationAccepted: boolean; declarationVersion: string;
+            },
             { submissionId: string }
           >(functions, "createBattleSubmission")({
             battleId: params.battleId,
             mediaRef: finalPlaybackUrl,
             description: caption.trim(),
             ownershipToken: uploadResult.ownershipToken,
+            declarationAccepted,
+            declarationVersion: DECLARATION_VERSION,
           });
         } catch (err: any) {
           // "already-exists" (brief §20/§21 — duplicate/concurrent
@@ -557,6 +599,7 @@ export default function CreateReelScreen() {
       setThumbnail(null);
       setCaption("");
       setScope("pan_india");
+      setDeclarationAccepted(false);
       setShowMyPosts(true);
 
       Alert.alert(
@@ -738,10 +781,10 @@ export default function CreateReelScreen() {
         {engine === "canonical" && canonicalSubmission && canonicalSubmission.status !== "WITHDRAWN" && canonicalSubmission.status !== "REMOVED" && (
           <View
             style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, padding: 14, gap: 8 }]}
-            accessibilityLabel={`Your submission status: ${canonicalSubmission.status === "PENDING_MODERATION" ? "pending review" : canonicalSubmission.status === "APPROVED" ? "approved" : "rejected"}`}
+            accessibilityLabel={`Your submission status: ${UNDER_REVIEW_STATUSES.includes(canonicalSubmission.status) ? "pending review" : canonicalSubmission.status === "APPROVED" ? "approved" : "rejected"}`}
           >
             <Text style={[styles.sectionTitle, { color: colors.text }]}>📋 Your Submission</Text>
-            {canonicalSubmission.status === "PENDING_MODERATION" && (
+            {UNDER_REVIEW_STATUSES.includes(canonicalSubmission.status) && (
               <>
                 <Text style={{ color: "#f39c12", fontSize: 13, fontWeight: "800" }}>⏳ Submitted — Under review</Text>
                 <Text style={[styles.statusDesc, { color: colors.textSecondary }]}>
@@ -769,7 +812,7 @@ export default function CreateReelScreen() {
               </>
             )}
 
-            {canonicalSubmission.status === "PENDING_MODERATION" && (
+            {UNDER_REVIEW_STATUSES.includes(canonicalSubmission.status) && (
               <TouchableOpacity
                 onPress={withdrawSubmission}
                 disabled={withdrawing}
@@ -1103,11 +1146,32 @@ export default function CreateReelScreen() {
           </View>
         )}
 
+        {/* Originality declaration (Phase B §6) — required before final
+            submission for BOTH engines, see the state declaration above.
+            Exact wording is the server's own source of truth
+            (ORIGINALITY_DECLARATION_TEXT, moderation/types.ts) — do not
+            paraphrase here. */}
+        <TouchableOpacity
+          style={[styles.declarationBox, { backgroundColor: colors.card, borderColor: declarationAccepted ? accent : colors.border }]}
+          onPress={() => setDeclarationAccepted((v) => !v)}
+          activeOpacity={0.85}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: declarationAccepted }}
+          accessibilityLabel="I accept the originality declaration"
+        >
+          <View style={[styles.declarationCheck, { borderColor: declarationAccepted ? accent : colors.border, backgroundColor: declarationAccepted ? accent : "transparent" }]}>
+            {declarationAccepted && <Ionicons name="checkmark" size={14} color="#fff" />}
+          </View>
+          <Text style={[styles.declarationText, { color: colors.textSecondary }]}>
+            {ORIGINALITY_DECLARATION_TEXT}
+          </Text>
+        </TouchableOpacity>
+
         {/* Submit button */}
         {(() => {
           const alreadySubmitted = engine === "canonical" && !!canonicalSubmission
             && canonicalSubmission.status !== "WITHDRAWN" && canonicalSubmission.status !== "REMOVED";
-          const disabled = !videoAsset || loading || engine === "loading" || alreadySubmitted;
+          const disabled = !videoAsset || loading || engine === "loading" || alreadySubmitted || !declarationAccepted;
           const label = alreadySubmitted ? "Already Submitted" : loading ? "Submitting…" : "Submit to Battle 🚀";
           return (
             <TouchableOpacity
@@ -1208,6 +1272,10 @@ const styles = StyleSheet.create({
   scopePill:     { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5 },
   scopePillText: { fontSize: 12, fontWeight: "700" },
   scopeHint:     { fontSize: 11, fontWeight: "500", lineHeight: 15 },
+
+  declarationBox:   { flexDirection: "row", alignItems: "flex-start", gap: 10, marginHorizontal: 16, marginBottom: 14, padding: 14, borderRadius: 14, borderWidth: 1.5 },
+  declarationCheck: { width: 20, height: 20, borderRadius: 5, borderWidth: 1.5, alignItems: "center", justifyContent: "center", marginTop: 1 },
+  declarationText:  { fontSize: 11.5, fontWeight: "500", flex: 1, lineHeight: 17 },
 
   rulesBox:   { marginHorizontal: 16, marginBottom: 16, padding: 14, borderRadius: 14, borderWidth: 1, gap: 8 },
   rulesTitle: { fontSize: 14, fontWeight: "800", marginBottom: 4 },

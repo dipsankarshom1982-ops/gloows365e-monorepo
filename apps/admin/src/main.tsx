@@ -46,6 +46,7 @@ const CreateQuiz           = lazy(() => import("./pages/CreateQuiz"));
 const QuizQuestions        = lazy(() => import("./pages/QuizQuestions"));
 const DailyStreakQuiz       = lazy(() => import("./pages/DailyStreakQuiz"));
 const SkillBattles         = lazy(() => import("./pages/SkillBattles"));
+const SkillBattleModeration = lazy(() => import("./pages/SkillBattleModeration"));
 const SkillCategories      = lazy(() => import("./pages/SkillCategories"));
 const LearnFun             = lazy(() => import("./pages/LearnFun"));
 const BadgesAndStars       = lazy(() => import("./pages/BadgesAndStars"));
@@ -197,6 +198,7 @@ function ProtectedRoutes() {
           <Route path="/quizzes/:quizId/questions" element={<QuizQuestions />} />
           <Route path="/daily-streak-quiz"         element={<DailyStreakQuiz />} />
           <Route path="/skill-battles"             element={<SkillBattles />} />
+          <Route path="/skill-battle-moderation"   element={<SkillBattleModeration />} />
           <Route path="/skill-categories"          element={<SkillCategories />} />
           <Route path="/learnfun"                  element={<LearnFun />} />
           <Route path="/badges"                    element={<BadgesAndStars />} />

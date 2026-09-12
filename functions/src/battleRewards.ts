@@ -22,6 +22,7 @@
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { creditVCoinsBalance, getSkillBattleCoinForRank } from "./vcoins";
+import { requireVerifiedWinner } from "./moderation/winnerVerification";
 
 const db = admin.firestore();
 
@@ -61,6 +62,15 @@ export const claimBattleReward = functionsV1
 
     if (!myEntry) {
       return { totalCredited: 0, alreadyClaimed: false };
+    }
+
+    // Winner verification gate (Phase B §9/§10) — same posture as
+    // vcoins.ts's claimSkillBattleReward; see
+    // moderation/winnerVerification.ts's header. Only change to this
+    // function — everything below is the pre-existing crediting logic.
+    const winnerCheck = await requireVerifiedWinner("canonical", battleId, uid);
+    if (!winnerCheck.allowed) {
+      throw new functionsV1.https.HttpsError("failed-precondition", winnerCheck.message);
     }
 
     const vcoinsPool = battleSnap.exists ? ((battleSnap.data() as SkillBattleDoc).vcoinsPool ?? 0) : 0;

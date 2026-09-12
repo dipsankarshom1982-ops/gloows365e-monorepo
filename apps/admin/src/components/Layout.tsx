@@ -40,6 +40,10 @@ const NAV_GROUPS = [
     { path: "/daily-streak-quiz",label: "🔥 Daily Streak Quiz",permKey: "daily-streak-quiz" },
     { path: "/skill-battles",    label: "⚔️ Skill Battles",    permKey: "skill-battles" },
     { path: "/skill-categories", label: "🎯 Skill Taxonomy",   permKey: "skill-battles" },
+    // Phase B — reuses the same "skill-battles" permission, deliberately
+    // NOT a new permKey (brief §2: reuse the existing role system, don't
+    // build a second competing one).
+    { path: "/skill-battle-moderation", label: "🛡️ Battle Moderation", permKey: "skill-battles" },
     { path: "/learnfun",         label: "🎮 LearnFun",         permKey: "learnfun" },
     { path: "/badges",           label: "🏆 Badges & Stars",   permKey: "badges" },
   ]},
@@ -87,7 +91,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const { user, logout, isSuperAdmin, permissions } = useAuth();
 
-  const EXACT_MATCH_PATHS = ["/ads", "/contests", "/stories", "/skill-battles", "/banners", "/partners", "/badges", "/admins", "/students", "/subscriptions", "/courses", "/practice", "/quizzes", "/daily-streak-quiz"];
+  const EXACT_MATCH_PATHS = ["/ads", "/contests", "/stories", "/skill-battles", "/skill-battle-moderation", "/banners", "/partners", "/badges", "/admins", "/students", "/subscriptions", "/courses", "/practice", "/quizzes", "/daily-streak-quiz"];
 
   const isActive = (path: string) => {
     if (path === "/") return pathname === "/";

@@ -628,6 +628,34 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 🛡️ SKILL BATTLE MODERATION (Phase B, 2026-09-12) — reporting,
+    // winner verification, and the append-only moderation audit trail.
+    // Every write below happens via Admin SDK (functions/src/moderation/
+    // reporting.ts, legacyPostReview.ts, winnerVerification.ts,
+    // auditLog.ts) — these rules exist purely as defense-in-depth against
+    // a direct client write, same posture as every other server-only
+    // collection in this file.
+    match /skillBattleReports/{reportId} {
+      // A reporter can read their own filed reports; the reported
+      // student can never read who reported them or why (privacy — the
+      // brief's "do not automatically declare a user guilty" extends to
+      // not exposing the accusation itself to the accused).
+      allow read: if request.auth != null &&
+                     (resource.data.reporterUid == request.auth.uid || request.auth.token.admin == true);
+      allow write: if false;
+    }
+    match /winnerVerifications/{verificationId} {
+      // A student may read their own verification state (so the app can
+      // show "pending verification" honestly); never another student's.
+      allow read: if request.auth != null &&
+                     (resource.data.uid == request.auth.uid || request.auth.token.admin == true);
+      allow write: if false;
+    }
+    match /moderationAuditLog/{eventId} {
+      allow read:  if request.auth != null && request.auth.token.admin == true;
+      allow write: if false;
+    }
+
     // 🤝 PARTNERS
     match /partners/{partnerId} {
       allow read: if request.auth != null;

@@ -7,9 +7,9 @@ import { checkOriginalityDeclaration } from "../../moderation/originalityDeclara
 import { CURRENT_DECLARATION_VERSION } from "../../moderation/types";
 
 describe("checkOriginalityDeclaration", () => {
-  test("both fields omitted: valid, recorded honestly as not accepted (Phase A mobile compatibility)", () => {
+  test("both fields omitted: rejected outright (Phase B tightening — mobile now always sends this)", () => {
     const result = checkOriginalityDeclaration({});
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
     expect(result.record.declarationAccepted).toBe(false);
     expect(result.record.declarationVersion).toBeNull();
     expect(result.record.declarationAcceptedAt).toBeNull();

@@ -7,6 +7,13 @@
 // behavior stays covered without re-opening the ownership gap in the
 // test fixtures themselves. A new describe block covers the ownership
 // check itself (Attacks A/C/D from the hardening brief).
+//
+// Phase B §6: the originality declaration is now a hard requirement (see
+// ../moderation/originalityDeclaration.ts) — every call below spreads
+// VALID_DECLARATION unless the test is specifically exercising the
+// declaration check itself, since the declaration is validated before
+// the ownership/battle checks and would otherwise mask what each test
+// actually means to verify.
 
 jest.mock("firebase-admin", () => require("./helpers/mockFirebaseAdmin").mockAdminModule);
 
@@ -18,6 +25,7 @@ const SKILL_ID = "singing";
 const UID = "student_1";
 const CTX = { auth: { uid: UID, token: {} } };
 const ADMIN_CTX = { auth: { uid: "admin_1", token: { admin: true } } };
+const VALID_DECLARATION = { declarationAccepted: true, declarationVersion: "v1" };
 
 function seedOpenBattle(overrides: Record<string, unknown> = {}) {
   fakeDb.seed(`skillBattles/${BATTLE_ID}`, {
@@ -50,7 +58,7 @@ describe("createBattleSubmission — battle validation (§7)", () => {
     seedOpenBattle(); seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
     const result = await createBattleSubmission.run(
-      { battleId: BATTLE_ID, mediaRef: "cf_video_123", ownershipToken: tokenFor("cf_video_123") }, CTX
+      { battleId: BATTLE_ID, mediaRef: "cf_video_123", ownershipToken: tokenFor("cf_video_123"), ...VALID_DECLARATION }, CTX
     );
     expect(result.submissionId).toBe(`${BATTLE_ID}_${UID}`);
     expect(result.moderationStatus).toBe("PENDING_HUMAN_REVIEW");
@@ -70,15 +78,13 @@ describe("createBattleSubmission — battle validation (§7)", () => {
     expect(doc?.mediaOwnershipVerified).toBe(true);
   });
 
-  test("originality declaration: omitted is recorded honestly as not accepted, not rejected (pre-Phase-B mobile compatibility)", async () => {
+  test("originality declaration: omitted is now rejected outright (Phase B tightening)", async () => {
     seedOpenBattle(); seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
-    const result = await createBattleSubmission.run(
+    await expect(createBattleSubmission.run(
       { battleId: BATTLE_ID, mediaRef: "no_declaration", ownershipToken: tokenFor("no_declaration") }, CTX
-    );
-    const doc = fakeDb.peek(`submissions/${result.submissionId}`);
-    expect(doc?.declarationAccepted).toBe(false);
-    expect(doc?.declarationVersion).toBeNull();
+    )).rejects.toMatchObject({ code: "invalid-argument" });
+    expect(fakeDb.peek(`submissions/${BATTLE_ID}_${UID}`)).toBeUndefined();
   });
 
   test("originality declaration: a present but invalid value is rejected outright", async () => {
@@ -96,7 +102,7 @@ describe("createBattleSubmission — battle validation (§7)", () => {
     seedOpenBattle(); seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
     const result = await createBattleSubmission.run(
-      { battleId: BATTLE_ID, mediaRef: "accepted", ownershipToken: tokenFor("accepted"), declarationAccepted: true, declarationVersion: "v1" }, CTX
+      { battleId: BATTLE_ID, mediaRef: "accepted", ownershipToken: tokenFor("accepted"), ...VALID_DECLARATION }, CTX
     );
     const doc = fakeDb.peek(`submissions/${result.submissionId}`);
     expect(doc?.declarationAccepted).toBe(true);
@@ -107,14 +113,14 @@ describe("createBattleSubmission — battle validation (§7)", () => {
   test("Attack: submission for a battle that doesn't exist", async () => {
     seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
-    await expect(createBattleSubmission.run({ battleId: "fake_battle", mediaRef: "x", ownershipToken: tokenFor("x") }, CTX))
+    await expect(createBattleSubmission.run({ battleId: "fake_battle", mediaRef: "x", ownershipToken: tokenFor("x"), ...VALID_DECLARATION }, CTX))
       .rejects.toMatchObject({ code: "not-found" });
   });
 
   test("Attack 2: submit to a closed (non-OPEN) battle", async () => {
     seedOpenBattle({ state: "SUBMISSION_CLOSED" }); seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
-    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x") }, CTX))
+    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x"), ...VALID_DECLARATION }, CTX))
       .rejects.toMatchObject({ code: "failed-precondition" });
   });
 
@@ -122,27 +128,27 @@ describe("createBattleSubmission — battle validation (§7)", () => {
     seedOpenBattle({ submissionDeadline: new Date(Date.now() - 60_000).toISOString() });
     seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
-    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x") }, CTX))
+    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x"), ...VALID_DECLARATION }, CTX))
       .rejects.toMatchObject({ code: "failed-precondition" });
   });
 
   test("invalid skill: battle's skill has been deactivated", async () => {
     seedOpenBattle(); seedSkill({ isActive: false }); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
-    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x") }, CTX))
+    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x"), ...VALID_DECLARATION }, CTX))
       .rejects.toMatchObject({ code: "failed-precondition" });
   });
 
   test("invalid student: no student profile on record", async () => {
     seedOpenBattle(); seedSkill();
     const { createBattleSubmission } = require("../battleSubmissions");
-    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x") }, CTX))
+    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x"), ...VALID_DECLARATION }, CTX))
       .rejects.toMatchObject({ code: "failed-precondition" });
   });
 
   test("throws unauthenticated with no auth context", async () => {
     const { createBattleSubmission } = require("../battleSubmissions");
-    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x") }, {}))
+    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x"), ...VALID_DECLARATION }, {}))
       .rejects.toMatchObject({ code: "unauthenticated" });
   });
 });
@@ -151,7 +157,7 @@ describe("createBattleSubmission — media ownership (2026-09-11 audit P0 fix)",
   test("Attack A: missing ownershipToken is rejected", async () => {
     seedOpenBattle(); seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
-    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x" }, CTX))
+    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ...VALID_DECLARATION }, CTX))
       .rejects.toMatchObject({ code: "failed-precondition" });
     expect(fakeDb.peek(`submissions/${BATTLE_ID}_${UID}`)).toBeUndefined();
   });
@@ -160,7 +166,7 @@ describe("createBattleSubmission — media ownership (2026-09-11 audit P0 fix)",
     seedOpenBattle(); seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
     const forgedToken = tokenFor("cf_video_999", "someone_else");
-    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "cf_video_999", ownershipToken: forgedToken }, CTX))
+    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "cf_video_999", ownershipToken: forgedToken, ...VALID_DECLARATION }, CTX))
       .rejects.toMatchObject({ code: "failed-precondition" });
   });
 
@@ -173,7 +179,7 @@ describe("createBattleSubmission — media ownership (2026-09-11 audit P0 fix)",
     // Student A legitimately uploads and submits.
     const tokenA = mintMediaOwnershipToken({ uid: "student_a", videoUid: "video_a" });
     await createBattleSubmission.run(
-      { battleId: BATTLE_ID, mediaRef: "video_a", ownershipToken: tokenA },
+      { battleId: BATTLE_ID, mediaRef: "video_a", ownershipToken: tokenA, ...VALID_DECLARATION },
       { auth: { uid: "student_a", token: {} } }
     );
 
@@ -181,7 +187,7 @@ describe("createBattleSubmission — media ownership (2026-09-11 audit P0 fix)",
     // tries to submit it as their own, reusing student A's token.
     await expect(
       createBattleSubmission.run(
-        { battleId: "battle_2", mediaRef: "video_a", ownershipToken: tokenA },
+        { battleId: "battle_2", mediaRef: "video_a", ownershipToken: tokenA, ...VALID_DECLARATION },
         { auth: { uid: "student_b", token: {} } }
       )
     ).rejects.toMatchObject({ code: "failed-precondition" });
@@ -191,7 +197,7 @@ describe("createBattleSubmission — media ownership (2026-09-11 audit P0 fix)",
     seedOpenBattle(); seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
     const badToken = mintMediaOwnershipToken({ uid: UID, videoUid: "x" }, "not_the_real_secret");
-    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: badToken }, CTX))
+    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: badToken, ...VALID_DECLARATION }, CTX))
       .rejects.toMatchObject({ code: "failed-precondition" });
   });
 
@@ -200,7 +206,7 @@ describe("createBattleSubmission — media ownership (2026-09-11 audit P0 fix)",
     const { createBattleSubmission } = require("../battleSubmissions");
     const past = Date.now() - 60_000;
     const expiredToken = mintMediaOwnershipToken({ uid: UID, videoUid: "x", iat: past - 1000, exp: past });
-    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: expiredToken }, CTX))
+    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: expiredToken, ...VALID_DECLARATION }, CTX))
       .rejects.toMatchObject({ code: "failed-precondition" });
   });
 
@@ -208,7 +214,7 @@ describe("createBattleSubmission — media ownership (2026-09-11 audit P0 fix)",
     seedOpenBattle(); seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
     try {
-      await createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x" }, CTX);
+      await createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ...VALID_DECLARATION }, CTX);
       throw new Error("expected rejection");
     } catch (err: any) {
       expect(err.message).not.toMatch(/secret|signature|hmac|jwt/i);
@@ -221,8 +227,8 @@ describe("createBattleSubmission — one student, one submission, one battle (§
     seedOpenBattle(); seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
 
-    await createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "first", ownershipToken: tokenFor("first") }, CTX);
-    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "second", ownershipToken: tokenFor("second") }, CTX))
+    await createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "first", ownershipToken: tokenFor("first"), ...VALID_DECLARATION }, CTX);
+    await expect(createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "second", ownershipToken: tokenFor("second"), ...VALID_DECLARATION }, CTX))
       .rejects.toMatchObject({ code: "already-exists" });
 
     // The original submission is untouched — a rejected duplicate attempt
@@ -247,7 +253,7 @@ describe("withdrawBattleSubmission", () => {
   test("owner can withdraw a still-pending submission", async () => {
     seedOpenBattle(); seedSkill(); seedStudent();
     const { createBattleSubmission, withdrawBattleSubmission } = require("../battleSubmissions");
-    await createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x") }, CTX);
+    await createBattleSubmission.run({ battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x"), ...VALID_DECLARATION }, CTX);
     const result = await withdrawBattleSubmission.run({ battleId: BATTLE_ID }, CTX);
     expect(result.ok).toBe(true);
     expect(fakeDb.peek(`submissions/${BATTLE_ID}_${UID}`)?.status).toBe("WITHDRAWN");

@@ -46,6 +46,13 @@ function seedSkillboard(ranks: Partial<{ india: number; state: number; district:
     ranks: { india: 0, state: 0, district: 0, local: 0, ...ranks },
   });
 }
+// Phase B §9/§10: claimSkillBattleReward now requires a prior moderator
+// winner verification — see moderation/winnerVerification.ts.
+function seedVerifiedWinner(uid = UID, battleId = BATTLE_ID) {
+  fakeDb.seed(`winnerVerifications/${battleId}_${uid}`, {
+    battleId, uid, engine: "legacy", winnerStatus: "WINNER_VERIFIED", prizeStatus: "PRIZE_PENDING",
+  });
+}
 
 beforeEach(() => {
   fakeDb.reset();
@@ -95,12 +102,44 @@ describe("getMySkillBattleStanding — server-computed standing, client never su
   });
 });
 
+describe("claimSkillBattleReward — winner verification gate (Phase B §9/§10)", () => {
+  test("first claim attempt with no prior verification is rejected and creates a WINNER_PENDING_REVIEW record", async () => {
+    fakeDb.seed(`skillBattles/${BATTLE_ID}`, ENDED_BATTLE);
+    seedStudent();
+    seedUser();
+    seedSkillboard({ india: 1 });
+
+    const { claimSkillBattleReward } = require("../vcoins");
+    await expect(claimSkillBattleReward.run({ battleId: BATTLE_ID }, CTX))
+      .rejects.toMatchObject({ code: "failed-precondition" });
+
+    expect(fakeDb.peek(`users/${UID}`)?.vCoinsBalance).toBe(0);
+    expect(fakeDb.peek(`winnerVerifications/${BATTLE_ID}_${UID}`)?.winnerStatus).toBe("WINNER_PENDING_REVIEW");
+  });
+
+  test("a WINNER_REJECTED verification permanently blocks the claim", async () => {
+    fakeDb.seed(`skillBattles/${BATTLE_ID}`, ENDED_BATTLE);
+    seedStudent();
+    seedUser();
+    seedSkillboard({ india: 1 });
+    fakeDb.seed(`winnerVerifications/${BATTLE_ID}_${UID}`, {
+      battleId: BATTLE_ID, uid: UID, winnerStatus: "WINNER_REJECTED", prizeStatus: "PRIZE_REJECTED",
+    });
+
+    const { claimSkillBattleReward } = require("../vcoins");
+    await expect(claimSkillBattleReward.run({ battleId: BATTLE_ID }, CTX))
+      .rejects.toMatchObject({ code: "failed-precondition" });
+    expect(fakeDb.peek(`users/${UID}`)?.vCoinsBalance).toBe(0);
+  });
+});
+
 describe("claimSkillBattleReward — server-authoritative rank/pool/amount (SB-P0-03)", () => {
   test("client payload has no rank/vcoins fields to smuggle — signature accepts only battleId", async () => {
     fakeDb.seed(`skillBattles/${BATTLE_ID}`, ENDED_BATTLE);
     seedStudent();
     seedUser();
     seedSkillboard({ india: 1, state: 2, district: 3, local: 0 });
+    seedVerifiedWinner();
 
     const { claimSkillBattleReward } = require("../vcoins");
 
@@ -151,6 +190,7 @@ describe("claimSkillBattleReward — server-authoritative rank/pool/amount (SB-P
     seedStudent();
     seedUser();
     seedSkillboard({ india: 1 });
+    seedVerifiedWinner();
 
     const { claimSkillBattleReward } = require("../vcoins");
     const first  = await claimSkillBattleReward.run({ battleId: BATTLE_ID }, CTX);
@@ -169,6 +209,7 @@ describe("claimSkillBattleReward — server-authoritative rank/pool/amount (SB-P
     seedStudent();
     seedUser();
     seedSkillboard({ india: 1, state: 1, district: 1, local: 1 });
+    seedVerifiedWinner();
 
     const { claimSkillBattleReward } = require("../vcoins");
     await claimSkillBattleReward.run({ battleId: BATTLE_ID }, CTX);

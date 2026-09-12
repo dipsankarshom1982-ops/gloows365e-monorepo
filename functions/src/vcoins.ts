@@ -8,6 +8,7 @@
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { getRedis, todayIST, TTL, RK } from "./redish";
+import { requireVerifiedWinner } from "./moderation/winnerVerification";
 
 const db = admin.firestore();
 
@@ -634,6 +635,16 @@ export const claimSkillBattleReward = functionsV1
     }
     if (!cls) {
       return { totalCredited: 0, alreadyClaimed: false, breakdown: {} };
+    }
+
+    // Winner verification gate (Phase B §9/§10) — a leaderboard rank
+    // alone must never authorize a payout. See
+    // moderation/winnerVerification.ts's header for the full design;
+    // this is the ONLY change to this function — everything below is
+    // the pre-existing, already-verified crediting logic, untouched.
+    const winnerCheck = await requireVerifiedWinner("legacy", battleId, uid);
+    if (!winnerCheck.allowed) {
+      throw new functionsV1.https.HttpsError("failed-precondition", winnerCheck.message);
     }
 
     const awardRef = db.doc(`skillBattleAwards/${battleId}_${uid}`);

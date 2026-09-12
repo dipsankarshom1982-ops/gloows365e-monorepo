@@ -65,6 +65,17 @@ export { engageBattleSubmission } from "./battleEngagement";
 export { onBattleSubmissionWritten, onBattleEngagementWritten, getMyBattleRank, getBattleLeaderboardPage } from "./battleRanking";
 export { finalizeBattleResults } from "./battleFinalization";
 export { claimBattleReward } from "./battleRewards";
+
+// ── Skill Battle moderation, reporting & winner verification (Phase B,
+// 2026-09-12) — see functions/src/moderation/ for the full pipeline
+// (Phase A: state model/decision engine; Phase B: this operational
+// layer). Admin-only except reportSkillBattleContent, which any
+// authenticated student may call. ─────────────────────────────────────
+export { getModerationQueue } from "./moderation/moderationQueue";
+export { reviewSkillBattlePost } from "./moderation/legacyPostReview";
+export { reportSkillBattleContent, resolveSkillBattleReport } from "./moderation/reporting";
+export { verifyBattleWinner } from "./moderation/winnerVerification";
+
 export { joinVidyastarContest, deleteContest } from "./vidyastarContest";
 export { submitVidyastarContestQuiz } from "./submitVidyastarContestQuiz";
 export { finalizeContestRanking, autoFinalizeEndedContests } from "./contestLeaderboard";

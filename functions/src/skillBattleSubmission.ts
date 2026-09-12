@@ -76,9 +76,8 @@ interface SubmitSkillBattleReelInput {
   // Short-lived, HMAC-signed token minted by the Cloudflare Worker after
   // it verified this student's Firebase ID token — see mediaOwnership.ts.
   ownershipToken?: string;
-  // Originality declaration — see moderation/originalityDeclaration.ts's
-  // header for the Phase A compatibility rule (omitted = today's
-  // pre-Phase-B mobile client; a present-but-invalid value is rejected).
+  // Originality declaration (Phase B §6, tightened) — required on every
+  // new submission; see moderation/originalityDeclaration.ts's header.
   declarationAccepted?: unknown;
   declarationVersion?: unknown;
 }
