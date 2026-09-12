@@ -46,18 +46,62 @@ beforeEach(() => {
 });
 
 describe("createBattleSubmission — battle validation (§7)", () => {
-  test("a valid submission succeeds and starts PENDING_MODERATION", async () => {
+  test("a valid submission succeeds and lands in PENDING_HUMAN_REVIEW (no automated provider configured)", async () => {
     seedOpenBattle(); seedSkill(); seedStudent();
     const { createBattleSubmission } = require("../battleSubmissions");
     const result = await createBattleSubmission.run(
       { battleId: BATTLE_ID, mediaRef: "cf_video_123", ownershipToken: tokenFor("cf_video_123") }, CTX
     );
     expect(result.submissionId).toBe(`${BATTLE_ID}_${UID}`);
+    expect(result.moderationStatus).toBe("PENDING_HUMAN_REVIEW");
     const doc = fakeDb.peek(`submissions/${result.submissionId}`);
-    expect(doc?.status).toBe("PENDING_MODERATION");
+    // No automated moderation/copyright/similarity provider is configured
+    // in this test environment (or production, today) — the decision
+    // engine's fail-closed default routes every submission to human
+    // review, never straight to APPROVED. See moderation/decisionEngine.ts.
+    expect(doc?.status).toBe("PENDING_HUMAN_REVIEW");
+    expect(doc?.moderationStatus).toBe("PENDING_HUMAN_REVIEW");
+    expect(doc?.copyrightStatus).toBe("NOT_CONFIGURED");
+    expect(doc?.similarityStatus).toBe("NOT_CHECKED");
+    expect(doc?.winnerStatus).toBe("NOT_APPLICABLE");
+    expect(doc?.prizeStatus).toBe("NOT_APPLICABLE");
     expect(doc?.studentId).toBe(UID);
     // Media ownership is now genuinely verified — the token above proved it.
     expect(doc?.mediaOwnershipVerified).toBe(true);
+  });
+
+  test("originality declaration: omitted is recorded honestly as not accepted, not rejected (pre-Phase-B mobile compatibility)", async () => {
+    seedOpenBattle(); seedSkill(); seedStudent();
+    const { createBattleSubmission } = require("../battleSubmissions");
+    const result = await createBattleSubmission.run(
+      { battleId: BATTLE_ID, mediaRef: "no_declaration", ownershipToken: tokenFor("no_declaration") }, CTX
+    );
+    const doc = fakeDb.peek(`submissions/${result.submissionId}`);
+    expect(doc?.declarationAccepted).toBe(false);
+    expect(doc?.declarationVersion).toBeNull();
+  });
+
+  test("originality declaration: a present but invalid value is rejected outright", async () => {
+    seedOpenBattle(); seedSkill(); seedStudent();
+    const { createBattleSubmission } = require("../battleSubmissions");
+    await expect(createBattleSubmission.run(
+      { battleId: BATTLE_ID, mediaRef: "x", ownershipToken: tokenFor("x"), declarationAccepted: false, declarationVersion: "v1" }, CTX
+    )).rejects.toMatchObject({ code: "invalid-argument" });
+    await expect(createBattleSubmission.run(
+      { battleId: BATTLE_ID, mediaRef: "y", ownershipToken: tokenFor("y"), declarationAccepted: true, declarationVersion: "tampered-version" }, CTX
+    )).rejects.toMatchObject({ code: "invalid-argument" });
+  });
+
+  test("originality declaration: correctly accepted is recorded with a server-stamped timestamp", async () => {
+    seedOpenBattle(); seedSkill(); seedStudent();
+    const { createBattleSubmission } = require("../battleSubmissions");
+    const result = await createBattleSubmission.run(
+      { battleId: BATTLE_ID, mediaRef: "accepted", ownershipToken: tokenFor("accepted"), declarationAccepted: true, declarationVersion: "v1" }, CTX
+    );
+    const doc = fakeDb.peek(`submissions/${result.submissionId}`);
+    expect(doc?.declarationAccepted).toBe(true);
+    expect(doc?.declarationVersion).toBe("v1");
+    expect(doc?.declarationAcceptedAt).toBeTruthy();
   });
 
   test("Attack: submission for a battle that doesn't exist", async () => {
@@ -236,6 +280,13 @@ describe("reviewBattleSubmission — moderation, never student-transitionable (�
     const doc = fakeDb.peek(`submissions/${BATTLE_ID}_${UID}`);
     expect(doc?.status).toBe("APPROVED");
     expect(doc?.approvedAt).toBeTruthy();
+  });
+
+  test("admin CAN approve a submission sitting in PENDING_HUMAN_REVIEW (the decision engine's real Phase A output)", async () => {
+    fakeDb.seed(`submissions/${BATTLE_ID}_${UID}`, { studentId: UID, battleId: BATTLE_ID, status: "PENDING_HUMAN_REVIEW" });
+    const { reviewBattleSubmission } = require("../battleSubmissions");
+    const result = await reviewBattleSubmission.run({ battleId: BATTLE_ID, studentId: UID, action: "APPROVE" }, ADMIN_CTX);
+    expect(result.status).toBe("APPROVED");
   });
 
   test("admin CAN reject with a reason", async () => {

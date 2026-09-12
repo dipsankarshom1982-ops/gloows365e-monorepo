@@ -31,6 +31,8 @@
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { verifyMediaOwnershipToken } from "./mediaOwnership";
+import { checkOriginalityDeclaration } from "./moderation/originalityDeclaration";
+import { runModerationPipeline, moderationResultToFields } from "./moderation/pipeline";
 
 const db = admin.firestore();
 
@@ -74,6 +76,11 @@ interface SubmitSkillBattleReelInput {
   // Short-lived, HMAC-signed token minted by the Cloudflare Worker after
   // it verified this student's Firebase ID token — see mediaOwnership.ts.
   ownershipToken?: string;
+  // Originality declaration — see moderation/originalityDeclaration.ts's
+  // header for the Phase A compatibility rule (omitted = today's
+  // pre-Phase-B mobile client; a present-but-invalid value is rejected).
+  declarationAccepted?: unknown;
+  declarationVersion?: unknown;
 }
 
 export const submitSkillBattleReel = functionsV1
@@ -83,13 +90,22 @@ export const submitSkillBattleReel = functionsV1
       throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
     }
     const uid = context.auth.uid;
-    const { battleId, battleTitle, battleType, month, caption, targetState, targetLanguage, mediaUrl, thumbnail, ownershipToken } = data ?? {};
+    const {
+      battleId, battleTitle, battleType, month, caption, targetState, targetLanguage, mediaUrl, thumbnail,
+      ownershipToken, declarationAccepted, declarationVersion,
+    } = data ?? {};
 
     if (!battleId || typeof battleId !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "battleId is required");
     }
     if (!mediaUrl || typeof mediaUrl !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "mediaUrl is required — upload the video first");
+    }
+
+    // ── Originality declaration — see moderation/originalityDeclaration.ts.
+    const declarationCheck = checkOriginalityDeclaration({ declarationAccepted, declarationVersion });
+    if (!declarationCheck.valid) {
+      throw new functionsV1.https.HttpsError("invalid-argument", declarationCheck.reason ?? "Originality declaration invalid.");
     }
 
     // ── Media ownership (2026-09-11 audit P0 fix) — verified before any
@@ -125,6 +141,14 @@ export const submitSkillBattleReel = functionsV1
 
     const postsRef   = db.collection("posts");
     const newPostRef = postsRef.doc();
+
+    // ── Automated moderation pipeline (Phase A) — see battleSubmissions.ts's
+    // identical call for why this runs once, outside the transaction.
+    const moderationResult = await runModerationPipeline({
+      submissionId: newPostRef.id,
+      videoRef: mediaUrl,
+      battleId,
+    });
 
     await db.runTransaction(async (tx) => {
       // Count-and-create in one transaction — the old client pre-flight
@@ -175,10 +199,21 @@ export const submitSkillBattleReel = functionsV1
         // Real, verified true — the ownership check above already
         // rejected this request otherwise. Never hardcoded/assumed.
         mediaOwnershipVerified: true,
+        // Video moderation/copyright pipeline (Phase A) — added
+        // alongside the existing `status` field, not a replacement for
+        // it: `status` stays "pending"/"approved"/"rejected" (unchanged,
+        // still what updateSkillboard's trigger and getReelsFeed key
+        // off), while these new fields carry the richer moderation
+        // metadata the decision engine actually computed. See this
+        // file's header and moderation/decisionEngine.ts.
+        ...moderationResultToFields(moderationResult),
+        ...declarationCheck.record,
+        winnerStatus: "NOT_APPLICABLE",
+        prizeStatus: "NOT_APPLICABLE",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
 
-    console.log(`✅ SkillBattle submission created: uid=${uid} battle=${battleId} post=${newPostRef.id}`);
-    return { postId: newPostRef.id };
+    console.log(`✅ SkillBattle submission created: uid=${uid} battle=${battleId} post=${newPostRef.id} moderationStatus=${moderationResult.decision.nextStatus}`);
+    return { postId: newPostRef.id, moderationStatus: moderationResult.decision.nextStatus };
   });

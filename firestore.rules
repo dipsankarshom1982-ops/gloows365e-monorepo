@@ -83,7 +83,21 @@ service cloud.firestore {
               'location', 'mediaUrl', 'thumbnail',
               'status', 'rejectionReason', 'reviewedAt', 'reviewedBy',
               'likes', 'views', 'shares', 'comments', 'watchTime', 'createdAt',
-              'mediaOwnershipVerified'
+              'mediaOwnershipVerified',
+              // Video moderation/copyright pipeline (Phase A) — only the
+              // plain scalar decision fields are allow-listed here (each
+              // forced to its one safe "not yet decided" value below);
+              // the richer diagnostic objects (safetyModeration,
+              // copyrightCheck, similarityCheck, moderationReasons,
+              // moderationRiskLevel) and declarationVersion/
+              // declarationAcceptedAt are deliberately NOT allow-listed
+              // at all — only submitSkillBattleReel (Admin SDK) ever
+              // writes those, after actually running the decision engine
+              // (functions/src/moderation/decisionEngine.ts). A direct
+              // client write containing any of them is rejected outright
+              // by hasOnly() above, not merely value-checked.
+              'moderationStatus', 'copyrightStatus', 'similarityStatus',
+              'declarationAccepted', 'winnerStatus', 'prizeStatus'
             ])
             // Every server-authoritative field must start in its one safe
             // initial state — the moderation queue (an admin, or a future
@@ -106,6 +120,19 @@ service cloud.firestore {
             // checking the Worker-issued ownership token. See
             // functions/src/mediaOwnership.ts.
             && (!('mediaOwnershipVerified' in request.resource.data) || request.resource.data.mediaOwnershipVerified == false)
+            // SECURITY FIX (video moderation/copyright pipeline audit,
+            // Phase A): none of these can be forged by a direct client
+            // write either — only the decision engine (via
+            // submitSkillBattleReel, Admin SDK) ever sets a value other
+            // than these one safe defaults. See
+            // functions/src/moderation/decisionEngine.ts and
+            // originalityDeclaration.ts.
+            && (!('moderationStatus' in request.resource.data) || request.resource.data.moderationStatus == 'PENDING_MODERATION')
+            && (!('copyrightStatus' in request.resource.data) || request.resource.data.copyrightStatus == 'NOT_CONFIGURED')
+            && (!('similarityStatus' in request.resource.data) || request.resource.data.similarityStatus == 'NOT_CHECKED')
+            && (!('declarationAccepted' in request.resource.data) || request.resource.data.declarationAccepted == false)
+            && (!('winnerStatus' in request.resource.data) || request.resource.data.winnerStatus == 'NOT_APPLICABLE')
+            && (!('prizeStatus' in request.resource.data) || request.resource.data.prizeStatus == 'NOT_APPLICABLE')
           )
         );
 

@@ -25,6 +25,8 @@
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { verifyMediaOwnershipToken } from "./mediaOwnership";
+import { checkOriginalityDeclaration } from "./moderation/originalityDeclaration";
+import { runModerationPipeline, moderationResultToFields } from "./moderation/pipeline";
 
 const db = admin.firestore();
 
@@ -36,11 +38,26 @@ const db = admin.firestore();
 const OWNERSHIP_ERROR_MESSAGE =
   "Media ownership could not be verified. Please upload your video again and resubmit.";
 
+// SECURITY FIX (video moderation/copyright pipeline — Phase A): a
+// submission's initial status is no longer a hardcoded "PENDING_MODERATION"
+// — it's whatever the centralized decision engine (moderation/decisionEngine.ts)
+// computes from the three automated checks (moderation/pipeline.ts). Every
+// provider is currently an Unconfigured*Provider stub (no AWS/copyright/
+// similarity credentials exist in this environment), so every submission
+// today lands on PENDING_HUMAN_REVIEW — see that engine's header for why
+// this is a deliberate fail-closed default, not a bug. PENDING_MODERATION
+// is kept as a type value for the brief moment before the pipeline runs;
+// nothing is ever left sitting in it since the pipeline runs synchronously
+// before the submission doc is created (Phase A only — see pipeline.ts's
+// TODO for why a real provider needs this to become an async queue).
 export type SubmissionStatus =
   | "PENDING_MODERATION"
+  | "MODERATION_PROCESSING"
+  | "PENDING_HUMAN_REVIEW"
   | "APPROVED"
   | "REJECTED"
   | "REMOVED"
+  | "APPEALED"
   | "WITHDRAWN";
 
 interface SkillBattleDoc {
@@ -70,20 +87,33 @@ interface StudentDoc {
 export const createBattleSubmission = functionsV1
   .runWith({ timeoutSeconds: 20, memory: "128MB", secrets: ["WORKER_OWNERSHIP_SECRET"] })
   .https.onCall(async (
-    data: { battleId?: string; mediaRef?: string; title?: string; description?: string; ownershipToken?: string },
+    data: {
+      battleId?: string; mediaRef?: string; title?: string; description?: string; ownershipToken?: string;
+      declarationAccepted?: unknown; declarationVersion?: unknown;
+    },
     context
   ) => {
     if (!context.auth) {
       throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
     }
     const uid = context.auth.uid;
-    const { battleId, mediaRef, title, description, ownershipToken } = data ?? {};
+    const { battleId, mediaRef, title, description, ownershipToken, declarationAccepted, declarationVersion } = data ?? {};
 
     if (!battleId || typeof battleId !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "battleId is required");
     }
     if (!mediaRef || typeof mediaRef !== "string") {
       throw new functionsV1.https.HttpsError("invalid-argument", "mediaRef is required — upload the media first");
+    }
+
+    // ── Originality declaration — see moderation/originalityDeclaration.ts's
+    // header for the Phase A compatibility rule (omitted entirely = honestly
+    // recorded as not-accepted, never rejected outright; a PRESENT but
+    // invalid/tampered value is rejected outright, same as any other
+    // forged-field attempt).
+    const declarationCheck = checkOriginalityDeclaration({ declarationAccepted, declarationVersion });
+    if (!declarationCheck.valid) {
+      throw new functionsV1.https.HttpsError("invalid-argument", declarationCheck.reason ?? "Originality declaration invalid.");
     }
 
     // ── Media ownership (2026-09-11 audit P0 fix) — verified BEFORE any
@@ -128,6 +158,18 @@ export const createBattleSubmission = functionsV1
 
     const submissionRef = db.doc(`submissions/${battleId}_${uid}`);
 
+    // ── Automated moderation pipeline (Phase A) — a pure computation, no
+    // Firestore reads/writes of its own, so it runs once outside the
+    // transaction rather than being re-evaluated on every transaction
+    // retry. See moderation/pipeline.ts's header for why this stays
+    // synchronous only as long as every provider is an instant-resolving
+    // stub.
+    const moderationResult = await runModerationPipeline({
+      submissionId: submissionRef.id,
+      videoRef: mediaRef,
+      battleId,
+    });
+
     return db.runTransaction(async (tx) => {
       const existing = await tx.get(submissionRef);
       if (existing.exists) {
@@ -150,7 +192,17 @@ export const createBattleSubmission = functionsV1
         mediaOwnershipVerified: true,
         title: (title ?? "").trim(),
         description: (description ?? "").trim(),
-        status: "PENDING_MODERATION" as SubmissionStatus,
+        // Video moderation/copyright pipeline (Phase A) — status is the
+        // decision engine's real output, never a hardcoded value. See
+        // this file's header and moderation/decisionEngine.ts.
+        status: moderationResult.decision.nextStatus as SubmissionStatus,
+        ...moderationResultToFields(moderationResult),
+        ...declarationCheck.record,
+        // Winner/prize verification (schema only this phase — the real
+        // gate and admin UI ship in Phase B; recorded now so nothing can
+        // forge either field in the meantime).
+        winnerStatus: "NOT_APPLICABLE",
+        prizeStatus: "NOT_APPLICABLE",
         rejectionReason: "",
         reviewedBy: "",
         reviewedAt: null,
@@ -159,7 +211,10 @@ export const createBattleSubmission = functionsV1
         updatedAt: now,
       });
 
-      return { submissionId: submissionRef.id };
+      return {
+        submissionId: submissionRef.id,
+        moderationStatus: moderationResult.decision.nextStatus,
+      };
     });
   });
 
@@ -188,7 +243,12 @@ export const withdrawBattleSubmission = functionsV1
         throw new functionsV1.https.HttpsError("not-found", "No submission found for this battle.");
       }
       const status = snap.data()?.status as SubmissionStatus;
-      if (status !== "PENDING_MODERATION") {
+      // Same reviewable-state widening as reviewBattleSubmission below —
+      // PENDING_HUMAN_REVIEW is what the decision engine actually routes
+      // every submission to today (no automated provider configured, see
+      // moderation/decisionEngine.ts), not the pre-pipeline
+      // PENDING_MODERATION value.
+      if (status !== "PENDING_MODERATION" && status !== "PENDING_HUMAN_REVIEW") {
         throw new functionsV1.https.HttpsError(
           "failed-precondition",
           `Cannot withdraw a submission that is already ${status}.`
@@ -247,7 +307,13 @@ export const reviewBattleSubmission = functionsV1
         return { ok: true, status: "REMOVED" };
       }
 
-      if (currentStatus !== "PENDING_MODERATION") {
+      // Reviewable states: PENDING_MODERATION (pre-pipeline, effectively
+      // never observed in practice — the pipeline runs before the doc is
+      // ever created, see createBattleSubmission above) and
+      // PENDING_HUMAN_REVIEW (what the decision engine actually routes
+      // every submission to today, since no automated provider is
+      // configured — see moderation/decisionEngine.ts).
+      if (currentStatus !== "PENDING_MODERATION" && currentStatus !== "PENDING_HUMAN_REVIEW") {
         throw new functionsV1.https.HttpsError(
           "failed-precondition",
           `Cannot ${action.toLowerCase()} a submission that is already ${currentStatus}.`
