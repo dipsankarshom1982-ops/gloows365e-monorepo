@@ -57,6 +57,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth, db, functions } from "@/lib/firebase";
 import { scoreReel, matchesClassFilter, toMillis, type ScoringProfile } from "@/lib/reelScoring";
+import ReelMoreMenu from "@/components/ReelMoreMenu";
+import ReportVideoModal from "@/components/ReportVideoModal";
+import { isPubliclyVisible } from "@/lib/feedVisibility";
 import { httpsCallable } from "firebase/functions";
 import {
   addDoc,
@@ -104,6 +107,9 @@ type Post = {
   shares?: number;
   status?: PostStatus | string;
   createdAt?: any;
+  // Report Video (student reporting UI) — required by
+  // reportSkillBattleContent's schema alongside the post's own id.
+  battleId?: string;
   // short_reels fields
   category?: string;
   cfVideoId?: string;
@@ -243,6 +249,7 @@ function VideoItem({
   const [comments,        setComments]        = useState<any[]>([]);
   const [commentText,     setCommentText]     = useState("");
   const [commentCount,    setCommentCount]    = useState(item.comments || 0);
+  const [reportVisible,   setReportVisible]   = useState(false);
   // PERF FIX (student report — "reels take so much time to load"): this
   // used to run waitForManifest() — a network round trip to the CF Worker's
   // /video-status endpoint (or a manifest GET) — for EVERY reel BEFORE
@@ -265,6 +272,16 @@ function VideoItem({
   const pollingRef      = useRef(false);
   const hasTriedPollRef = useRef(false); // avoid re-polling on repeat error events
   const isOwner    = !isShortReel && auth.currentUser?.uid === item.userId;
+  // Report Video — Skill Battle posts only (reportSkillBattleContent's
+  // contentType schema doesn't cover admin short_reels, and reporting a
+  // plain non-battle "reel" post is a separate product decision this
+  // feature doesn't make). Hidden for a viewer's own post — self-
+  // reporting isn't meaningful, and this is a client-side UX choice
+  // only: the backend itself doesn't forbid it (see
+  // reportSkillBattleContent's own header), so hiding it here doesn't
+  // create a security dependency. Also requires battleId — a post
+  // without one can't satisfy the backend's required field.
+  const isReportable = !isShortReel && item.isSkillBattle === true && !isOwner && !!item.battleId;
 
   const playbackUrl = resolvePlaybackUrl(item);
 
@@ -463,6 +480,13 @@ function VideoItem({
         <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
         {renderProcessingOverlay()}
 
+        {/* Report Video — top-right "⋮" menu, Skill Battle posts only */}
+        {isReportable && (
+          <View style={[styles.moreMenuWrap, { top: 50 }]}>
+            <ReelMoreMenu colors={colors} onReport={() => setReportVisible(true)} />
+          </View>
+        )}
+
         {/* Status watermark — only for own pending posts */}
         {isOwner && item.status !== "approved" && (
           <>
@@ -579,6 +603,17 @@ function VideoItem({
             </View>
           </View>
         </Modal>
+      )}
+
+      {isReportable && (
+        <ReportVideoModal
+          visible={reportVisible}
+          onClose={() => setReportVisible(false)}
+          contentType="post"
+          contentId={item.id}
+          battleId={item.battleId ?? ""}
+          colors={colors}
+        />
       )}
     </>
   );
@@ -770,7 +805,12 @@ export default function Reels() {
             if (cancelled) return;
             if (snap.exists()) {
               const post = { id: snap.id, ...(snap.data() as Omit<Post, "id">) };
-              if ((post as any).status !== "rejected") {
+              // A shared/deep link to an unapproved Skill Battle video must
+              // not bypass moderation just because the viewer has the
+              // direct link — see isPubliclyVisible's header. A student's
+              // OWN pending post has its own separate, watermarked surface
+              // (ownPending below); this is the generic/public route.
+              if (isPubliclyVisible(post as any)) {
                 setReels([post]);
                 setCurrentIndex(0);
                 hasScrolled.current = true;
@@ -779,14 +819,14 @@ export default function Reels() {
           } catch { /* the deep-linked post itself failing shouldn't block the rest of the feed below */ }
 
           const q = isSkillBattleFilter
-            ? query(collection(db, "posts"), where("isSkillBattle", "==", true),  orderBy("createdAt", "desc"), limit(20))
-            : query(collection(db, "posts"), where("postType", "==", "reel"),     orderBy("createdAt", "desc"), limit(20));
+            ? query(collection(db, "posts"), where("isSkillBattle", "==", true), where("status", "==", "approved"), orderBy("createdAt", "desc"), limit(20))
+            : query(collection(db, "posts"), where("postType", "==", "reel"),    orderBy("createdAt", "desc"), limit(20));
           const snap = await getDocs(q);
           if (cancelled) return;
           const rest = rankByRelevance(
             snap.docs
               .map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">) }))
-              .filter((p) => p.id !== params.postId && (p as any).status !== "rejected")
+              .filter((p) => p.id !== params.postId && isPubliclyVisible(p as any))
           );
           setReels((prev) => {
             const pinned = prev[0];
@@ -797,14 +837,19 @@ export default function Reels() {
 
         // ── SKILL BATTLE feed — posts only, deliberately not mixed with
         // admin short reels; this filter means "just skill battle" ──
+        // SECURITY FIX: status=="approved" is now an actual query
+        // constraint (see isPubliclyVisible's header above), not just a
+        // post-fetch filter — a pending/in-review Skill Battle post can
+        // no longer reach this feed regardless of what the client does
+        // with the results afterward.
         if (isSkillBattleFilter) {
-          const q = query(collection(db, "posts"), where("isSkillBattle", "==", true), orderBy("createdAt", "desc"), limit(20));
+          const q = query(collection(db, "posts"), where("isSkillBattle", "==", true), where("status", "==", "approved"), orderBy("createdAt", "desc"), limit(20));
           const snap = await getDocs(q);
           if (cancelled) return;
           const data = rankByRelevance(
             snap.docs
               .map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">), isShortReel: false }))
-              .filter((p) => (p as any).status !== "rejected")
+              .filter((p) => isPubliclyVisible(p as any))
           );
           setReels(data);
           return;
@@ -813,21 +858,37 @@ export default function Reels() {
         // ── DEFAULT LANDING FEED — creator posts + admin short reels,
         // merged and ranked together (bug report — "reels tab should mix
         // creator shorts and short reels one by one, not creator shorts
-        // only"). FIX 2 still applies to the posts side: no
-        // status=="approved" filter, since posts never get approved —
-        // only explicitly rejected posts are filtered out.
-        const [postsSnap, shortReelsSnap] = await Promise.all([
+        // only"). Non-Skill-Battle "reel" posts keep their existing,
+        // unchanged publication model — no approval flow for them, only
+        // explicitly rejected posts are filtered out (out of scope for
+        // this fix — see isPubliclyVisible's header).
+        //
+        // SECURITY FIX: this branch's general "reel" query used to also
+        // pull in Skill Battle posts (they carry postType=="reel" too)
+        // filtered only by the same lenient !="rejected" rule, so an
+        // unapproved Skill Battle video leaked into this DEFAULT feed
+        // even when the dedicated isSkillBattleFilter branch above was
+        // already fixed. Fixed the same way getReelsFeed/the dedicated
+        // branch above do it: Skill Battle posts are fetched from their
+        // OWN query with status=="approved" as an actual constraint, and
+        // explicitly excluded from the general population so a pending
+        // one can never sneak in from that side either.
+        const [postsSnap, battlePostsSnap, shortReelsSnap] = await Promise.all([
           getDocs(query(collection(db, "posts"), where("postType", "==", "reel"), orderBy("createdAt", "desc"), limit(20))),
+          getDocs(query(collection(db, "posts"), where("isSkillBattle", "==", true), where("status", "==", "approved"), orderBy("createdAt", "desc"), limit(20))),
           getDocs(query(collection(db, "short_reels"), where("status", "==", "active"), orderBy("createdAt", "desc"), limit(20))),
         ]);
         if (cancelled) return;
         const postsData = postsSnap.docs
           .map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">), isShortReel: false }))
-          .filter((p) => (p as any).status !== "rejected");
+          .filter((p) => (p as any).isSkillBattle !== true && (p as any).status !== "rejected");
+        const battlePostsData = battlePostsSnap.docs
+          .map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">), isShortReel: false }))
+          .filter((p) => isPubliclyVisible(p as any)); // redundant with the query above — defense in depth
         const shortReelsData = shortReelsSnap.docs
           .map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">), isShortReel: true }))
           .filter((p) => matchesClassFilter(p, viewerProfileRef.current?.class));
-        const data = pinNewestShortReel(rankByRelevance([...postsData, ...shortReelsData]));
+        const data = pinNewestShortReel(rankByRelevance([...postsData, ...battlePostsData, ...shortReelsData]));
         setReels(data);
       } catch (e) {
         console.log("[Reels] loadReels error:", e);
@@ -1023,6 +1084,7 @@ export default function Reels() {
 }
 
 const styles = StyleSheet.create({
+  moreMenuWrap:   { position: "absolute", right: 16, zIndex: 5 },
   ownStatusBar:   { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 10 },
   ownStatusIcon:  { fontSize: 22 },
   ownStatusInfo:  { flex: 1 },
