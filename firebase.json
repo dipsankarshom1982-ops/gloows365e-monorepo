@@ -10,7 +10,7 @@
       "predeploy": [
         "cd \"$RESOURCE_DIR\" && npm install",
         "npm --prefix \"$RESOURCE_DIR\" run build",
-        "node \"$RESOURCE_DIR/lib/index.js\""
+        "node \"$RESOURCE_DIR/scripts/warmDiscovery.js\""
       ],
       "source": "functions-cloudflare"
     }

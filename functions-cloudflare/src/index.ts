@@ -43,18 +43,45 @@
 // There is a SECOND predeploy step for the same underlying reason this
 // codebase exists: right after a fresh `npm install`+`tsc` build, the
 // newly-written node_modules/lib files are "cold" from the OS/antivirus's
-// point of view — the very first require() to touch them pays a one-time
-// filesystem-scan tax that, reproduced locally (2026-09) immediately
-// after a real install+build, measured 6-14 SECONDS even for this small,
-// isolated closure — i.e. it can still blow Firebase's ~10s discovery
-// budget on its own, the exact failure mode this codebase was built to
-// avoid, just at a smaller scale. The third predeploy command,
-// `node "$RESOURCE_DIR/lib/index.js"`, deliberately runs (and discards)
-// this exact require() once during predeploy — which has NO fixed
-// timeout — so that tax is already paid by the time Firebase's own,
-// 10-second-budgeted discovery step runs moments later and finds
-// everything already OS-cached (~0.5-0.8s, verified across repeated
-// trials). Do not remove this step to "simplify" predeploy.
+// point of view — the very first load of them pays a one-time filesystem-
+// scan tax that, reproduced locally (2026-09) immediately after a real
+// install+build, measured 6-14 SECONDS — i.e. it can still blow
+// Firebase's ~10s discovery budget on its own, the exact failure mode
+// this codebase was built to avoid, just at a smaller scale.
+//
+// A first version of this step ran a plain `node "$RESOURCE_DIR/lib/index.js"`
+// — that is NOT enough on its own, and shipping it as "fixed" without
+// re-verifying against the real discovery mechanism cost a second failed
+// deploy. A plain require of our own compiled output never touches
+// express or firebase-functions' own internal runtime/bin machinery
+// (runtime/loader.js, runtime/manifest.js, params/index.js,
+// security/roles.js, common/api.js, lifecycle/index.js, its rolldown
+// runtime bundle) — those files are only loaded by firebase-functions'
+// OWN discovery binary (node_modules/firebase-functions/lib/bin/
+// firebase-functions.js), which is what Firebase's real discovery step
+// actually spawns, never by our code directly (confirmed via
+// require.cache inspection: express/runtime-loader are absent after a
+// plain require of lib/index.js). Left cold, that gap alone reproduced
+// 8.5s+ real discovery time even with our own code's files fully warm.
+//
+// The fix, scripts/warmDiscovery.js, runs that SAME real discovery
+// binary once during predeploy (spawn -> poll /__/functions.yaml -> kill)
+// so every file the real, timed discovery step touches is already
+// OS-cached moments later — see that script's own header for the full
+// mechanism. Do not remove this step or revert it to a plain require.
+//
+// HONEST RESIDUAL RISK (2026-09, this exact dev machine): even with this
+// warm-up in place, repeated full clean trials (fresh install+build+
+// warm-up, then a genuinely separate real-discovery-binary spawn) were
+// NOT uniformly fast — most were ~0.5-1.1s, but two independent trials
+// still measured 11.3s and 14.2s, over budget, apparently from residual
+// antivirus/filesystem-scan variance this warm-up step cannot fully
+// eliminate on this machine. This is a real, irreducible-so-far
+// environment cost, not a code defect — recommend also setting the
+// FUNCTIONS_DISCOVERY_TIMEOUT env var (read directly by firebase-tools'
+// discovery/index.js, e.g. `$env:FUNCTIONS_DISCOVERY_TIMEOUT = "30"` in
+// PowerShell before `firebase deploy`) as a safety margin on top of this
+// warm-up, not instead of it.
 
 import * as admin from "firebase-admin";
 
