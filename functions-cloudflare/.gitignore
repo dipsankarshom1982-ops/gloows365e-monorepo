@@ -1,0 +1,5 @@
+# Build output and dependencies for the isolated cloudflare-webhook
+# codebase — never commit either; predeploy regenerates both from source.
+node_modules/
+lib/
+*.tsbuildinfo
