@@ -20,6 +20,41 @@
 // exactly the "must discover everything in this file" cost this codebase
 // was created to avoid, and pulls in whatever new dependency closure that
 // export needs.
+//
+// firebase.json's predeploy for this codebase — DO NOT "simplify" it back
+// to `npm --prefix "$RESOURCE_DIR" install` (verified 2026-09, reproduced
+// against the actual installed firebase-tools): firebase-tools spawns
+// EVERY predeploy command with cwd = the Firebase project root (see
+// deploy/lifecycleHooks.js's runTargetCommands — cwd is always
+// overallOptions.config.projectDir, never $RESOURCE_DIR), not cwd =
+// this directory. Since the project root's own package.json (name
+// "gloows365e-monorepo") is npm's ancestor of this directory, running
+// `npm --prefix "$RESOURCE_DIR" install` from that cwd makes npm silently
+// add "gloows365e-monorepo": "file:.." to THIS package.json/lockfile and
+// symlink the ENTIRE monorepo root into node_modules/gloows365e-monorepo
+// — which is what turned a locally-verified ~0.5s cold require() into a
+// production "Cannot determine backend specification. Timeout after
+// 10000" on the very first real deploy, despite every local test passing.
+// The fix is `cd "$RESOURCE_DIR" && npm install` instead — forces npm's
+// own cwd to actually be this directory, which does not trigger the
+// ancestor-package.json auto-link. Confirmed via firebase-tools' own
+// cross-env-shell wrapper, not just a plain shell `cd`.
+//
+// There is a SECOND predeploy step for the same underlying reason this
+// codebase exists: right after a fresh `npm install`+`tsc` build, the
+// newly-written node_modules/lib files are "cold" from the OS/antivirus's
+// point of view — the very first require() to touch them pays a one-time
+// filesystem-scan tax that, reproduced locally (2026-09) immediately
+// after a real install+build, measured 6-14 SECONDS even for this small,
+// isolated closure — i.e. it can still blow Firebase's ~10s discovery
+// budget on its own, the exact failure mode this codebase was built to
+// avoid, just at a smaller scale. The third predeploy command,
+// `node "$RESOURCE_DIR/lib/index.js"`, deliberately runs (and discards)
+// this exact require() once during predeploy — which has NO fixed
+// timeout — so that tax is already paid by the time Firebase's own,
+// 10-second-budgeted discovery step runs moments later and finds
+// everything already OS-cached (~0.5-0.8s, verified across repeated
+// trials). Do not remove this step to "simplify" predeploy.
 
 import * as admin from "firebase-admin";
 

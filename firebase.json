@@ -8,8 +8,9 @@
     {
       "codebase": "cloudflare-webhook",
       "predeploy": [
-        "npm --prefix \"$RESOURCE_DIR\" install",
-        "npm --prefix \"$RESOURCE_DIR\" run build"
+        "cd \"$RESOURCE_DIR\" && npm install",
+        "npm --prefix \"$RESOURCE_DIR\" run build",
+        "node \"$RESOURCE_DIR/lib/index.js\""
       ],
       "source": "functions-cloudflare"
     }
