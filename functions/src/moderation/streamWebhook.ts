@@ -28,12 +28,46 @@ import { recordModerationAuditEvent } from "./auditLog";
 
 const db = admin.firestore();
 
+// Configurable replay window (seconds) — same envNumber-with-safe-fallback
+// pattern already established elsewhere in this codebase (see
+// decisionEngine.ts's MODERATION_HIGH_THRESHOLD/MODERATION_REVIEW_THRESHOLD)
+// rather than a new configuration mechanism. 300s (5 min) is a
+// conservative default wide enough to absorb normal clock drift and
+// Cloudflare's own delivery/retry latency without meaningfully weakening
+// replay protection. Not documented as a *required* secret — this is a
+// tuning knob, not a credential.
+//
+// Deliberately read PER-CALL, not cached in a module-level constant the
+// way decisionEngine.ts's thresholds are — this value has no cold-start
+// performance reason to be cached (it's one process.env read), and
+// reading it fresh means a redeploy or (in the emulator/tests) an env
+// change always takes effect without relying on module-cache timing.
+function webhookMaxSkewSeconds(): number {
+  const raw = process.env.CLOUDFLARE_STREAM_WEBHOOK_MAX_SKEW_SECONDS;
+  if (!raw) return 300;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 300;
+}
+
 // ── Signature verification (Cloudflare Stream's documented scheme,
 // 2026-09 verified) ─────────────────────────────────────────────────────
 // Header: "Webhook-Signature: time=<unix_seconds>,sig1=<hex_hmac_sha256>"
 // Signed string: `${time}.${rawBody}` (exact bytes, not re-serialized
 // JSON — mirrors mediaOwnership.ts's "verify before ever trusting the
 // payload" posture).
+//
+// FRESHNESS (added alongside the original HMAC check, not a replacement
+// for it — the HMAC remains the primary authentication mechanism; this
+// closes a separate gap: a captured, correctly-signed request replayed
+// well after the fact would otherwise still pass signature verification
+// forever, since Cloudflare's secret doesn't rotate on its own). Rejects
+// a `time` older OR materially newer than WEBHOOK_MAX_SKEW_SECONDS from
+// now — both directions matter: too old is a replay candidate, too far
+// in the future is a forged/clock-abused timestamp. This is intentionally
+// checked only AFTER the HMAC comparison succeeds, so a request with a
+// bad signature is always rejected for the same reason (401) regardless
+// of its timestamp, and never leaks timing information about which check
+// tripped.
 export function verifyStreamWebhookSignature(
   header: string | undefined,
   rawBody: string,
@@ -59,7 +93,14 @@ export function verifyStreamWebhookSignature(
     return false;
   }
   if (expectedBuf.length !== providedBuf.length) return false;
-  return crypto.timingSafeEqual(expectedBuf, providedBuf);
+  if (!crypto.timingSafeEqual(expectedBuf, providedBuf)) return false;
+
+  const timeSeconds = Number(time);
+  if (!Number.isFinite(timeSeconds)) return false;
+  const skew = Math.abs(Date.now() / 1000 - timeSeconds);
+  if (skew > webhookMaxSkewSeconds()) return false;
+
+  return true;
 }
 
 interface StreamWebhookPayload {
@@ -232,6 +273,14 @@ export async function processReadyVideo(
 export const handleCloudflareStreamWebhook = functionsV1
   .runWith({ timeoutSeconds: 60, memory: "256MB", secrets: ["CLOUDFLARE_STREAM_WEBHOOK_SECRET", "CLOUDFLARE_API_TOKEN"] })
   .https.onRequest(async (req, res) => {
+    // Method enforcement — checked BEFORE any body parsing/secret lookup/
+    // signature work, so a non-POST request is rejected as cheaply as
+    // possible and never reaches code that trusts req.rawBody.
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
     const { webhookSigningSecret } = getCloudflareStreamEnvConfig();
     if (!webhookSigningSecret) {
       console.error("handleCloudflareStreamWebhook: CLOUDFLARE_STREAM_WEBHOOK_SECRET not configured — rejecting all requests fail-closed.");

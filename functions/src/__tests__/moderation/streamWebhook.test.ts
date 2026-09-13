@@ -15,14 +15,15 @@ const WEBHOOK_SECRET = "test_stream_webhook_secret";
 const ORIGINAL_ENV = { ...process.env };
 const ORIGINAL_FETCH = global.fetch;
 
-function signedReq(body: unknown, opts: { badSig?: boolean; noSig?: boolean } = {}) {
+function signedReq(body: unknown, opts: { badSig?: boolean; noSig?: boolean; method?: string; ageSeconds?: number } = {}) {
   const rawBody = Buffer.from(JSON.stringify(body));
-  const time = Math.floor(Date.now() / 1000).toString();
+  const time = Math.floor(Date.now() / 1000 - (opts.ageSeconds ?? 0)).toString();
   const sig1 = opts.badSig
     ? "0".repeat(64)
     : crypto.createHmac("sha256", WEBHOOK_SECRET).update(`${time}.${rawBody.toString("utf8")}`).digest("hex");
   const header = opts.noSig ? undefined : `time=${time},sig1=${sig1}`;
   return {
+    method: opts.method ?? "POST",
     rawBody,
     get: (name: string) => (name === "Webhook-Signature" ? header : undefined),
   };
@@ -43,6 +44,68 @@ beforeEach(() => {
 afterAll(() => {
   process.env = ORIGINAL_ENV;
   global.fetch = ORIGINAL_FETCH;
+});
+
+describe("handleCloudflareStreamWebhook — HTTP method enforcement", () => {
+  test("rejects a non-POST request with 405, before any body/signature processing", async () => {
+    const { handleCloudflareStreamWebhook } = require("../../moderation/streamWebhook");
+    const req = signedReq({ uid: "cfuid1" }, { method: "GET" });
+    const res = makeRes();
+    await handleCloudflareStreamWebhook(req as any, res as any);
+    expect(res.status).toHaveBeenCalledWith(405);
+  });
+});
+
+describe("handleCloudflareStreamWebhook — signature freshness (replay protection)", () => {
+  test("rejects an otherwise-validly-signed request whose timestamp is far in the past", async () => {
+    const { handleCloudflareStreamWebhook } = require("../../moderation/streamWebhook");
+    const req = signedReq({ uid: "cfuid1", readyToStream: true, status: { state: "ready" } }, { ageSeconds: 3600 }); // 1 hour old
+    const res = makeRes();
+    await handleCloudflareStreamWebhook(req as any, res as any);
+    expect(res.status).toHaveBeenCalledWith(401);
+  });
+
+  test("rejects a validly-signed request whose timestamp is far in the future", async () => {
+    const { handleCloudflareStreamWebhook } = require("../../moderation/streamWebhook");
+    const req = signedReq({ uid: "cfuid1", readyToStream: true, status: { state: "ready" } }, { ageSeconds: -3600 }); // 1 hour in the future
+    const res = makeRes();
+    await handleCloudflareStreamWebhook(req as any, res as any);
+    expect(res.status).toHaveBeenCalledWith(401);
+  });
+
+  test("accepts a validly-signed request just inside the default 300s window", async () => {
+    fakeDb.seed("submissions/battle_1_student_1", { battleId: "battle_1", streamVideoUid: "cfuid1", status: "PENDING_HUMAN_REVIEW", mediaRef: "https://x/y.m3u8" });
+    const { handleCloudflareStreamWebhook } = require("../../moderation/streamWebhook");
+    const req = signedReq({ uid: "cfuid1", readyToStream: true, status: { state: "ready" } }, { ageSeconds: 200 });
+    const res = makeRes();
+    await handleCloudflareStreamWebhook(req as any, res as any);
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  test("rejects a request just outside the default 300s window", async () => {
+    const { handleCloudflareStreamWebhook } = require("../../moderation/streamWebhook");
+    const req = signedReq({ uid: "cfuid1", readyToStream: true, status: { state: "ready" } }, { ageSeconds: 301 });
+    const res = makeRes();
+    await handleCloudflareStreamWebhook(req as any, res as any);
+    expect(res.status).toHaveBeenCalledWith(401);
+  });
+
+  test("respects CLOUDFLARE_STREAM_WEBHOOK_MAX_SKEW_SECONDS when configured", async () => {
+    // The skew window is read fresh on every call (see
+    // webhookMaxSkewSeconds() in streamWebhook.ts) rather than cached at
+    // module load, precisely so a plain env var change like this one
+    // takes effect immediately — no resetModules()/re-require needed
+    // (and none wanted here: resetModules() would also reset the shared
+    // fakeDb mock singleton this whole file's beforeEach relies on).
+    process.env.CLOUDFLARE_STREAM_WEBHOOK_MAX_SKEW_SECONDS = "60";
+    fakeDb.seed("submissions/battle_1_student_1", { battleId: "battle_1", streamVideoUid: "cfuid1", status: "PENDING_HUMAN_REVIEW", mediaRef: "https://x/y.m3u8" });
+    const { handleCloudflareStreamWebhook } = require("../../moderation/streamWebhook");
+    // 200s old — inside the default 300s window but outside a configured 60s window.
+    const req = signedReq({ uid: "cfuid1", readyToStream: true, status: { state: "ready" } }, { ageSeconds: 200 });
+    const res = makeRes();
+    await handleCloudflareStreamWebhook(req as any, res as any);
+    expect(res.status).toHaveBeenCalledWith(401);
+  });
 });
 
 describe("handleCloudflareStreamWebhook — signature verification (security)", () => {
