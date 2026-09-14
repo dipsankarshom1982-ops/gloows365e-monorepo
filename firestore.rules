@@ -27,9 +27,14 @@ service cloud.firestore {
       // re-verified against current code. studentId/learnScore are
       // deliberately absent, so hasOnly() rejects them outright on create
       // regardless of value.
+      //
+      // 'stream' and 'parentGuardianName' added 2026-09-14 (Class 11/12
+      // stream + parent/guardian name architecture update) — register.tsx
+      // and profile-settings.tsx now write both on create.
       allow create: if request.auth.uid == userId
         && request.resource.data.keys().hasOnly([
           'name', 'title', 'phone', 'school', 'board', 'section', 'class',
+          'stream', 'parentGuardianName',
           'preferredLanguage', 'profilePic', 'parentPhone', 'parentPhoneVerified',
           'parentalConsent', 'dob', 'age', 'location', 'interests', 'stats',
           'learningProfile', 'onboardingComplete', 'createdAt', 'updatedAt',

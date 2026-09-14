@@ -94,6 +94,9 @@ export {
   getTodaysStreakQuizQuestion, submitDailyStreakQuizAnswer,
   applyForAmbassadorProgram, dailyStreakQuizReminder,
 } from "./dailyStreakQuiz";
+export {
+  generateDailyStreakQuizQuestions, regenerateDailyStreakQuizQuestion,
+} from "./dailyStreakQuizGeneration";
 
 // ── AI Personalized Dashboard ───────────────────────────────────────────────
 export { getPersonalizedDashboard } from "./personalDashboard";
@@ -126,7 +129,7 @@ export { aiGuruCheckoutPage, aiGuruCreateSubscription, aiGuruPaymentSuccess } fr
 export { aggregateAdAnalytics, claimAdReward, getAds, recordAdEvent } from "./ads";
 
 // ── Admin Management ───────────────────────────────────────────────────────────
-export { approveContent, createAdmin, createComboPlan, createCoupon, getUserSubscriptionHistory, removeAdmin } from "./adminManagement";
+export { approveContent, createAdmin, createComboPlan, createCoupon, getUserSubscriptionHistory, removeAdmin, adminUpdateStudentProfile } from "./adminManagement";
 
 // ── Contest Lesson Generation (lazy, per student language) ─────────────────────
 export { getContestLesson } from "./contestLesson";

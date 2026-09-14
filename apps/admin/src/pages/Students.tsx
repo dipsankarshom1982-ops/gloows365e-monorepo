@@ -5,12 +5,23 @@ import { db, functions } from "../lib/firebase";
 import DrawerPanel from "../components/DrawerPanel";
 import StatusBadge from "../components/StatusBadge";
 
+type StudentStream = "Science" | "Commerce" | "Arts/Humanities";
+// Mirrors packages/shared-logic/src/types/student.ts's STUDENT_STREAMS —
+// admin doesn't depend on that mobile/web-only package (see
+// DailyStreakQuiz.tsx for the same local-copy convention).
+const STREAMS: StudentStream[] = ["Science", "Commerce", "Arts/Humanities"];
+const STREAM_CLASSES = ["11", "12"];
+
 interface Student {
   id: string;
   name?: string;
   email?: string;
   phone?: string;
   class?: string;
+  // Class 11/12 only — absent/null for classes 6–10 and for any account
+  // created before the 2026-09-14 stream architecture update.
+  stream?: StudentStream | null;
+  parentGuardianName?: string;
   school?: string;
   createdAt?: { toDate?: () => Date };
   profilePic?: string;
@@ -23,6 +34,10 @@ const getHistoryFn = httpsCallable<{ userId: string }, { subscriptions: Record<s
 const adminEraseStudentFn = httpsCallable<{ uid: string }, { success: boolean }>(
   functions, "adminEraseStudent"
 );
+const adminUpdateStudentProfileFn = httpsCallable<
+  { uid: string; class?: string; stream?: StudentStream | null; parentGuardianName?: string },
+  { success: boolean }
+>(functions, "adminUpdateStudentProfile");
 
 const PAGE = 20;
 // Student IDs are always "GLS" + 6 digits (see functions/src/studentId.ts)
@@ -56,6 +71,16 @@ export default function Students() {
   const [idLookupLoading, setIdLookupLoading] = useState(false);
 
   const [deleting, setDeleting] = useState(false);
+
+  // Class/Stream/Parent-Guardian-Name correction — the only student fields
+  // admin can edit today. Routed through adminUpdateStudentProfile since
+  // students/{uid} has no admin write bypass in firestore.rules (by design
+  // — see that function's header comment).
+  const [editClass,     setEditClass]     = useState("");
+  const [editStream,    setEditStream]    = useState<StudentStream | "">("");
+  const [editParent,    setEditParent]    = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError,  setProfileError]  = useState("");
 
   const loadPage = async (after?: QueryDocumentSnapshot<DocumentData> | null) => {
     setLoading(true);
@@ -96,6 +121,10 @@ export default function Students() {
 
   const openProfile = async (s: Student) => {
     setSelected(s);
+    setEditClass(s.class ?? "");
+    setEditStream(STREAM_CLASSES.includes(s.class ?? "") ? (s.stream ?? "") : "");
+    setEditParent(s.parentGuardianName ?? "");
+    setProfileError("");
     setLH(true);
     setRoleLoading(true);
     try {
@@ -144,6 +173,39 @@ export default function Students() {
         return next;
       });
     } finally { setSavingRole(false); }
+  };
+
+  const editIsStreamClass = STREAM_CLASSES.includes(editClass);
+
+  const saveProfileEdit = async () => {
+    if (!selected) return;
+    if (!editClass) { setProfileError("Class is required."); return; }
+    if (editIsStreamClass && !editStream) { setProfileError("Stream is required for Class 11/12."); return; }
+    if (!editParent.trim()) { setProfileError("Parent/Guardian name is required."); return; }
+
+    setSavingProfile(true);
+    setProfileError("");
+    try {
+      await adminUpdateStudentProfileFn({
+        uid: selected.id,
+        class: editClass,
+        stream: editIsStreamClass ? (editStream as StudentStream) : null,
+        parentGuardianName: editParent.trim(),
+      });
+      const updated: Student = {
+        ...selected,
+        class: editClass,
+        stream: editIsStreamClass ? (editStream as StudentStream) : null,
+        parentGuardianName: editParent.trim(),
+      };
+      setSelected(updated);
+      setStudents((prev) => prev.map((s) => s.id === updated.id ? updated : s));
+      if (idLookupResult?.id === updated.id) setIdLookupResult(updated);
+    } catch (err: any) {
+      setProfileError(err?.message ?? "Failed to save. Please try again.");
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   // Cascading delete of every collection/subcollection keyed to this
@@ -264,7 +326,7 @@ export default function Students() {
                       </div>
                     </div>
                   </td>
-                  <td className="p-4 text-slate-300">{s.class ? `Class ${s.class}` : "—"}</td>
+                  <td className="p-4 text-slate-300">{s.class ? `Class ${s.class}${s.stream ? ` · ${s.stream}` : ""}` : "—"}</td>
                   <td className="p-4 text-slate-400 text-xs max-w-[160px] truncate">{s.school ?? "—"}</td>
                   <td className="p-4 text-slate-400 text-xs">
                     {s.createdAt?.toDate ? s.createdAt.toDate().toLocaleDateString("en-IN") : "—"}
@@ -288,7 +350,8 @@ export default function Students() {
             <div className="grid grid-cols-2 gap-3">
               {[
                 { label: "Student ID", value: selected.studentId ?? "— (not yet assigned)" },
-                { label: "Class", value: selected.class ? `Class ${selected.class}` : "—" },
+                { label: "Class", value: selected.class ? `Class ${selected.class}${selected.stream ? ` · ${selected.stream}` : ""}` : "—" },
+                { label: "Parent/Guardian", value: selected.parentGuardianName ?? "— (not provided)" },
                 { label: "School", value: selected.school ?? "—" },
                 { label: "Phone", value: selected.phone ?? "—" },
                 { label: "UID", value: selected.id },
@@ -298,6 +361,61 @@ export default function Students() {
                   <p className="text-white text-sm font-medium truncate">{value}</p>
                 </div>
               ))}
+            </div>
+
+            {/* Class / Stream / Parent-Guardian-Name correction — the only
+                student fields admin can edit. Routed through
+                adminUpdateStudentProfile (students/{uid} has no admin write
+                bypass in firestore.rules by design). */}
+            <div className="bg-slate-800 rounded-xl p-4 border border-slate-700">
+              <p className="text-slate-300 text-sm font-bold mb-3">✏️ Correct Profile</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-500 text-xs block mb-1">Class</label>
+                  <select
+                    value={editClass}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setEditClass(next);
+                      if (!STREAM_CLASSES.includes(next)) setEditStream("");
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">Select class</option>
+                    {["6", "7", "8", "9", "10", "11", "12"].map((c) => <option key={c} value={c}>Class {c}</option>)}
+                  </select>
+                </div>
+                {editIsStreamClass && (
+                  <div>
+                    <label className="text-slate-500 text-xs block mb-1">Stream</label>
+                    <select
+                      value={editStream}
+                      onChange={(e) => setEditStream(e.target.value as StudentStream)}
+                      className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="">Select stream</option>
+                      {STREAMS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div className={editIsStreamClass ? "col-span-2" : ""}>
+                  <label className="text-slate-500 text-xs block mb-1">Parent/Guardian Name</label>
+                  <input
+                    value={editParent}
+                    onChange={(e) => setEditParent(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm"
+                    placeholder="Parent / Guardian Name"
+                  />
+                </div>
+              </div>
+              {profileError && <p className="text-red-400 text-xs mt-2">{profileError}</p>}
+              <button
+                onClick={saveProfileEdit}
+                disabled={savingProfile}
+                className="w-full mt-3 text-sm font-bold py-2 rounded-lg transition-colors disabled:opacity-50 bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30"
+              >
+                {savingProfile ? "Saving…" : "Save Correction"}
+              </button>
             </div>
 
             <div className="bg-slate-800 rounded-xl p-4 border border-purple-500/20">

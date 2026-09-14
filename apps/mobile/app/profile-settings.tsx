@@ -1,4 +1,5 @@
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
+import { STUDENT_STREAMS, StudentStream } from "@gloows/shared-logic";
 import Header from "@/components/header";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -28,6 +29,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 // ─── Constants ─────────────────────────────────────────────
 const CLASS_OPTIONS: string[] = ["4", "6", "7", "8", "9", "10", "11", "12"];
+const STREAM_CLASSES: string[] = ["11", "12"];
 const BOARDS: string[] = ["CBSE", "ICSE", "State Board", "IB", "IGCSE"];
 const INTEREST_OPTIONS: string[] = ["GK", "Science", "Math", "History", "Geography", "English", "Coding", "Arts"];
 
@@ -40,6 +42,10 @@ interface StudentLocation { area?: string; city?: string; district: string; pinc
 
 interface StudentData extends DocumentData {
   name?: string; phone?: string; school?: string; class?: string | number;
+  // Class 11/12 only — absent/null for classes 6–10 and for any account
+  // created before the 2026-09-14 stream architecture update.
+  stream?: StudentStream | null;
+  parentGuardianName?: string;
   board?: string; age?: number; dob?: string; preferredLanguage?: string;
   profilePic?: string; interests?: string[]; location?: StudentLocation; updatedAt?: string;
 }
@@ -143,6 +149,8 @@ export default function ProfileSettingsScreen() {
   const [phone,            setPhone]            = useState("");
   const [school,           setSchool]           = useState("");
   const [studentClass,     setStudentClass]     = useState("");
+  const [stream,           setStream]           = useState<StudentStream | "">("");
+  const [parentGuardianName, setParentGuardianName] = useState("");
   const [board,            setBoard]            = useState("");
   const [age,              setAge]              = useState("");
   const [dob,              setDob]              = useState("");
@@ -169,6 +177,7 @@ export default function ProfileSettingsScreen() {
 
   const originalPhone = original?.phone ?? "";
   const phoneDirty    = phone.trim() !== originalPhone.trim();
+  const isStreamClass = STREAM_CLASSES.includes(studentClass);
 
   // ─── Fetch profile ───────────────────────────────────────
   useEffect(() => {
@@ -195,6 +204,8 @@ export default function ProfileSettingsScreen() {
     setPhone(d.phone ?? "");
     setSchool(d.school ?? "");
     setStudentClass(d.class !== undefined ? String(d.class) : "");
+    setStream(STREAM_CLASSES.includes(d.class !== undefined ? String(d.class) : "") ? (d.stream ?? "") : "");
+    setParentGuardianName(d.parentGuardianName ?? "");
     setBoard(d.board ?? "");
     setAge(d.age !== undefined ? String(d.age) : "");
     setDob(d.dob ?? "");
@@ -336,12 +347,25 @@ export default function ProfileSettingsScreen() {
 
       const updatePayload: StudentData = {
         name: name.trim(), phone: phone.trim(), school: school.trim(),
-        class: studentClass.trim(), board: board.trim(),
+        class: studentClass.trim(),
+        stream: isStreamClass ? (stream || null) : null,
+        board: board.trim(),
         age: age ? parseInt(age, 10) : undefined,
         dob: dob.trim(), preferredLanguage, profilePic: finalPhotoURL, interests,
         location: { area: area.trim(), district: district.trim(), pincode: pincode.trim(), state: stateVal.trim() },
         updatedAt: new Date().toISOString(),
       };
+      // Firestore's updateDoc throws on an `undefined` field value (no
+      // ignoreUndefinedProperties set for this app's db instance) — unlike
+      // stream/class above, parentGuardianName can legitimately be blank
+      // for a student who hasn't filled it in yet, and leaving it blank
+      // must never block saving unrelated edits (see this screen's header:
+      // existing students are never forced to complete it). Key omitted
+      // entirely rather than set to "" so an already-saved name is never
+      // silently blanked out by an unrelated edit.
+      if (parentGuardianName.trim()) {
+        updatePayload.parentGuardianName = parentGuardianName.trim();
+      }
 
       await updateDoc(doc(db, "students", uid), updatePayload);
       setProfilePic(finalPhotoURL);
@@ -575,6 +599,9 @@ export default function ProfileSettingsScreen() {
             <Field label="Age" icon="hourglass-outline" value={age} onChangeText={setAge}
               placeholder="Enter age" keyboardType="numeric" autoCapitalize="none"
               isEditing={isEditing} colors={colors as ThemeColors} />
+            <Field label="Parent / Guardian Name" icon="people-outline" value={parentGuardianName}
+              onChangeText={(t) => setParentGuardianName(t.slice(0, 60))}
+              placeholder="Enter parent/guardian name" isEditing={isEditing} colors={colors as ThemeColors} />
 
             <SectionTitle icon="📚" label={t("academicDetails")} colors={colors as ThemeColors} />
             <Field label="School / Institution" icon="business-outline" value={school} onChangeText={setSchool}
@@ -582,8 +609,21 @@ export default function ProfileSettingsScreen() {
 
             <ChipRow label="Class / Grade" options={CLASS_OPTIONS}
               selected={studentClass ? [studentClass] : []}
-              onToggle={(opt) => { if (isEditing) setStudentClass(opt === studentClass ? "" : opt); }}
+              onToggle={(opt) => {
+                if (!isEditing) return;
+                const next = opt === studentClass ? "" : opt;
+                setStudentClass(next);
+                // Stream only ever applies to Class 11/12 — moving away
+                // from those must never leave a stale stream attached.
+                if (!STREAM_CLASSES.includes(next)) setStream("");
+              }}
               isEditing={isEditing} colors={colors as ThemeColors} />
+            {isStreamClass && (
+              <ChipRow label="Stream" options={STUDENT_STREAMS as unknown as string[]}
+                selected={stream ? [stream] : []}
+                onToggle={(opt) => { if (isEditing) setStream(opt === stream ? "" : opt as StudentStream); }}
+                isEditing={isEditing} colors={colors as ThemeColors} />
+            )}
             <ChipRow label="Board" options={BOARDS}
               selected={board ? [board] : []}
               onToggle={(opt) => { if (isEditing) setBoard(opt === board ? "" : opt); }}

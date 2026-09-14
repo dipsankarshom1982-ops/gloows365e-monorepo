@@ -15,9 +15,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   collection, getDocs, addDoc, doc, updateDoc, deleteDoc,
-  serverTimestamp, query, orderBy, collectionGroup,
+  serverTimestamp, query, orderBy, collectionGroup, where,
 } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import DrawerForm from "../components/DrawerForm";
@@ -35,6 +36,9 @@ import {
 interface Question {
   id: string;
   class: number;
+  // Class 11/12 only — null for classes 6–10 and for legacy questions
+  // authored before the 2026-09-14 stream architecture update.
+  stream?: StudentStream | null;
   language: string;
   subject: string;
   question: string;
@@ -48,6 +52,15 @@ interface Question {
   status: "active" | "inactive";
   createdBy?: string;
   createdAt?: any;
+  // ── AI generation metadata — absent on every admin-hand-authored
+  // question, set only by dailyStreakQuizGeneration.ts ──────────────────
+  topic?: string;
+  difficulty?: "easy" | "medium" | "hard";
+  generatedBy?: "ai" | "admin";
+  generationStatus?: "pending" | "generating" | "success" | "failed";
+  validationStatus?: "validated" | "failed";
+  generationAttempts?: number;
+  generatedAt?: any;
 }
 
 interface DayRecord {
@@ -59,6 +72,12 @@ interface DayRecord {
 }
 
 const CLASSES = [6, 7, 8, 9, 10, 11, 12];
+const STREAM_CLASSES = [11, 12];
+type StudentStream = "Science" | "Commerce" | "Arts/Humanities";
+// Mirrors packages/shared-logic/src/types/student.ts's STUDENT_STREAMS —
+// admin doesn't depend on that mobile/web-only package, so this is
+// intentionally a local copy (same convention as CLASSES/SUBJECTS below).
+const STREAMS: StudentStream[] = ["Science", "Commerce", "Arts/Humanities"];
 const LANGUAGES = [
   "English", "Hindi", "Assamese", "Bengali", "Bodo", "Dogri", "Gujarati",
   "Kannada", "Kashmiri", "Konkani", "Maithili", "Malayalam", "Manipuri",
@@ -69,6 +88,7 @@ const SUBJECTS = ["General Knowledge", "Mathematics", "Science", "English", "Soc
 
 const EMPTY_Q = {
   class: 8,
+  stream: null as StudentStream | null,
   language: "English",
   subject: "General Knowledge",
   question: "",
@@ -86,7 +106,7 @@ const inputCls = "w-full bg-slate-800 border border-slate-700 text-white rounded
 const labelCls = "text-slate-300 text-sm font-semibold block mb-1.5";
 
 export default function DailyStreakQuiz() {
-  const [tab, setTab] = useState<"questions" | "analytics">("questions");
+  const [tab, setTab] = useState<"questions" | "analytics" | "generation">("questions");
 
   return (
     <div className="space-y-6">
@@ -108,10 +128,16 @@ export default function DailyStreakQuiz() {
           >
             📊 Analytics
           </button>
+          <button
+            onClick={() => setTab("generation")}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${tab === "generation" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+          >
+            🤖 Generation
+          </button>
         </div>
       </div>
 
-      {tab === "questions" ? <QuestionsTab /> : <AnalyticsTab />}
+      {tab === "questions" ? <QuestionsTab /> : tab === "analytics" ? <AnalyticsTab /> : <GenerationTab />}
     </div>
   );
 }
@@ -166,7 +192,8 @@ function QuestionsTab() {
   const openEdit = (q: Question) => {
     setEditingId(q.id);
     setForm({
-      class: q.class, language: q.language, subject: q.subject,
+      class: q.class, stream: STREAM_CLASSES.includes(q.class) ? (q.stream ?? null) : null,
+      language: q.language, subject: q.subject,
       question: q.question, optionA: q.optionA, optionB: q.optionB,
       optionC: q.optionC, optionD: q.optionD, correctOption: q.correctOption,
       explanation: q.explanation, publishDate: q.publishDate, status: q.status,
@@ -174,25 +201,33 @@ function QuestionsTab() {
     setDrawer(true);
   };
 
+  const isStreamClass = STREAM_CLASSES.includes(Number(form.class));
+
   const isValid = form.question.trim() && form.optionA.trim() && form.optionB.trim() &&
-    form.optionC.trim() && form.optionD.trim() && form.publishDate;
+    form.optionC.trim() && form.optionD.trim() && form.publishDate &&
+    (!isStreamClass || !!form.stream);
 
   const save = async () => {
     if (!isValid) return;
     setSaving(true);
     try {
+      // Stream only ever travels with a Class 11/12 doc — force it null for
+      // every other class regardless of what the form state happens to
+      // hold (defensive: the Class select's onChange already clears it,
+      // this is the last line of defense before it reaches Firestore).
+      const payload = { ...form, class: Number(form.class), stream: isStreamClass ? form.stream : null };
       if (editingId) {
         await updateDoc(doc(db, "dailyStreakQuizQuestions", editingId), {
-          ...form, class: Number(form.class), updatedAt: serverTimestamp(),
+          ...payload, updatedAt: serverTimestamp(),
         });
-        setQuestions((prev) => prev.map((q) => q.id === editingId ? { ...q, ...form, class: Number(form.class) } : q));
+        setQuestions((prev) => prev.map((q) => q.id === editingId ? { ...q, ...payload } : q));
       } else {
         const ref = await addDoc(collection(db, "dailyStreakQuizQuestions"), {
-          ...form, class: Number(form.class),
+          ...payload,
           createdBy: user?.uid ?? "admin",
           createdAt: serverTimestamp(),
         });
-        setQuestions((prev) => [{ id: ref.id, ...form, class: Number(form.class) }, ...prev]);
+        setQuestions((prev) => [{ id: ref.id, ...payload }, ...prev]);
       }
       setDrawer(false);
       setForm(EMPTY_Q);
@@ -263,7 +298,7 @@ function QuestionsTab() {
                   className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors"
                 >
                   <td className="p-4 text-white font-medium max-w-[280px] truncate">{q.question}</td>
-                  <td className="p-4 text-slate-300">Class {q.class}</td>
+                  <td className="p-4 text-slate-300">Class {q.class}{q.stream ? ` · ${q.stream}` : ""}</td>
                   <td className="p-4 text-slate-300">{q.language}</td>
                   <td className="p-4 text-slate-300">{q.subject}</td>
                   <td className="p-4 text-slate-300 tabular-nums">{q.publishDate}</td>
@@ -301,7 +336,14 @@ function QuestionsTab() {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>Class</label>
-            <select value={form.class} onChange={(e) => setForm((f) => ({ ...f, class: Number(e.target.value) }))} className={inputCls}>
+            <select
+              value={form.class}
+              onChange={(e) => {
+                const nextClass = Number(e.target.value);
+                setForm((f) => ({ ...f, class: nextClass, stream: STREAM_CLASSES.includes(nextClass) ? f.stream : null }));
+              }}
+              className={inputCls}
+            >
               {CLASSES.map((c) => <option key={c} value={c}>Class {c}</option>)}
             </select>
           </div>
@@ -312,6 +354,24 @@ function QuestionsTab() {
             </select>
           </div>
         </div>
+
+        {isStreamClass && (
+          <div>
+            <label className={labelCls}>Stream *</label>
+            <div className="flex gap-2">
+              {STREAMS.map((s) => (
+                <button
+                  key={s} type="button"
+                  onClick={() => setForm((f) => ({ ...f, stream: s }))}
+                  className={`flex-1 px-3 py-2 rounded-xl text-sm font-bold border transition-colors ${form.stream === s ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-700 text-slate-300 hover:border-slate-500"}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <p className="text-slate-500 text-xs -mt-2">
           Write the question in English — Gemini automatically translates it into each student's
           preferred language the first time someone in that language sees it, same as VidyaStar lessons.
@@ -385,7 +445,7 @@ function QuestionsTab() {
                 <p className="text-slate-400 text-xs mt-4">💡 {previewing.explanation}</p>
               )}
               <div className="flex gap-2 mt-4 text-xs text-slate-500">
-                <span>Class {previewing.class}</span>·<span>{previewing.language}</span>·<span>{previewing.publishDate}</span>
+                <span>Class {previewing.class}{previewing.stream ? ` (${previewing.stream})` : ""}</span>·<span>{previewing.language}</span>·<span>{previewing.publishDate}</span>
                 <StatusBadge label={previewing.status} variant={previewing.status === "active" ? "success" : "default"} />
               </div>
             </motion.div>
@@ -514,6 +574,186 @@ function AnalyticsTab() {
           "Weekly Completion Rate" = students currently mid-streak (weeklyProgress &gt; 0) ÷ all students who have ever submitted at least once.
         </p>
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════ GENERATION TAB ═══════════════════════════════
+// Status view over the AI pipeline in functions/src/dailyStreakQuizGeneration.ts
+// — shows today's + tomorrow's question per class and lets an admin force a
+// regenerate. Manual regeneration is optional; the scheduler
+// (generateDailyStreakQuizQuestions) keeps this filled in on its own.
+
+const regenerateFn = httpsCallable<{ class: number; date: string; stream?: StudentStream | null }, { success: boolean; status: string }>(
+  functions, "regenerateDailyStreakQuizQuestion"
+);
+
+// The 11 daily slots — 5 non-stream classes + (Class 11 × 3 streams) +
+// (Class 12 × 3 streams) — mirrors dailyStreakQuizGeneration.ts's
+// buildDailySlots() exactly.
+interface Slot { class: number; stream: StudentStream | null; }
+function buildDailySlots(): Slot[] {
+  const slots: Slot[] = CLASSES.filter((c) => !STREAM_CLASSES.includes(c)).map((c) => ({ class: c, stream: null }));
+  for (const c of STREAM_CLASSES) {
+    for (const s of STREAMS) slots.push({ class: c, stream: s });
+  }
+  return slots;
+}
+const DAILY_SLOTS = buildDailySlots();
+
+function todayIST(): string {
+  const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+  return new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function tomorrowIST(): string {
+  const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+  return new Date(Date.now() + IST_OFFSET_MS + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function GenerationTab() {
+  const [loading, setLoading] = useState(true);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [regenerating, setRegenerating] = useState<string | null>(null); // `${date}_${class}`
+  const [rowError, setRowError] = useState<Record<string, string>>({});
+
+  const today = useMemo(() => todayIST(), []);
+  const tomorrow = useMemo(() => tomorrowIST(), []);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(
+        collection(db, "dailyStreakQuizQuestions"),
+        where("publishDate", ">=", today),
+        where("publishDate", "<=", tomorrow),
+      ));
+      setQuestions(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Question)));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keyed by class+stream (not just class) — Class 11 Science and Class 11
+  // Commerce are different slots and must never collapse into one row.
+  // Legacy stream-less questions for a stream-class (authored before this
+  // architecture update) fall under the `-` stream key and simply won't
+  // match any of the 3 current-day slot rows — same "don't touch, don't
+  // crash" treatment the backend gives them.
+  const byDateAndSlot = useMemo(() => {
+    const map: Record<string, Question | undefined> = {};
+    questions
+      // Prefer the active doc when a slot somehow has more than one
+      // (e.g. an admin doc alongside an AI doc mid-regeneration).
+      .sort((a, b) => (a.status === "active" ? -1 : 1) - (b.status === "active" ? -1 : 1))
+      .forEach((q) => {
+        const key = `${q.publishDate}_${q.class}_${q.stream ?? "-"}`;
+        if (!map[key]) map[key] = q;
+      });
+    return map;
+  }, [questions]);
+
+  const regenerate = async (date: string, slot: Slot) => {
+    const key = `${date}_${slot.class}_${slot.stream ?? "-"}`;
+    setRegenerating(key);
+    setRowError((e) => ({ ...e, [key]: "" }));
+    try {
+      await regenerateFn({ class: slot.class, date, stream: slot.stream });
+      await load();
+    } catch (err: any) {
+      setRowError((e) => ({ ...e, [key]: err?.message ?? "Regeneration failed" }));
+    } finally {
+      setRegenerating(null);
+    }
+  };
+
+  function statusBadge(q: Question | undefined) {
+    if (!q) return <StatusBadge label="Not generated yet" variant="default" />;
+    if (q.generationStatus === "failed") return <StatusBadge label="Generation failed" variant="error" />;
+    if (q.generationStatus === "generating") return <StatusBadge label="Generating…" variant="warning" />;
+    if (q.status === "active") return <StatusBadge label="Published" variant="success" />;
+    return <StatusBadge label="Inactive" variant="default" />;
+  }
+
+  function validationBadge(q: Question | undefined) {
+    if (!q || !q.generatedBy) return null; // admin-authored — no AI validation to show
+    if (q.validationStatus === "validated") return <StatusBadge label="Validated" variant="success" />;
+    if (q.validationStatus === "failed") return <StatusBadge label="Validation failed" variant="error" />;
+    return null;
+  }
+
+  if (loading) return <div className="text-slate-400 py-12 text-center">Loading…</div>;
+
+  return (
+    <div className="space-y-8">
+      {[{ label: "Today", date: today }, { label: "Tomorrow", date: tomorrow }].map(({ label, date }) => (
+        <div key={date} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+          <div className="p-4 border-b border-slate-800 flex items-center gap-3">
+            <h2 className="text-white font-bold">{label}</h2>
+            <span className="text-slate-500 text-sm tabular-nums">{date}</span>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-800 text-slate-400 text-xs uppercase">
+                <th className="text-left p-4">Class / Stream</th>
+                <th className="text-left p-4">Subject / Topic</th>
+                <th className="text-left p-4">Source</th>
+                <th className="text-left p-4">Status</th>
+                <th className="text-left p-4">Validation</th>
+                <th className="text-left p-4">Generated At</th>
+                <th className="text-right p-4">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {DAILY_SLOTS.map((slot) => {
+                const key = `${date}_${slot.class}_${slot.stream ?? "-"}`;
+                const q = byDateAndSlot[key];
+                const isBusy = regenerating === key;
+                const generatedAt = q?.generatedAt?.toDate?.() ?? null;
+                return (
+                  <tr key={key} className="border-b border-slate-800/50">
+                    <td className="p-4 text-white font-semibold">
+                      Class {slot.class}{slot.stream ? <span className="text-indigo-400"> · {slot.stream}</span> : null}
+                    </td>
+                    <td className="p-4 text-slate-300 max-w-[260px] truncate">
+                      {q ? `${q.subject}${q.topic ? ` — ${q.topic}` : ""}` : "—"}
+                    </td>
+                    <td className="p-4 text-slate-300">
+                      {q?.generatedBy === "ai" ? "🤖 AI" : q ? "🧑‍💼 Admin" : "—"}
+                    </td>
+                    <td className="p-4">{statusBadge(q)}</td>
+                    <td className="p-4">{validationBadge(q) ?? <span className="text-slate-600">—</span>}</td>
+                    <td className="p-4 text-slate-400 tabular-nums">
+                      {generatedAt ? generatedAt.toLocaleString() : "—"}
+                    </td>
+                    <td className="p-4 text-right">
+                      <button
+                        onClick={() => regenerate(date, slot)}
+                        disabled={isBusy}
+                        className="text-indigo-400 hover:text-indigo-300 disabled:opacity-50 text-xs font-bold"
+                      >
+                        {isBusy ? "Regenerating…" : "Regenerate"}
+                      </button>
+                      {rowError[key] && (
+                        <p className="text-red-400 text-xs mt-1 max-w-[180px] ml-auto">{rowError[key]}</p>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ))}
+      <p className="text-slate-500 text-xs">
+        Questions are generated automatically every day (~20:30 IST) with a 2-day buffer — manual regeneration is
+        only needed if you want to force a specific question to change.
+      </p>
     </div>
   );
 }

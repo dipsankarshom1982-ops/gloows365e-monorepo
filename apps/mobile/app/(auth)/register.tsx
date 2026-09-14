@@ -26,6 +26,7 @@ if (Platform.OS !== "web") {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
+import { STUDENT_STREAMS, StudentStream } from "@gloows/shared-logic";
 import { auth, db, firebaseConfig, functions } from "@/lib/firebase";
 import { ensureReferralCode } from "@/lib/initUser";
 import { ensureStudentId } from "@/services/studentIdService";
@@ -181,6 +182,8 @@ export default function StudentRegister() {
   const [board,             setBoard]             = useState("");
   const [section,           setSection]           = useState("");
   const [studentClass,      setStudentClass]      = useState("");
+  const [stream,            setStream]            = useState<StudentStream | "">("");
+  const [parentGuardianName, setParentGuardianName] = useState("");
   const [preferredLanguage, setPreferredLanguage] = useState("");
   const [profilePic,        setProfilePic]        = useState<string | null>(null);
 
@@ -217,6 +220,8 @@ export default function StudentRegister() {
 
   const boards       = ["CBSE", "ICSE", "State Board", "Other"];
   const classOptions = ["6", "7", "8", "9", "10", "11", "12"];
+  const streamClasses = ["11", "12"];
+  const isStreamClass = streamClasses.includes(studentClass);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -346,9 +351,10 @@ export default function StudentRegister() {
   // ── Validation (for normal student path only) ─────────────────────────────
 
   const validate = () => {
-    if (!name || !title || !phone || !pincode || !school || !board || !dob || !studentClass || !preferredLanguage) {
+    if (!name || !title || !phone || !pincode || !school || !board || !dob || !studentClass || !preferredLanguage || !parentGuardianName.trim()) {
       return "Please fill all required fields";
     }
+    if (isStreamClass && !stream)              return "Please select your stream";
     if (!/^[6-9]\d{9}$/.test(phone))         return "Invalid parent phone number";
     if (!parentPhoneVerified)                  return "Please verify parent phone number";
     if (!parentalConsent)                      return "Parent/guardian consent is required to continue";
@@ -416,7 +422,10 @@ export default function StudentRegister() {
 
       await setDoc(doc(db, "students", user.uid), {
         name, title, phone, school, board, section,
-        class: studentClass, preferredLanguage,
+        class: studentClass,
+        stream: isStreamClass ? (stream || null) : null,
+        parentGuardianName: parentGuardianName.trim(),
+        preferredLanguage,
         profilePic: profilePicUrl,
         parentPhone: phone,
         parentPhoneVerified: true,
@@ -751,12 +760,41 @@ export default function StudentRegister() {
             {classOptions.map((c) => (
               <TouchableOpacity
                 key={c} style={[S.chip, studentClass === c && S.active]}
-                onPress={() => setStudentClass(c)}
+                onPress={() => {
+                  setStudentClass(c);
+                  // Stream only ever applies to Class 11/12 — moving away
+                  // from those must never leave a stale stream attached.
+                  if (!streamClasses.includes(c)) setStream("");
+                }}
               >
                 <Text style={S.chipText}>{c}</Text>
               </TouchableOpacity>
             ))}
           </View>
+
+          {/* Stream — Class 11/12 only */}
+          {isStreamClass && (
+            <>
+              <Text style={S.label}>Select Stream *</Text>
+              <View style={S.row}>
+                {STUDENT_STREAMS.map((s) => (
+                  <TouchableOpacity
+                    key={s} style={[S.chip, stream === s && S.active]}
+                    onPress={() => setStream(s)}
+                  >
+                    <Text style={S.chipText}>{s}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* Parent / Guardian Name */}
+          <TextInput
+            style={S.input} placeholder="Parent / Guardian Name *"
+            placeholderTextColor="#aaa" value={parentGuardianName}
+            onChangeText={(t) => setParentGuardianName(t.slice(0, 60))}
+          />
 
           {/* Language */}
           <Text style={S.label}>Preferred Language *</Text>

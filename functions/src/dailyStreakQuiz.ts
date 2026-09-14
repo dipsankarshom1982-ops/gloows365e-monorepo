@@ -40,6 +40,11 @@ type Option = "A" | "B" | "C" | "D";
 
 interface QuestionDoc {
   class: number;
+  // Class 11/12 only — null for classes 6–10 and for legacy questions
+  // authored before the 2026-09-14 stream architecture update (field
+  // absent entirely on those docs; every read below treats "absent" and
+  // "null" identically — see dailyStreakQuizGeneration.ts's header).
+  stream?: string | null;
   language: string;
   subject: string;
   question: string;
@@ -51,6 +56,18 @@ interface QuestionDoc {
   explanation: string;
   publishDate: string;
   status: "active" | "inactive";
+  // ── AI generation metadata (dailyStreakQuizGeneration.ts) ──────────────
+  // Absent/undefined on every question an admin hand-authored through
+  // DailyStreakQuiz.tsx — only AI-generated docs set these. Nothing in
+  // this file reads them; they exist purely for the admin "Generation"
+  // dashboard tab and for ensureQuestionGenerated's own idempotency logic.
+  topic?: string;
+  difficulty?: "easy" | "medium" | "hard";
+  generatedBy?: "ai" | "admin";
+  generationStatus?: "pending" | "generating" | "success" | "failed";
+  validationStatus?: "validated" | "failed";
+  generationAttempts?: number;
+  generatedAt?: admin.firestore.Timestamp;
 }
 
 interface ProgressDoc {
@@ -198,19 +215,31 @@ export const getTodaysStreakQuizQuestion = functionsV1
     }
     const student = studentSnap.data()!;
     const studentClass = Number(student.class ?? 0);
+    const studentStream: string | null = student.stream ?? null;
     const preferredLanguage: string = student.preferredLanguage ?? "English";
     const today = todayIST();
 
     // Canonical question is always authored in English by admin — see the
     // translation section above for how non-English students get it.
-    const snap = await db
+    //
+    // Stream (Class 11/12 only, added 2026-09-14): filtered ONLY when the
+    // student actually has one set — classes 6–10's query here is
+    // byte-for-byte what it was before streams existed. A Class 11/12
+    // student who hasn't picked a stream yet gets NO stream filter at all
+    // (falls through to whatever active question exists for their class —
+    // a legacy stream-less admin question if one exists, otherwise
+    // arbitrarily one of the 3 stream-specific ones) rather than "no quiz
+    // today" — see dailyStreakQuizGeneration.ts's header for why this is
+    // the deliberate, safe fallback instead of guessing a stream.
+    let query = db
       .collection("dailyStreakQuizQuestions")
       .where("status", "==", "active")
       .where("class", "==", studentClass)
       .where("language", "==", "English")
-      .where("publishDate", "==", today)
-      .limit(1)
-      .get();
+      .where("publishDate", "==", today);
+    if (studentStream) query = query.where("stream", "==", studentStream);
+
+    const snap = await query.limit(1).get();
     if (snap.empty) return null;
 
     const questionId = snap.docs[0].id;
@@ -334,10 +363,22 @@ export const submitDailyStreakQuizAnswer = functionsV1
 
       // Re-validate this is genuinely today's question for this student —
       // never trust the client just because it knows a questionId.
+      //
+      // Stream check: reject ONLY when BOTH the question and the student
+      // have a stream set and they disagree. Never rejects when either
+      // side is null — that's the exact fallback case
+      // getTodaysStreakQuizQuestion intentionally serves to a Class 11/12
+      // student who hasn't picked a stream yet, and it must never be
+      // submit-blocked.
+      const questionStream: string | null = question.stream ?? null;
+      const studentStream: string | null = student.stream ?? null;
+      const streamMismatch = questionStream !== null && studentStream !== null && questionStream !== studentStream;
+
       if (
         question.status !== "active" ||
         question.publishDate !== today ||
-        Number(question.class) !== Number(student.class ?? -1)
+        Number(question.class) !== Number(student.class ?? -1) ||
+        streamMismatch
       ) {
         throw new functionsV1.https.HttpsError(
           "failed-precondition",

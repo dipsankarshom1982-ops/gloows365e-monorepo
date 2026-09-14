@@ -259,3 +259,80 @@ export const getUserSubscriptionHistory = onCall(async (request) => {
 
   return { subscriptions };
 });
+
+// ── adminUpdateStudentProfile (2026-09-14, Class 11/12 stream + parent/
+// guardian name architecture update) ────────────────────────────────────
+// students/{uid} has no admin bypass in firestore.rules (only read) — every
+// other admin mutation of user-owned data in this codebase goes through a
+// Cloud Function for exactly that reason, and this is that path for
+// apps/admin/src/pages/Students.tsx's Class/Stream/Parent-Guardian-Name
+// correction UI. Deliberately narrow: only ever touches these three fields,
+// never anything a student earns/accrues (XP, streak, V-Coins all live
+// elsewhere and this function doesn't import/touch them at all).
+const STUDENT_CLASSES = [6, 7, 8, 9, 10, 11, 12];
+const STUDENT_STREAM_CLASSES = [11, 12];
+const STUDENT_STREAMS = ["Science", "Commerce", "Arts/Humanities"];
+
+export const adminUpdateStudentProfile = onCall(async (request) => {
+  if (!request.auth?.token?.admin) {
+    throw new HttpsError("permission-denied", "Admins only.");
+  }
+
+  const { uid, class: rawClass, stream, parentGuardianName } = request.data as {
+    uid: string;
+    class?: number | string;
+    stream?: string | null;
+    parentGuardianName?: string;
+  };
+  if (!uid) throw new HttpsError("invalid-argument", "uid is required.");
+
+  const db = admin.firestore();
+  const studentRef = db.doc(`students/${uid}`);
+
+  const updates: Record<string, unknown> = {};
+
+  if (rawClass !== undefined) {
+    const cls = Number(rawClass);
+    if (!STUDENT_CLASSES.includes(cls)) {
+      throw new HttpsError("invalid-argument", "class must be one of 6–12.");
+    }
+    updates.class = String(cls);
+  }
+
+  if (stream !== undefined) {
+    // Whichever class this write ends up with — the one being set in this
+    // same call takes priority over whatever's already stored, since both
+    // might change together (e.g. correcting "Class 10, no stream" to
+    // "Class 11, Science" in one save).
+    const effectiveClass = rawClass !== undefined
+      ? Number(rawClass)
+      : Number((await studentRef.get()).data()?.class ?? 0);
+
+    if (STUDENT_STREAM_CLASSES.includes(effectiveClass)) {
+      if (!stream || !STUDENT_STREAMS.includes(stream)) {
+        throw new HttpsError("invalid-argument", "Class 11/12 requires a valid stream (Science, Commerce, or Arts/Humanities).");
+      }
+      updates.stream = stream;
+    } else {
+      if (stream) {
+        throw new HttpsError("invalid-argument", "Only Class 11/12 students have a stream.");
+      }
+      updates.stream = null;
+    }
+  }
+
+  if (parentGuardianName !== undefined) {
+    const trimmed = String(parentGuardianName).trim();
+    if (!trimmed) throw new HttpsError("invalid-argument", "parentGuardianName cannot be empty.");
+    updates.parentGuardianName = trimmed.slice(0, 60);
+  }
+
+  if (Object.keys(updates).length === 0) {
+    throw new HttpsError("invalid-argument", "Nothing to update.");
+  }
+
+  updates.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+  await studentRef.set(updates, { merge: true });
+
+  return { success: true };
+});
