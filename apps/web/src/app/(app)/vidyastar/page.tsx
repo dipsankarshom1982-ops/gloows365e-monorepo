@@ -461,12 +461,25 @@ export default function VidyaStarPage() {
   // contest, and the AI lesson is generated lazily in each viewing
   // student's own preferredLanguage the first time they open it.
   // Hide ended contests never participated in
-  const visible = classFiltered.slice(0, 10).filter((c) => {
-    const end     = getDate(c.endTime ?? c.endDate);
-    const isEnded = end && end < now;
-    const participated = !!joined[c.id] || !!completed[c.id];
-    return !(isEnded && !participated);
-  });
+  //
+  // BUG FIX (contest visible on Home, missing from every VidyaStar hub
+  // chip including "All"): this used to slice(0,10) BEFORE filtering out
+  // ended contests — classFiltered has no ordering (no Firestore orderBy),
+  // so once ended contests + this student's class outnumber 10, the cap
+  // could consume all 10 slots with old ended contests and drop an
+  // active/upcoming one before it ever reached a chip filter. Home
+  // (VidyaStarPreviewSection) never had this bug — it already filters out
+  // ended contests, then sorts, then slices. Filtering first here too
+  // (matching Home's order) means the cap only ever discards contests
+  // that were already going to be hidden.
+  const visible = classFiltered
+    .filter((c) => {
+      const end     = getDate(c.endTime ?? c.endDate);
+      const isEnded = end && end < now;
+      const participated = !!joined[c.id] || !!completed[c.id];
+      return !(isEnded && !participated);
+    })
+    .slice(0, 10);
 
   const live     = visible.filter((c) => { const s = getDate(c.startTime ?? c.startDate); const e = getDate(c.endTime ?? c.endDate); return s && e && s <= now && now <= e; });
   // Excludes contests the student has already completed (mirrors mobile's
