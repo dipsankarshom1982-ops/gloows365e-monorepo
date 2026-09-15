@@ -14,6 +14,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { callGeminiWithAudio, callGeminiText, parseJsonFromResponse } from "./gemini";
 import { getRedis, todayIST, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
+import { tryDebitAiGuruCredit, refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { resolveStudentLanguage, getDetectOrFallbackInstruction } from "./aiLanguage";
 
 const db = admin.firestore();
@@ -136,6 +137,9 @@ export const voiceTutorAnswer = onRequest(
     const preferredLanguage = await resolveStudentLanguage(uid, db, detectedLanguage);
 
     // ── Rate limit check ────────────────────────────────────────────────────
+    // creditTxId declared outside this try so the Gemini-call catch further
+    // down can refund it if the request fails after this point.
+    let creditTxId: string | null = null;
     try {
       const { isPremium } = await getSubscription(uid, db);
       const dailyLimit = isPremium ? PREMIUM_VOICE_DAILY : FREE_VOICE_DAILY;
@@ -145,14 +149,33 @@ export const voiceTutorAnswer = onRequest(
       try { const c = await getRedis().get<number>(key); used = c ?? 0; } catch {}
 
       if (used >= dailyLimit) {
-        res.status(429).json({
-          error: isPremium
-            ? `Daily voice tutor limit reached (${PREMIUM_VOICE_DAILY}/day).`
-            : `Free tier: ${FREE_VOICE_DAILY} voice questions/day. Upgrade for unlimited.`,
-          code: "LIMIT_REACHED",
-          isPremium,
-        });
-        return;
+        // Premium never pays credits, even at its own generous daily cap.
+        if (isPremium) {
+          res.status(429).json({
+            error: `Daily voice tutor limit reached (${PREMIUM_VOICE_DAILY}/day).`,
+            code: "LIMIT_REACHED",
+            isPremium,
+          });
+          return;
+        }
+
+        const debit = await tryDebitAiGuruCredit(uid, "VOICE_TUTOR", db);
+        if (!debit.ok) {
+          const balance  = debit.reason === "insufficient" ? debit.balance  : 0;
+          const required = debit.reason === "insufficient" ? debit.required : 1;
+          const balanceNote = debit.reason === "insufficient"
+            ? ` You have ${balance} credit${balance === 1 ? "" : "s"} left, need ${required}.`
+            : "";
+          res.status(429).json({
+            error: `Free tier: ${FREE_VOICE_DAILY} voice questions/day.${balanceNote} Buy credits or upgrade to Premium.`,
+            code: "CREDITS_EXHAUSTED",
+            isPremium,
+            creditBalance: balance,
+            creditsRequired: required,
+          });
+          return;
+        }
+        creditTxId = debit.txId;
       }
     } catch {}
 
@@ -193,6 +216,7 @@ export const voiceTutorAnswer = onRequest(
       res.status(200).json(parsed);
     } catch (e: any) {
       console.error("voiceTutorAnswer error:", e);
+      if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "VOICE_TUTOR", db);
       res.status(500).json({ error: e?.message ?? "Failed to process voice question", code: "AI_ERROR" });
     }
   }

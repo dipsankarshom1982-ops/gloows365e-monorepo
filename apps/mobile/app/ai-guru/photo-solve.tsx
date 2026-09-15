@@ -16,10 +16,10 @@ import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 
 import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
+import { auth } from "@/lib/firebase";
 import { solvePhotoQuestion, PhotoSolveSolution } from "@/services/photoSolveApi";
 import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
-
-const FREE_DAILY = 1;
+import CreditBalanceBadge from "@/components/aiGuru/CreditBalanceBadge";
 
 type Phase = "pick" | "solving" | "result" | "limit" | "error";
 
@@ -43,7 +43,7 @@ export default function PhotoSolveScreen() {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [solution, setSolution] = useState<PhotoSolveSolution | null>(null);
   const [errMsg,   setErrMsg]   = useState("");
-  const [remaining, setRemaining] = useState(FREE_DAILY);
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
 
   // ── Pick image ─────────────────────────────────────────────────────────────
   const pickImage = async (source: "camera" | "gallery") => {
@@ -70,9 +70,10 @@ export default function PhotoSolveScreen() {
   };
 
   const solve = async (base64: string, mimeType: string) => {
-    // Client-side gate: once the free quota is used, show the upgrade
-    // screen immediately instead of calling the backend.
-    if (remaining <= 0) { setPhase("limit"); return; }
+    // FIX: this used to hard-block after 1 solve via a client-side
+    // FREE_DAILY=1 constant that didn't match the server's real free limit
+    // (3/day, functions/src/photoSolve.ts) — nobody could ever reach the
+    // credits fallback. Removed; the server is the source of truth.
     setPhase("solving");
     setSolution(null);
     setErrMsg("");
@@ -80,9 +81,12 @@ export default function PhotoSolveScreen() {
       const result = await solvePhotoQuestion({ imageBase64: base64, imageMimeType: mimeType, classLevel, board, language });
       setSolution(result);
       setPhase("result");
-      setRemaining((r) => Math.max(0, r - 1));
     } catch (e: any) {
-      if (e?.code === "LIMIT_REACHED") {
+      if (e?.code === "CREDITS_EXHAUSTED") {
+        setCreditInfo({ balance: e.creditBalance ?? 0, required: e.creditsRequired ?? 1 });
+        setPhase("limit");
+      } else if (e?.code === "LIMIT_REACHED") {
+        setCreditInfo(undefined);
         setPhase("limit");
       } else {
         setErrMsg(e?.message ?? "Something went wrong");
@@ -102,14 +106,7 @@ export default function PhotoSolveScreen() {
         title="📸 PhotoSolve AI"
         subtitle="Snap any question for instant solution"
         showLanguageBadge
-        rightElement={
-          <View style={[S.quotaBadge, { backgroundColor: surface, borderColor: remaining > 0 ? border : "rgba(239,68,68,0.4)" }]}>
-            <View style={[S.quotaDot, { backgroundColor: remaining > 0 ? "#10b981" : "#ef4444" }]} />
-            <Text style={[S.quotaText, { color: remaining > 0 ? "#10b981" : "#ef4444" }]}>
-              {remaining}/{FREE_DAILY}
-            </Text>
-          </View>
-        }
+        rightElement={<CreditBalanceBadge uid={auth.currentUser?.uid ?? null} />}
       />
 
       <ScrollView contentContainerStyle={[S.scroll, { paddingBottom: insets.bottom + 32 }]} showsVerticalScrollIndicator={false}>
@@ -256,14 +253,26 @@ export default function PhotoSolveScreen() {
             <Text style={S.limitEmoji}>⏰</Text>
             <Text style={[S.limitTitle, { color: text }]}>Daily limit reached</Text>
             <Text style={[S.limitBody, { color: muted }]}>
-              You've used your free photo solve for today. Upgrade to Premium for 50 solves/day.
+              {creditInfo
+                ? `You've used today's free photo solves. You have ${creditInfo.balance} credit${creditInfo.balance === 1 ? "" : "s"} — buy more or upgrade to Premium for 50 solves/day.`
+                : "You've used your free photo solves for today. Upgrade to Premium for 50 solves/day."}
             </Text>
-            <TouchableOpacity style={S.upgradeWrap} onPress={() => router.push("/ai-guru/subscription" as any)}>
-              <LinearGradient colors={["#92400e", "#d97706", "#fbbf24"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
-                <Ionicons name="star" size={16} color="#fff" />
-                <Text style={S.upgradeBtnText}>Upgrade to Premium</Text>
+            <TouchableOpacity
+              style={S.upgradeWrap}
+              onPress={() => router.push((creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription") as any)}
+            >
+              <LinearGradient colors={creditInfo ? ["#4f46e5", "#7c3aed"] : ["#92400e", "#d97706", "#fbbf24"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
+                <Ionicons name={creditInfo ? "flash" : "star"} size={16} color="#fff" />
+                <Text style={S.upgradeBtnText}>{creditInfo ? "Buy Credits" : "Upgrade to Premium"}</Text>
               </LinearGradient>
             </TouchableOpacity>
+            {creditInfo && (
+              <TouchableOpacity onPress={() => router.push("/ai-guru/subscription" as any)}>
+                <Text style={[S.limitBody, { color: "#a5b4fc", fontSize: 12, marginTop: 4 }]}>
+                  Or upgrade to Premium for unlimited access
+                </Text>
+              </TouchableOpacity>
+            )}
           </Animated.View>
         )}
 

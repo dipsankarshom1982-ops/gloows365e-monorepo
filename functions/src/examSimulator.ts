@@ -9,6 +9,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
 import { getRedis, todayIST, TTL, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
+import { tryDebitAiGuruCredit, refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { resolveStudentLanguage, getLanguageInstruction } from "./aiLanguage";
 
 const db = admin.firestore();
@@ -167,6 +168,9 @@ export const generateExam = onRequest(
     const language = await resolveStudentLanguage(uid, db, requestedLanguage);
 
     // ── Rate limit ───────────────────────────────────────────────────────────
+    // creditTxId declared outside this try so the generate-exam catch
+    // further down can refund it if the request fails after this point.
+    let creditTxId: string | null = null;
     try {
       const { isPremium } = await getSubscription(uid, db);
       const dailyLimit = isPremium ? PREMIUM_EXAMS_DAILY : FREE_EXAMS_DAILY;
@@ -176,14 +180,33 @@ export const generateExam = onRequest(
       try { const c = await getRedis().get<number>(key); used = c ?? 0; } catch {}
 
       if (used >= dailyLimit) {
-        res.status(429).json({
-          error: isPremium
-            ? `Daily exam limit reached (${PREMIUM_EXAMS_DAILY}/day).`
-            : `Free tier: 1 exam/day. Upgrade for unlimited exams.`,
-          code: "LIMIT_REACHED",
-          isPremium,
-        });
-        return;
+        // Premium never pays credits, even at its own generous daily cap.
+        if (isPremium) {
+          res.status(429).json({
+            error: `Daily exam limit reached (${PREMIUM_EXAMS_DAILY}/day).`,
+            code: "LIMIT_REACHED",
+            isPremium,
+          });
+          return;
+        }
+
+        const debit = await tryDebitAiGuruCredit(uid, "EXAM_SIMULATOR", db);
+        if (!debit.ok) {
+          const balance  = debit.reason === "insufficient" ? debit.balance  : 0;
+          const required = debit.reason === "insufficient" ? debit.required : 1;
+          const balanceNote = debit.reason === "insufficient"
+            ? ` You have ${balance} credit${balance === 1 ? "" : "s"} left, need ${required}.`
+            : "";
+          res.status(429).json({
+            error: `Free tier: ${FREE_EXAMS_DAILY} exam/day.${balanceNote} Buy credits or upgrade to Premium.`,
+            code: "CREDITS_EXHAUSTED",
+            isPremium,
+            creditBalance: balance,
+            creditsRequired: required,
+          });
+          return;
+        }
+        creditTxId = debit.txId;
       }
     } catch {}
 
@@ -234,6 +257,7 @@ export const generateExam = onRequest(
       res.status(200).json(parsed);
     } catch (e: any) {
       console.error("generateExam error:", e);
+      if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "EXAM_SIMULATOR", db);
       res.status(500).json({ error: e?.message ?? "Failed to generate exam", code: "AI_ERROR" });
     }
   }

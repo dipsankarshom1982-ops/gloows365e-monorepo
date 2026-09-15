@@ -23,7 +23,7 @@
 
 import { useStudentProfile } from "@/context/StudentProfileContext";
 import { db } from "@/lib/firebase";
-import type { AppModule, SubscriptionPlan } from "@/services/appConfigService";
+import type { AppModule, CreditPack, SubscriptionPlan } from "@/services/appConfigService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   collection, doc, getDocs, onSnapshot, orderBy, query, where,
@@ -33,16 +33,19 @@ import { createContext, useContext, useEffect, useState } from "react";
 const CACHE_VERSION     = "v2";
 const CACHE_KEY_MODULES = `appConfig_modules_${CACHE_VERSION}`;
 const CACHE_KEY_PLANS   = `appConfig_plans_${CACHE_VERSION}`;
+const CACHE_KEY_CREDIT_PACKS = `appConfig_creditPacks_${CACHE_VERSION}`;
 
 type AppConfigContextType = {
   modules:       AppModule[];
   plans:         SubscriptionPlan[];
+  creditPacks:   CreditPack[];
   configLoading: boolean;
 };
 
 const AppConfigContext = createContext<AppConfigContextType>({
   modules:       [],
   plans:         [],
+  creditPacks:   [],
   configLoading: true,
 });
 
@@ -53,10 +56,12 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
 
   const [modules,       setModules]       = useState<AppModule[]>([]);
   const [plans,         setPlans]         = useState<SubscriptionPlan[]>([]);
+  const [creditPacks,   setCreditPacks]   = useState<CreditPack[]>([]);
   const [modulesReady,  setModulesReady]  = useState(false);
   const [plansReady,    setPlansReady]    = useState(false);
+  const [creditPacksReady, setCreditPacksReady] = useState(false);
 
-  const configLoading = !modulesReady || !plansReady;
+  const configLoading = !modulesReady || !plansReady || !creditPacksReady;
 
   // Is this user a tester or admin? Role lives on users/{uid}, not on the
   // students/{uid} profile doc — see the header comment above.
@@ -81,9 +86,11 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
     Promise.all([
       AsyncStorage.getItem(CACHE_KEY_MODULES),
       AsyncStorage.getItem(CACHE_KEY_PLANS),
-    ]).then(([cachedMods, cachedPlans]) => {
+      AsyncStorage.getItem(CACHE_KEY_CREDIT_PACKS),
+    ]).then(([cachedMods, cachedPlans, cachedPacks]) => {
       if (cachedMods)  setModules(JSON.parse(cachedMods));
       if (cachedPlans) setPlans(JSON.parse(cachedPlans));
+      if (cachedPacks) setCreditPacks(JSON.parse(cachedPacks));
     }).catch(() => {});
 
     // ── appModules listener ───────────────────────────────────────────────────
@@ -175,14 +182,46 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
+    // ── aiGuruCreditPacks listener ────────────────────────────────────────────
+    // Same isActive+order query/fallback shape as subscriptionPlans above —
+    // coexists with it, doesn't replace it (see apps/admin/src/pages/
+    // AiGuruCredits.tsx for the admin side of this collection).
+    const unsubCreditPacks = onSnapshot(
+      query(
+        collection(db, "aiGuruCreditPacks"),
+        where("isActive", "==", true),
+        orderBy("order", "asc")
+      ),
+      (snap) => {
+        const fresh = snap.docs.map((d) => ({ id: d.id, ...d.data() } as CreditPack));
+        setCreditPacks(fresh);
+        setCreditPacksReady(true);
+        AsyncStorage.setItem(CACHE_KEY_CREDIT_PACKS, JSON.stringify(fresh)).catch(() => {});
+      },
+      async () => {
+        try {
+          const snap = await getDocs(
+            query(collection(db, "aiGuruCreditPacks"), where("isActive", "==", true))
+          );
+          const fresh = snap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as CreditPack))
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+          setCreditPacks(fresh);
+          AsyncStorage.setItem(CACHE_KEY_CREDIT_PACKS, JSON.stringify(fresh)).catch(() => {});
+        } catch {}
+        setCreditPacksReady(true);
+      }
+    );
+
     return () => {
       unsubModules();
       unsubPlans();
+      unsubCreditPacks();
     };
   }, [isTester]); // re-subscribe when tester status changes (login/logout)
 
   return (
-    <AppConfigContext.Provider value={{ modules, plans, configLoading }}>
+    <AppConfigContext.Provider value={{ modules, plans, creditPacks, configLoading }}>
       {children}
     </AppConfigContext.Provider>
   );

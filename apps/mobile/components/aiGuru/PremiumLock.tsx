@@ -7,6 +7,15 @@ interface Props {
   onUpgrade: () => void;
   onDismiss?: () => void;
   compact?: boolean;
+  // Pay-as-you-go — all optional, so a caller that doesn't pass these gets
+  // the exact same single-button render as before. When creditBalance IS
+  // passed (even 0), the primary action becomes either "spend a credit"
+  // (balance > 0) or "buy credits" (balance <= 0), with Upgrade to Premium
+  // demoted to a secondary option rather than the only way out.
+  creditBalance?: number;
+  creditsRequired?: number;
+  onBuyCredits?: () => void;
+  onUseCredit?: () => void;
 }
 
 export default function PremiumLock({
@@ -14,6 +23,10 @@ export default function PremiumLock({
   onUpgrade,
   onDismiss,
   compact = false,
+  creditBalance,
+  creditsRequired = 1,
+  onBuyCredits,
+  onUseCredit,
 }: Props) {
   if (compact) {
     return (
@@ -26,6 +39,9 @@ export default function PremiumLock({
     );
   }
 
+  const hasCreditsOption = creditBalance !== undefined;
+  const canUseCredit = hasCreditsOption && creditBalance >= creditsRequired && !!onUseCredit;
+
   return (
     <View style={S.overlay}>
       <LinearGradient
@@ -36,9 +52,13 @@ export default function PremiumLock({
           <Ionicons name="lock-closed" size={32} color="#fbbf24" />
         </View>
 
-        <Text style={S.title}>Unlock AI Guru Premium</Text>
+        <Text style={S.title}>
+          {canUseCredit ? "Out of Free Actions for Today" : "Unlock AI Guru Premium"}
+        </Text>
         <Text style={S.subtitle}>
-          Get unlimited access to {feature} and all premium features
+          {hasCreditsOption
+            ? `You've used today's free ${feature}. Use a credit to keep going, or upgrade for unlimited access.`
+            : `Get unlimited access to ${feature} and all premium features`}
         </Text>
 
         <View style={S.features}>
@@ -57,16 +77,54 @@ export default function PremiumLock({
           ))}
         </View>
 
-        <TouchableOpacity style={S.upgradeBtn} onPress={onUpgrade} activeOpacity={0.9}>
-          <LinearGradient
-            colors={["#92400e", "#d97706", "#fbbf24"]}
-            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-            style={S.upgradeBtnGrad}
-          >
-            <Ionicons name="star" size={18} color="#fff" />
-            <Text style={S.upgradeBtnText}>Upgrade to Premium</Text>
-          </LinearGradient>
-        </TouchableOpacity>
+        {/* Primary action — spend a credit if they have one, otherwise buy
+            more; falls back to the plain Upgrade button when the caller
+            hasn't wired up credits at all (creditBalance omitted). */}
+        {canUseCredit ? (
+          <TouchableOpacity style={S.upgradeBtn} onPress={onUseCredit} activeOpacity={0.9}>
+            <LinearGradient
+              colors={["#4f46e5", "#7c3aed"]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={S.upgradeBtnGrad}
+            >
+              <Ionicons name="flash" size={18} color="#fff" />
+              <Text style={S.upgradeBtnText}>
+                Use {creditsRequired} credit{creditsRequired === 1 ? "" : "s"} · {creditBalance} left
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        ) : hasCreditsOption && onBuyCredits ? (
+          <TouchableOpacity style={S.upgradeBtn} onPress={onBuyCredits} activeOpacity={0.9}>
+            <LinearGradient
+              colors={["#4f46e5", "#7c3aed"]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={S.upgradeBtnGrad}
+            >
+              <Ionicons name="flash" size={18} color="#fff" />
+              <Text style={S.upgradeBtnText}>Buy Credits</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={S.upgradeBtn} onPress={onUpgrade} activeOpacity={0.9}>
+            <LinearGradient
+              colors={["#92400e", "#d97706", "#fbbf24"]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={S.upgradeBtnGrad}
+            >
+              <Ionicons name="star" size={18} color="#fff" />
+              <Text style={S.upgradeBtnText}>Upgrade to Premium</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
+        {/* When credits are in play, Upgrade to Premium becomes a
+            secondary option rather than the only way forward. */}
+        {hasCreditsOption && (canUseCredit || onBuyCredits) && (
+          <TouchableOpacity style={S.secondaryBtn} onPress={onUpgrade} activeOpacity={0.85}>
+            <Ionicons name="star-outline" size={14} color="#fbbf24" />
+            <Text style={S.secondaryBtnText}>Or upgrade to Premium for unlimited access</Text>
+          </TouchableOpacity>
+        )}
 
         {onDismiss && (
           <TouchableOpacity onPress={onDismiss} style={S.dismissBtn}>
@@ -90,6 +148,8 @@ const S = StyleSheet.create({
   upgradeBtn:    { width: "100%", borderRadius: 16, overflow: "hidden" },
   upgradeBtnGrad:{ flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 16, gap: 8 },
   upgradeBtnText:{ color: "#fff", fontSize: 17, fontWeight: "900" },
+  secondaryBtn:     { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
+  secondaryBtnText: { color: "#fbbf24", fontSize: 12, fontWeight: "700" },
   dismissBtn:    { paddingVertical: 8 },
   dismissText:   { color: "#64748b", fontSize: 12, textAlign: "center" },
   compactWrap:   { alignSelf: "flex-start" },

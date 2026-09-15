@@ -44,3 +44,31 @@ export async function getSubscriptionPlans(): Promise<SubscriptionPlan[]> {
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as SubscriptionPlan));
 }
+
+// AI Guru pay-as-you-go credit packs — coexists with SubscriptionPlan above,
+// same Firestore-driven admin-config pattern (see apps/admin/src/pages/
+// AiGuruCredits.tsx). pricePaise (not rupees) matches what the purchase
+// Cloud Function (aiGuruCreateCreditOrder) reads directly off the pack doc.
+export interface CreditPack {
+  id: string;
+  name: string;
+  emoji: string;
+  description?: string;
+  credits: number;
+  bonusCredits: number;
+  pricePaise: number;
+  gradient: [string, string];
+  highlight: boolean;
+  isActive: boolean;
+  order: number;
+}
+
+export async function getCreditPacks(): Promise<CreditPack[]> {
+  const q = query(
+    collection(db, "aiGuruCreditPacks"),
+    where("isActive", "==", true),
+    orderBy("order", "asc")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as CreditPack));
+}

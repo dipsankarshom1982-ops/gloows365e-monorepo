@@ -23,8 +23,10 @@ try { Speech = require("expo-speech"); } catch {}
 
 import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
+import { auth } from "@/lib/firebase";
 import { askVoiceTutor, VoiceTutorResponse } from "@/services/voiceTutorApi";
 import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
+import CreditBalanceBadge from "@/components/aiGuru/CreditBalanceBadge";
 
 // Graceful: expo-av for recording — falls back to text if unavailable
 let Audio: any = null;
@@ -38,8 +40,6 @@ const LANG_TTS_MAP: Record<string, string> = {
   Bengali:  "bn-IN",
   Assamese: "as-IN",
 };
-
-const FREE_VOICE_DAILY = 1;
 
 type Phase = "idle" | "recording" | "processing" | "result" | "limit" | "error";
 
@@ -89,7 +89,7 @@ export default function VoiceTutorScreen() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [textInput, setTextInput]   = useState("");
   const [showTextFallback, setShowTextFallback] = useState(false);
-  const [remaining, setRemaining]   = useState(FREE_VOICE_DAILY);
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
   const [errMsg, setErrMsg]         = useState("");
 
   const recordingRef = useRef<any>(null);
@@ -146,9 +146,10 @@ export default function VoiceTutorScreen() {
 
   // ── Ask question ──────────────────────────────────────────────────────────
   const askQuestion = async (input: { audioBase64?: string; audioMimeType?: string; textQuestion?: string }) => {
-    // Client-side gate: once the free quota is used, show the upgrade
-    // screen immediately instead of calling the backend.
-    if (remaining <= 0) { setPhase("limit"); return; }
+    // FIX: this used to hard-block after 1 question via a client-side
+    // FREE_VOICE_DAILY=1 constant that didn't match the server's real free
+    // limit (3/day, functions/src/voiceTutor.ts) — nobody could ever reach
+    // the credits fallback. Removed; the server is the source of truth.
     setPhase("processing");
     setResponse(null);
     setErrMsg("");
@@ -161,12 +162,18 @@ export default function VoiceTutorScreen() {
       });
       setResponse(result);
       setPhase("result");
-      setRemaining((r) => Math.max(0, r - 1));
       // Auto-play answer
       speakAnswer(result.answer, result.detectedLanguage ?? selectedLang);
     } catch (e: any) {
-      if (e?.code === "LIMIT_REACHED") { setPhase("limit"); }
-      else { setErrMsg(e?.message ?? "Something went wrong"); setPhase("error"); }
+      if (e?.code === "CREDITS_EXHAUSTED") {
+        setCreditInfo({ balance: e.creditBalance ?? 0, required: e.creditsRequired ?? 1 });
+        setPhase("limit");
+      } else if (e?.code === "LIMIT_REACHED") {
+        setCreditInfo(undefined);
+        setPhase("limit");
+      } else {
+        setErrMsg(e?.message ?? "Something went wrong"); setPhase("error");
+      }
     }
   };
 
@@ -211,14 +218,7 @@ export default function VoiceTutorScreen() {
         subtitle="Speak your doubt · Get instant answer"
         showLanguageBadge
         onBack={() => { Speech?.stop(); router.back(); }}
-        rightElement={
-          <View style={[S.quotaBadge, { backgroundColor: surface, borderColor: remaining > 0 ? border : "rgba(239,68,68,0.4)" }]}>
-            <View style={[S.quotaDot, { backgroundColor: remaining > 0 ? "#10b981" : "#ef4444" }]} />
-            <Text style={[S.quotaText, { color: remaining > 0 ? "#10b981" : "#ef4444" }]}>
-              {remaining}/{FREE_VOICE_DAILY}
-            </Text>
-          </View>
-        }
+        rightElement={<CreditBalanceBadge uid={auth.currentUser?.uid ?? null} />}
       />
 
       <ScrollView contentContainerStyle={[S.scroll, { paddingBottom: insets.bottom + 40 }]} showsVerticalScrollIndicator={false}>
@@ -412,14 +412,26 @@ export default function VoiceTutorScreen() {
             <Text style={S.limitEmoji}>⏰</Text>
             <Text style={[S.thinkingTitle, { color: text }]}>Daily limit reached</Text>
             <Text style={[S.thinkingNote, { color: dim }]}>
-              Free tier: 1 voice question/day. Upgrade for unlimited.
+              {creditInfo
+                ? `You've used today's free voice questions. You have ${creditInfo.balance} credit${creditInfo.balance === 1 ? "" : "s"} — buy more or upgrade to Premium.`
+                : "Free tier: 3 voice questions/day. Upgrade for unlimited."}
             </Text>
-            <TouchableOpacity onPress={() => router.push("/ai-guru/subscription" as any)} style={S.upgradeWrap}>
-              <LinearGradient colors={["#92400e", "#d97706"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
-                <Ionicons name="star" size={16} color="#fff" />
-                <Text style={S.upgradeBtnText}>Upgrade to Premium</Text>
+            <TouchableOpacity
+              onPress={() => router.push((creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription") as any)}
+              style={S.upgradeWrap}
+            >
+              <LinearGradient colors={creditInfo ? ["#4f46e5", "#7c3aed"] : ["#92400e", "#d97706"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
+                <Ionicons name={creditInfo ? "flash" : "star"} size={16} color="#fff" />
+                <Text style={S.upgradeBtnText}>{creditInfo ? "Buy Credits" : "Upgrade to Premium"}</Text>
               </LinearGradient>
             </TouchableOpacity>
+            {creditInfo && (
+              <TouchableOpacity onPress={() => router.push("/ai-guru/subscription" as any)}>
+                <Text style={[S.thinkingNote, { color: "#a5b4fc", fontSize: 12, marginTop: 4 }]}>
+                  Or upgrade to Premium for unlimited access
+                </Text>
+              </TouchableOpacity>
+            )}
           </Animated.View>
         )}
 

@@ -4,6 +4,7 @@
 import ScholarshipAdCard from "@/components/ads/ScholarshipAdCard";
 import AiGuruAvatar from "@/components/aiGuru/AiGuruAvatar";
 import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
+import CreditBalanceBadge from "@/components/aiGuru/CreditBalanceBadge";
 import { useAppTranslation, useLanguage } from "@/context/LanguageContext";
 import { useStudentProfile, useFeatureFlags } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
@@ -158,6 +159,13 @@ export default function AiGuruHomeScreen() {
         <AiGuruHeader
           rightElement={
             <View style={S.headerRightRow}>
+              {/* Only worth showing to non-subscribers with a non-zero
+                  balance — CreditBalanceBadge itself already renders
+                  nothing when balance is 0, this just skips it for
+                  subscribers who'll never need it. */}
+              {!subscribed && !loading && (
+                <CreditBalanceBadge uid={auth.currentUser?.uid ?? null} />
+              )}
               {!subscribed && !loading && (
                 <Pressable
                   onPress={() => router.push("/ai-guru/subscription")}

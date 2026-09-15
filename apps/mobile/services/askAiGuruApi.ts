@@ -46,6 +46,8 @@ export async function askAiGuruQuestion(
     err.code   = data.code   ?? "UNKNOWN";
     err.status = resp.status;
     err.limit  = data.limit  ?? 10;
+    if (data.creditBalance   !== undefined) err.creditBalance   = data.creditBalance;
+    if (data.creditsRequired !== undefined) err.creditsRequired = data.creditsRequired;
     throw err;
   }
 

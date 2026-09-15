@@ -20,6 +20,8 @@ async function post<T>(path: string, body: object): Promise<T> {
     const err: any = new Error(data.error ?? "Exam request failed");
     err.code = data.code ?? "UNKNOWN";
     err.status = resp.status;
+    if (data.creditBalance   !== undefined) err.creditBalance   = data.creditBalance;
+    if (data.creditsRequired !== undefined) err.creditsRequired = data.creditsRequired;
     throw err;
   }
   return data as T;

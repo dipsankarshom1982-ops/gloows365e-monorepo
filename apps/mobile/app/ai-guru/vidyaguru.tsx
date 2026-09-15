@@ -47,6 +47,9 @@ export default function VidyaGuruScreen() {
   const [guruState, setGuruState] = useState<GuruState>("idle");
   const [isRecording, setIsRecording] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
+  // Set only on a CREDITS_EXHAUSTED response — undefined keeps the
+  // paywall's plain pre-credits copy/CTA.
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
   const flatListRef = useRef<FlatList>(null);
   const currentPlayerRef = useRef<any>(null);
   // Keep messages in a ref so sendMessage callback never goes stale
@@ -140,7 +143,11 @@ export default function VidyaGuruScreen() {
         }
       } catch (err: any) {
         setGuruState("idle");
-        if (err?.code === "FREE_LIMIT_REACHED") {
+        if (err?.code === "CREDITS_EXHAUSTED") {
+          setCreditInfo({ balance: err.creditBalance ?? 0, required: err.creditsRequired ?? 1 });
+          setShowPaywall(true);
+        } else if (err?.code === "FREE_LIMIT_REACHED") {
+          setCreditInfo(undefined);
           setShowPaywall(true);
         } else {
           Alert.alert("Oops!", err?.message ?? "Failed to get a response. Please try again.");
@@ -382,19 +389,30 @@ export default function VidyaGuruScreen() {
           >
             <GuruAvatar state="idle" size={80} />
             <Text style={[S.paywallTitle, { color: colors.text }]}>{t("paywallTitle")}</Text>
-            <Text style={[S.paywallBody, { color: colors.textSecondary }]}>{t("paywallBody")}</Text>
+            <Text style={[S.paywallBody, { color: colors.textSecondary }]}>
+              {creditInfo
+                ? `You've used your free question for today. You have ${creditInfo.balance} credit${creditInfo.balance === 1 ? "" : "s"} — buy more or upgrade to Premium for unlimited conversations.`
+                : t("paywallBody")}
+            </Text>
             <TouchableOpacity
               style={S.paywallPrimary}
               onPress={() => {
                 setShowPaywall(false);
-                router.push("/ai-guru/subscription" as any);
+                router.push((creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription") as any);
               }}
             >
               <LinearGradient colors={["#6366f1", "#4f46e5"]} style={S.paywallGradient}>
-                <Ionicons name="sparkles" size={16} color="#fff" />
-                <Text style={S.paywallPrimaryText}>{t("upgradeToPremium")}</Text>
+                <Ionicons name={creditInfo ? "flash" : "sparkles"} size={16} color="#fff" />
+                <Text style={S.paywallPrimaryText}>{creditInfo ? "Buy Credits" : t("upgradeToPremium")}</Text>
               </LinearGradient>
             </TouchableOpacity>
+            {creditInfo && (
+              <TouchableOpacity onPress={() => { setShowPaywall(false); router.push("/ai-guru/subscription" as any); }}>
+                <Text style={[S.paywallBody, { color: "#a5b4fc", fontSize: 12 }]}>
+                  Or upgrade to Premium for unlimited access
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={S.paywallClose} onPress={() => setShowPaywall(false)}>
               <Text style={[S.paywallCloseText, { color: colors.textSecondary }]}>{t("maybeLater")}</Text>
             </TouchableOpacity>

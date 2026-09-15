@@ -12,6 +12,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { callGeminiWithImage, parseJsonFromResponse } from "./gemini";
 import { getRedis, todayIST, TTL, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
+import { tryDebitAiGuruCredit, refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { resolveStudentLanguage, getLanguageInstruction } from "./aiLanguage";
 
 const db = admin.firestore();
@@ -125,6 +126,9 @@ export const photoSolve = onRequest(
     const language = await resolveStudentLanguage(uid, db, requestedLanguage);
 
     // ── Rate limit check ────────────────────────────────────────────────────
+    // creditTxId declared outside this try so the Gemini-call catch further
+    // down can refund it if the request fails after this point.
+    let creditTxId: string | null = null;
     try {
       const { isPremium } = await getSubscription(uid, db);
       const dailyLimit = isPremium ? PREMIUM_PHOTOSOLVE_DAILY : FREE_PHOTOSOLVE_DAILY;
@@ -137,18 +141,43 @@ export const photoSolve = onRequest(
       } catch { /* Redis unavailable — allow through */ }
 
       if (used >= dailyLimit) {
-        res.status(429).json({
-          error: isPremium
-            ? `You've reached your daily limit of ${PREMIUM_PHOTOSOLVE_DAILY} solves.`
-            : `You've used your ${FREE_PHOTOSOLVE_DAILY} free photo solves for today. Upgrade for more.`,
-          code: "LIMIT_REACHED",
-          isPremium,
-        });
-        return;
+        // Premium never pays credits, even at its own generous daily cap —
+        // silently billing someone who already pays for unlimited access
+        // would be the worst outcome of adding credits at all.
+        if (isPremium) {
+          res.status(429).json({
+            error: `You've reached your daily limit of ${PREMIUM_PHOTOSOLVE_DAILY} solves.`,
+            code: "LIMIT_REACHED",
+            isPremium,
+          });
+          return;
+        }
+
+        const debit = await tryDebitAiGuruCredit(uid, "PHOTOSOLVE", db);
+        if (!debit.ok) {
+          const balance  = debit.reason === "insufficient" ? debit.balance  : 0;
+          const required = debit.reason === "insufficient" ? debit.required : 1;
+          const balanceNote = debit.reason === "insufficient"
+            ? ` You have ${balance} credit${balance === 1 ? "" : "s"} left, need ${required}.`
+            : "";
+          res.status(429).json({
+            error: `You've used your ${FREE_PHOTOSOLVE_DAILY} free photo solves for today.${balanceNote} Buy credits or upgrade to Premium.`,
+            code: "CREDITS_EXHAUSTED",
+            isPremium,
+            creditBalance: balance,
+            creditsRequired: required,
+          });
+          return;
+        }
+        creditTxId = debit.txId;
       }
     } catch (e) {
       console.error("Rate limit check failed:", e);
-      // On error, allow through (fail open for UX)
+      // On error, allow through (fail open for UX) — matches this
+      // function's existing behavior; tryDebitAiGuruCredit never throws
+      // for the ordinary "insufficient" case (returns a result instead),
+      // so a genuine debit failure above always returns 429 explicitly
+      // rather than falling through to this fail-open branch.
     }
 
     // ── Check result cache (image hash + class + board + language) ───────────
@@ -202,6 +231,7 @@ export const photoSolve = onRequest(
       res.status(200).json(parsed);
     } catch (e: any) {
       console.error("PhotoSolve error:", e);
+      if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "PHOTOSOLVE", db);
       res.status(500).json({ error: e?.message ?? "Failed to solve question", code: "AI_ERROR" });
     }
   }

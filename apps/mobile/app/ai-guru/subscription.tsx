@@ -29,14 +29,20 @@ import { useTheme } from "@/context/ThemeContext";
 import { auth } from "@/lib/firebase";
 import { RAZORPAY_KEY_ID } from "@/lib/seekho/constants";
 import { isSubscribed } from "@/services/aiGuruFirestore";
+import { purchaseCreditPack, subscribeToCreditBalance } from "@/services/aiGuruCreditsService";
 import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 
 type Cycle = "monthly" | "annual";
+// "Unlimited" = the existing flat-fee subscription (untouched below);
+// "Credits" = pay-as-you-go packs — coexist, not a replacement. See
+// functions/src/aiGuruCredits.ts and app/ai-guru/credits.tsx (the fuller
+// wallet/ledger screen this same purchase flow also powers).
+type MainTab = "unlimited" | "credits";
 
 export default function AiGuruSubscriptionScreen() {
   const { colors, isDarkMode } = useTheme();
   const { t } = useAppTranslation();
-  const { plans, configLoading } = useAppConfig();
+  const { plans, creditPacks, configLoading } = useAppConfig();
   const { user } = useStudentProfile();
 
   const [cycle, setCycle]               = useState<Cycle>("monthly");
@@ -44,6 +50,10 @@ export default function AiGuruSubscriptionScreen() {
   const [loading, setLoading]           = useState(false);
   const [subscribed, setSubscribed]     = useState(false);
   const [checkingStatus, setChecking]   = useState(true);
+
+  const [mainTab, setMainTab]           = useState<MainTab>("unlimited");
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [buyingPackId, setBuyingPackId] = useState<string | null>(null);
 
   // Theme shortcuts
   const pageBg    = isDarkMode ? "#060612" : colors.background;
@@ -76,6 +86,37 @@ export default function AiGuruSubscriptionScreen() {
       });
     }, [])
   );
+
+  // Credit balance — shown in the header area and used to decide whether
+  // the "Credits" tab is worth surfacing at all for a never-purchased user.
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    return subscribeToCreditBalance(uid, setCreditBalance);
+  }, []);
+
+  const handleBuyCredits = async (pack: (typeof creditPacks)[number]) => {
+    if (!auth.currentUser) {
+      Alert.alert("Login Required", "Please log out and log in again.");
+      return;
+    }
+    setBuyingPackId(pack.id);
+    try {
+      const result = await purchaseCreditPack(pack);
+      if (result.activated) {
+        Alert.alert("Credits added! ⚡", `You now have ${result.newBalance} AI Guru credits.`);
+      } else {
+        Alert.alert("Payment Status", "If you completed payment, your credits will show up within a minute.");
+      }
+    } catch (e: any) {
+      const msg = e?.message ?? "Purchase failed. Please try again.";
+      if (!msg.toLowerCase().includes("cancel")) {
+        Alert.alert("Purchase Failed", msg);
+      }
+    } finally {
+      setBuyingPackId(null);
+    }
+  };
 
   const selectedPlan = aiGuruPlans.find((p) => p.id === selectedPlanId);
   const displayTotal = selectedPlan
@@ -259,8 +300,91 @@ export default function AiGuruSubscriptionScreen() {
           </Animated.View>
         )}
 
+        {/* ── Unlimited vs Credits tabs ──
+             Only shown to non-subscribers — a subscriber already has
+             everything the Credits tab would sell them, so it's hidden
+             above rather than shown as a redundant option. */}
+        {!isLoading && !subscribed && (
+          <Animated.View entering={FadeInDown.duration(400).delay(120)} style={[S.mainTabWrap, { backgroundColor: isDarkMode ? "#0f172a" : colors.background }]}>
+            <TouchableOpacity
+              style={[S.mainTabBtn, mainTab === "unlimited" && S.mainTabBtnActive]}
+              onPress={() => setMainTab("unlimited")}
+            >
+              <Text style={[S.mainTabText, { color: mainTab === "unlimited" ? "#fff" : textSec }]}>✨ Unlimited</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[S.mainTabBtn, mainTab === "credits" && S.mainTabBtnActive]}
+              onPress={() => setMainTab("credits")}
+            >
+              <Text style={[S.mainTabText, { color: mainTab === "credits" ? "#fff" : textSec }]}>
+                ⚡ Pay As You Go{creditBalance ? ` · ${creditBalance}` : ""}
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
+        )}
+
+        {/* ── Credits tab: buy a prepaid pack, no subscription needed ── */}
+        {!isLoading && !subscribed && mainTab === "credits" && (
+          <>
+            {creditPacks.length === 0 ? (
+              <Animated.View entering={FadeInDown.duration(400)} style={S.centerBlock}>
+                <Text style={{ fontSize: 44 }}>🎫</Text>
+                <Text style={[S.comingSoonTitle, { color: textMain }]}>Coming Soon!</Text>
+                <Text style={[S.comingSoonSub, { color: textSec }]}>
+                  Credit packs are launching very soon.{"\n"}Check back in a little while!
+                </Text>
+              </Animated.View>
+            ) : (
+              creditPacks.map((pack, idx) => {
+                const totalCredits = pack.credits + (pack.bonusCredits ?? 0);
+                const rupees = pack.pricePaise / 100;
+                const isBuying = buyingPackId === pack.id;
+                return (
+                  <Animated.View key={pack.id} entering={FadeInDown.duration(380).delay(160 + idx * 70)}>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      disabled={!!buyingPackId}
+                      onPress={() => handleBuyCredits(pack)}
+                    >
+                      <LinearGradient
+                        colors={pack.gradient as any}
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                        style={[S.packCard, pack.highlight && S.packCardHighlight]}
+                      >
+                        {pack.highlight && (
+                          <View style={S.popularBadge}>
+                            <Text style={S.popularBadgeText}>⭐ Best Value</Text>
+                          </View>
+                        )}
+                        <View style={S.planHeader}>
+                          <Text style={S.planEmoji}>{pack.emoji}</Text>
+                          <View style={{ flex: 1 }}>
+                            <Text style={S.planName}>{pack.name}</Text>
+                            <Text style={S.packCreditsText}>
+                              {totalCredits} credits{pack.bonusCredits > 0 ? ` (+${pack.bonusCredits} bonus)` : ""}
+                            </Text>
+                          </View>
+                          {isBuying
+                            ? <ActivityIndicator color="#fff" size="small" />
+                            : <Text style={S.planPrice}>₹{rupees.toLocaleString("en-IN")}</Text>
+                          }
+                        </View>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </Animated.View>
+                );
+              })
+            )}
+            <Animated.View entering={FadeInDown.duration(380).delay(450)}>
+              <Text style={[S.disclaimer, { color: textSec }]}>
+                Credits never expire. Use them on any AI Guru feature once you've used today's free actions.
+              </Text>
+            </Animated.View>
+          </>
+        )}
+
         {/* ── Coming Soon (admin has deactivated all plans) ── */}
-        {!isLoading && !subscribed && aiGuruPlans.length === 0 && (
+        {!isLoading && !subscribed && mainTab === "unlimited" && aiGuruPlans.length === 0 && (
           <Animated.View entering={FadeInDown.duration(400)} style={S.centerBlock}>
             <Text style={{ fontSize: 52 }}>🚀</Text>
             <Text style={[S.comingSoonTitle, { color: textMain }]}>Coming Soon!</Text>
@@ -272,7 +396,7 @@ export default function AiGuruSubscriptionScreen() {
         )}
 
         {/* ── Normal: billing toggle + plan cards + subscribe CTA ── */}
-        {!isLoading && !subscribed && aiGuruPlans.length > 0 && (
+        {!isLoading && !subscribed && mainTab === "unlimited" && aiGuruPlans.length > 0 && (
           <>
             {/* Billing cycle toggle */}
             <Animated.View entering={FadeInDown.duration(400).delay(160)} style={[S.toggleWrap, { backgroundColor: isDarkMode ? "#0f172a" : colors.background }]}>
@@ -421,6 +545,17 @@ const S = StyleSheet.create({
   toggleBtn:      { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: "center" },
   toggleBtnActive:{ backgroundColor: "#4f46e5" },
   toggleText:     { fontSize: 13, fontWeight: "700" },
+
+  // Unlimited vs Credits — same shape as the monthly/annual toggle above,
+  // one level up (chooses the pricing model, not the billing cycle within it).
+  mainTabWrap:      { flexDirection: "row", borderRadius: 14, padding: 4, marginBottom: 16 },
+  mainTabBtn:       { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: "center" },
+  mainTabBtnActive: { backgroundColor: "#4f46e5" },
+  mainTabText:      { fontSize: 13, fontWeight: "700" },
+
+  packCard:          { borderRadius: 18, padding: 18, marginBottom: 12 },
+  packCardHighlight: { borderWidth: 2, borderColor: "#fbbf24" },
+  packCreditsText:   { color: "#e0e7ff", fontSize: 12, fontWeight: "600", marginTop: 2 },
 
   planCard:       { borderRadius: 18, padding: 18, marginBottom: 12, borderWidth: 1.5, gap: 10 },
   planCardSelected:{ borderColor: "#6366f1" },

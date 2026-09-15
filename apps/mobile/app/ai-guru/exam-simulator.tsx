@@ -55,12 +55,9 @@ export default function ExamSimulatorScreen() {
   const [timeLeft,   setTimeLeft]   = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Client-side free-quota gate: the first exam attempt is free, every
-  // attempt after that shows the upgrade screen instead of calling the
-  // backend. Enforces "first one free, then upgrade" locally, since the
-  // actual backend isn't part of this codebase.
-  const FREE_EXAMS = 1;
-  const examsUsedRef = useRef(0);
+  // Set only on a CREDITS_EXHAUSTED response — undefined keeps the "limit"
+  // screen's plain pre-credits render.
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
 
   const startTimer = (minutes: number) => {
     setTimeLeft(minutes * 60);
@@ -82,10 +79,11 @@ export default function ExamSimulatorScreen() {
       Alert.alert("Missing info", "Please pick a subject and enter the chapter name.");
       return;
     }
-    // Client-side gate: once the free quota is used, show the upgrade
-    // screen immediately instead of calling the backend.
-    if (examsUsedRef.current >= FREE_EXAMS) { setPhase("limit"); return; }
-    examsUsedRef.current += 1;
+    // FIX: this used to hard-block via a client-side, never-resetting
+    // examsUsedRef counter (stricter than the server's real 1/day limit,
+    // and reset only by an app restart) that also meant nobody could ever
+    // reach the credits fallback. Removed; the server is the source of
+    // truth for both the free limit and the credits fallback beyond it.
     setPhase("generating");
     try {
       const result = await generateExam({
@@ -97,8 +95,15 @@ export default function ExamSimulatorScreen() {
       setPhase("exam");
       startTimer(result.estimatedMinutes);
     } catch (e: any) {
-      if (e?.code === "LIMIT_REACHED") { setPhase("limit"); }
-      else { setErrMsg(e?.message ?? "Failed to generate exam"); setPhase("error"); }
+      if (e?.code === "CREDITS_EXHAUSTED") {
+        setCreditInfo({ balance: e.creditBalance ?? 0, required: e.creditsRequired ?? 1 });
+        setPhase("limit");
+      } else if (e?.code === "LIMIT_REACHED") {
+        setCreditInfo(undefined);
+        setPhase("limit");
+      } else {
+        setErrMsg(e?.message ?? "Failed to generate exam"); setPhase("error");
+      }
     }
   };
 
@@ -418,15 +423,29 @@ export default function ExamSimulatorScreen() {
             </Text>
             <Text style={[S.thinkingNote, { color: dim }]}>
               {phase === "limit"
-                ? "Free tier: 1 exam/day. Upgrade for unlimited exams."
+                ? (creditInfo
+                    ? `You've used today's free exam. You have ${creditInfo.balance} credit${creditInfo.balance === 1 ? "" : "s"} — buy more or upgrade to Premium.`
+                    : "Free tier: 1 exam/day. Upgrade for unlimited exams.")
                 : errMsg}
             </Text>
             {phase === "limit" ? (
-              <TouchableOpacity onPress={() => router.push("/ai-guru/subscription" as any)} style={S.upgradeWrap}>
-                <LinearGradient colors={["#92400e", "#d97706"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
-                  <Text style={S.upgradeBtnText}>Upgrade to Premium</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  onPress={() => router.push((creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription") as any)}
+                  style={S.upgradeWrap}
+                >
+                  <LinearGradient colors={creditInfo ? ["#4f46e5", "#7c3aed"] : ["#92400e", "#d97706"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
+                    <Text style={S.upgradeBtnText}>{creditInfo ? "Buy Credits" : "Upgrade to Premium"}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+                {creditInfo && (
+                  <TouchableOpacity onPress={() => router.push("/ai-guru/subscription" as any)}>
+                    <Text style={[S.thinkingNote, { color: "#a5b4fc", fontSize: 12, marginTop: 4 }]}>
+                      Or upgrade to Premium for unlimited access
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
             ) : (
               <TouchableOpacity onPress={() => setPhase("setup")} style={[S.retakeWrap]}>
                 <LinearGradient colors={["#7f1d1d", "#dc2626"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.retakeBtn}>

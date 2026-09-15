@@ -119,11 +119,13 @@ export { voiceTutorAnswer } from "./voiceTutor";
 // ── AI Guru Subscription (Razorpay) ────────────────────────────────────────────
 export { aiGuruCheckoutPage, aiGuruCreateSubscription, aiGuruPaymentSuccess } from "./aiGuruSubscription";
 
-// ── AI Guru Credits — pay-as-you-go (Razorpay) — functions/src/aiGuruCredits.ts
-// exists on disk but is NOT YET COMMITTED (see the Phase D.6/D.7 deployment-
-// readiness audit); this export is removed for now so the predeploy build
-// isn't blocked on an unresolved import. Re-add once that feature batch is
-// reviewed and committed on its own. ─────────────────────────────────────────
+// ── AI Guru Credits — pay-as-you-go (Razorpay) ─────────────────────────────────
+// Reviewed and promoted out of the Phase D.6/D.7 deployment-readiness audit
+// (see aiGuruCredits.ts's own header) — the debit/refund side of this
+// feature (aiGuruCreditDebit.ts) has been live since 7505d8f; this adds the
+// purchase side (order creation, payment verification, and the
+// reconciliation job) so credits can actually be topped up.
+export { aiGuruCreateCreditOrder, aiGuruCreditPaymentSuccess, reconcileAiGuruCreditOrders } from "./aiGuruCredits";
 
 // ── Unified Ads System ─────────────────────────────────────────────────────────
 export { aggregateAdAnalytics, claimAdReward, getAds, recordAdEvent } from "./ads";

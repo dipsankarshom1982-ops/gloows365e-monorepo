@@ -36,6 +36,10 @@ export default function ContentScreen() {
   // getRemainingLessons(), which lives outside this repo.
   const [remaining, setRemaining]   = useState<number>(1);
   const [limitReached, setLimitReached] = useState(false);
+  // Set only when the server's block was CREDITS_EXHAUSTED specifically
+  // (not a plain FREE_LIMIT_REACHED) — undefined here keeps PremiumLock's
+  // exact pre-credits render (single Upgrade button, no credits option).
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -94,7 +98,11 @@ export default function ContentScreen() {
       router.replace({ pathname: "/ai-guru/generating", params: { lessonId } });
     } catch (err: any) {
       const msg: string = err?.message ?? "";
-      if (msg.includes("FREE_LIMIT_REACHED")) {
+      if (err?.code === "CREDITS_EXHAUSTED") {
+        setCreditInfo({ balance: err.creditBalance ?? 0, required: err.creditsRequired ?? 1 });
+        setLimitReached(true);
+      } else if (msg.includes("FREE_LIMIT_REACHED")) {
+        setCreditInfo(undefined);
         setLimitReached(true);
       } else {
         Alert.alert("Generation Failed", msg || "Please try again.");
@@ -110,6 +118,9 @@ export default function ContentScreen() {
         feature="unlimited AI lesson generation"
         onUpgrade={() => router.push("/ai-guru/subscription" as any)}
         onDismiss={() => setLimitReached(false)}
+        creditBalance={creditInfo?.balance}
+        creditsRequired={creditInfo?.required}
+        onBuyCredits={() => router.push("/ai-guru/credits" as any)}
       />
     );
   }
