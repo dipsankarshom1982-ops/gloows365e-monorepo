@@ -33,9 +33,6 @@ import { useTheme } from "@/context/ThemeContext";
 import type { GuruMessage, GuruState } from "@/lib/vidyaguru/types";
 import { askVidyaGuru, playGuruAudio } from "@/services/vidyaguruApi";
 
-const GREETING =
-  "Namaste! I am VidyaGuru AI — your personal AI teacher. Ask me anything about your studies — maths, science, history, anything! I'm here to help you learn and grow.";
-
 export default function VidyaGuruScreen() {
   const { colors, isDarkMode } = useTheme();
   const { t } = useAppTranslation();
@@ -57,12 +54,18 @@ export default function VidyaGuruScreen() {
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
-  // Show greeting on mount — greeting updates when language changes
+  // Show greeting on mount — greeting updates when language changes.
+  // Greeting now tells the student VidyaGuru can also answer in their
+  // currently selected language.
   useEffect(() => {
+    const greetingBody =
+      t("vidyaGuruGreeting", { language: languageName }) ??
+      `I am VidyaGuru AI — your personal AI teacher. Ask me anything about your studies — maths, science, history, anything! I'm here to help you learn and grow. I can answer in ${languageName} too!`;
+
     const greetMsg: GuruMessage = {
       id: "greeting",
       role: "guru",
-      text: `${t("helloGreet") ?? "Hello"} ${studentName}! ${GREETING}`,
+      text: `${t("helloGreet") ?? "Hello"} ${studentName}! ${greetingBody}`,
       createdAt: Date.now(),
     };
     setMessages([greetMsg]);
@@ -291,14 +294,22 @@ export default function VidyaGuruScreen() {
             },
           ]}
         >
-          {/* Selected language badge */}
+          {/* Selected language badge — tappable: jumps straight to
+              language settings, since "preferred language" matters
+              enough here that a student should be able to act on it
+              without leaving the chat to dig through Settings manually. */}
           <View style={S.langRow}>
-            <View style={[S.langBadge, { backgroundColor: isDarkMode ? "rgba(99,102,241,0.15)" : "#ede9fe", borderColor: "#6366f1" }]}>
+            <TouchableOpacity
+              style={[S.langBadge, { backgroundColor: isDarkMode ? "rgba(99,102,241,0.15)" : "#ede9fe", borderColor: "#6366f1" }]}
+              onPress={() => router.push("/language-settings" as any)}
+              activeOpacity={0.75}
+            >
               <Ionicons name="globe-outline" size={12} color="#6366f1" />
               <Text style={[S.langBadgeText, { color: "#6366f1" }]}>
                 {t("respondingIn", { lang: languageName }) ?? `Responding in ${languageName}`}
               </Text>
-            </View>
+              <Ionicons name="chevron-forward" size={11} color="#6366f1" />
+            </TouchableOpacity>
           </View>
 
           {/* Text + mic row */}
