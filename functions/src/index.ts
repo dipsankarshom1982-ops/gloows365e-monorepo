@@ -53,14 +53,13 @@ export { getHomeFeed, getReelsFeed } from "./feed";
 // ── VCoins ─────────────────────────────────────────────────────────────────
 export { claimVCoinReward, getVCoinBalance } from "./vcoins";
 export { creditSignupBonus, creditWatchReward, claimSkillBattleReward, getMySkillBattleStanding } from "./vcoins";
-export { submitSkillBattleReel } from "./skillBattleSubmission";
 export { transitionBattleState } from "./skillBattleDomain";
 
 // ── Battle Engine (Phase 2C) — new canonical submissions/scoring/ranking/
 // finalization/rewards pipeline. Parallel to, and independent of, the
 // legacy posts-based SkillBattle flow above — see battleSubmissions.ts's
 // header for why. Nothing in the mobile app calls any of these yet.
-export { createBattleSubmission, withdrawBattleSubmission, reviewBattleSubmission } from "./battleSubmissions";
+export { withdrawBattleSubmission, reviewBattleSubmission } from "./battleSubmissions";
 export { engageBattleSubmission } from "./battleEngagement";
 export { onBattleSubmissionWritten, onBattleEngagementWritten, getMyBattleRank, getBattleLeaderboardPage } from "./battleRanking";
 export { finalizeBattleResults } from "./battleFinalization";
@@ -81,7 +80,6 @@ export { verifyBattleWinner } from "./moderation/winnerVerification";
 // Stream / Sightengine are the only intended callers, verified via HMAC
 // signature inside each — see their own file headers); everything else
 // here is the same admin-only posture as the rest of this directory.
-export { handleCloudflareStreamWebhook } from "./moderation/streamWebhook";
 export { handleSightengineCallback } from "./moderation/sightengineWebhook";
 export { requestReModeration } from "./moderation/reModeration";
 
