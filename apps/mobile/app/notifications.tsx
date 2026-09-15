@@ -27,7 +27,7 @@ type Notification = {
   id: string;
   title: string;
   body: string;
-  type: "achievement" | "contest" | "reward" | "system" | "ai";
+  type: "achievement" | "contest" | "reward" | "system" | "ai" | "shikshahub";
   read: boolean;
   createdAt: any;
 };
@@ -41,6 +41,9 @@ const TYPE_META: Record<
   reward: { icon: "🪙", color: "#F59E0B", bg: "rgba(245,158,11,0.12)" },
   system: { icon: "📢", color: "#38BDF8", bg: "rgba(56,189,248,0.12)" },
   ai: { icon: "🤖", color: "#A78BFA", bg: "rgba(167,139,250,0.12)" },
+  // ShikshaHub notifications phase — Instant Help response + session-ended
+  // student-facing events (functions/src/shikshahubNotify.ts).
+  shikshahub: { icon: "🎓", color: "#34D399", bg: "rgba(52,211,153,0.12)" },
 };
 
 function timeAgo(ts: any): string {

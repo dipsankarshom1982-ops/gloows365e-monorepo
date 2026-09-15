@@ -13,10 +13,11 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { generateExam, evaluateExam, GeneratedExam, ExamEvaluation } from "@/services/examSimulatorApi";
 import { SUBJECTS, SUBJECT_ICONS } from "@/lib/aiGuru/constants";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 
 const DIFFICULTIES = ["Easy", "Standard", "Exam Level"] as const;
 
@@ -33,7 +34,6 @@ export default function ExamSimulatorScreen() {
   const text    = isDarkMode ? "#f1f5f9" : colors.text;
   const muted   = isDarkMode ? "#94a3b8" : colors.textSecondary;
   const dim     = isDarkMode ? "#64748b" : colors.textSecondary;
-  const backBg  = isDarkMode ? "rgba(255,255,255,0.08)" : colors.card;
 
   const classLevel = String(studentProfile?.class ?? "10");
   const board      = studentProfile?.board ?? "CBSE";
@@ -55,6 +55,13 @@ export default function ExamSimulatorScreen() {
   const [timeLeft,   setTimeLeft]   = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Client-side free-quota gate: the first exam attempt is free, every
+  // attempt after that shows the upgrade screen instead of calling the
+  // backend. Enforces "first one free, then upgrade" locally, since the
+  // actual backend isn't part of this codebase.
+  const FREE_EXAMS = 1;
+  const examsUsedRef = useRef(0);
+
   const startTimer = (minutes: number) => {
     setTimeLeft(minutes * 60);
     timerRef.current = setInterval(() => {
@@ -75,6 +82,10 @@ export default function ExamSimulatorScreen() {
       Alert.alert("Missing info", "Please pick a subject and enter the chapter name.");
       return;
     }
+    // Client-side gate: once the free quota is used, show the upgrade
+    // screen immediately instead of calling the backend.
+    if (examsUsedRef.current >= FREE_EXAMS) { setPhase("limit"); return; }
+    examsUsedRef.current += 1;
     setPhase("generating");
     try {
       const result = await generateExam({
@@ -121,22 +132,18 @@ export default function ExamSimulatorScreen() {
     <View style={[S.root, { backgroundColor: bg }]}>
       {isDarkMode && <LinearGradient colors={["#060612", "#0a0a1a"]} style={StyleSheet.absoluteFillObject} />}
 
-      {/* Header */}
-      <Animated.View entering={FadeIn.duration(350)} style={[S.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity onPress={() => { if (timerRef.current) clearInterval(timerRef.current); router.back(); }} style={[S.backBtn, { backgroundColor: backBg }]}>
-          <Ionicons name="chevron-back" size={22} color={muted} />
-        </TouchableOpacity>
-        <View style={S.headerCenter}>
-          <Text style={[S.headerTitle, { color: text }]}>🎯 Exam Simulator</Text>
-          <Text style={[S.headerSub, { color: dim }]}>Board-pattern mock tests · AI-evaluated</Text>
-        </View>
-        {phase === "exam" && (
+      <AiGuruHeader
+        title="🎯 Exam Simulator"
+        subtitle="Board-pattern mock tests · AI-evaluated"
+        showLanguageBadge
+        onBack={() => { if (timerRef.current) clearInterval(timerRef.current); router.back(); }}
+        rightElement={phase === "exam" ? (
           <View style={[S.timerBadge, { backgroundColor: timeLeft < 120 ? "rgba(239,68,68,0.15)" : surface, borderColor: timeLeft < 120 ? "#ef4444" : border }]}>
             <Ionicons name="time-outline" size={14} color={timeLeft < 120 ? "#ef4444" : muted} />
             <Text style={[S.timerText, { color: timeLeft < 120 ? "#ef4444" : text }]}>{formatTime(timeLeft)}</Text>
           </View>
-        )}
-      </Animated.View>
+        ) : undefined}
+      />
 
       <ScrollView contentContainerStyle={[S.scroll, { paddingBottom: insets.bottom + 40 }]} showsVerticalScrollIndicator={false}>
 
@@ -437,11 +444,6 @@ export default function ExamSimulatorScreen() {
 
 const S = StyleSheet.create({
   root:   { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, gap: 10 },
-  backBtn:{ width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  headerCenter: { flex: 1 },
-  headerTitle:  { fontSize: 17, fontWeight: "900" },
-  headerSub:    { fontSize: 11, marginTop: 1 },
   timerBadge:   { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 20, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 5 },
   timerText:    { fontSize: 13, fontWeight: "900" },
   scroll:       { paddingHorizontal: 16, paddingTop: 8 },

@@ -6,7 +6,13 @@
  *   - Testers/admins → ALL modules shown regardless of isEnabled flag
  *
  * How it works:
- *   - Reads studentProfile.role from StudentProfileContext
+ *   - Reads role off users/{uid} — NOT studentProfile.role. The tester
+ *     toggle in apps/admin/src/pages/Students.tsx writes role to
+ *     users/{uid}, while StudentProfileContext (studentProfile) reads a
+ *     separate students/{uid} doc that never has role on it. Reading
+ *     studentProfile.role here always evaluated to undefined, so testers
+ *     never actually got the bypass — see functions/src/usageCheck.ts's
+ *     getSubscription() for the same users/{uid} read done server-side.
  *   - If role=="tester" or "admin": fetches ALL appModules (no isEnabled filter)
  *     and forces isEnabled=true on every one before passing to consumers
  *   - Everyone else: same as before — only isEnabled==true modules
@@ -20,7 +26,7 @@ import { db } from "@/lib/firebase";
 import type { AppModule, SubscriptionPlan } from "@/services/appConfigService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  collection, getDocs, onSnapshot, orderBy, query, where,
+  collection, doc, getDocs, onSnapshot, orderBy, query, where,
 } from "firebase/firestore";
 import { createContext, useContext, useEffect, useState } from "react";
 
@@ -43,7 +49,7 @@ const AppConfigContext = createContext<AppConfigContextType>({
 export const useAppConfig = () => useContext(AppConfigContext);
 
 export function AppConfigProvider({ children }: { children: React.ReactNode }) {
-  const { studentProfile } = useStudentProfile();
+  const { user } = useStudentProfile();
 
   const [modules,       setModules]       = useState<AppModule[]>([]);
   const [plans,         setPlans]         = useState<SubscriptionPlan[]>([]);
@@ -52,10 +58,23 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
 
   const configLoading = !modulesReady || !plansReady;
 
-  // Is this user a tester or admin?
-  const isTester =
-    studentProfile?.role === "tester" ||
-    studentProfile?.role === "admin";
+  // Is this user a tester or admin? Role lives on users/{uid}, not on the
+  // students/{uid} profile doc — see the header comment above.
+  const [isTester, setIsTester] = useState(false);
+
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) { setIsTester(false); return; }
+    const unsub = onSnapshot(
+      doc(db, "users", uid),
+      (snap) => {
+        const role = snap.exists() ? (snap.data()?.role as string | undefined) : undefined;
+        setIsTester(role === "tester" || role === "admin");
+      },
+      () => setIsTester(false)
+    );
+    return unsub;
+  }, [user?.uid]);
 
   useEffect(() => {
     // Seed UI from versioned cache

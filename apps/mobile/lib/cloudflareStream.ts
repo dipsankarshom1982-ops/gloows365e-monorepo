@@ -8,6 +8,15 @@
  * handles authentication and multipart encoding on the server.
  *
  * Uses expo-file-system uploadAsync for native streaming — no OOM.
+ *
+ * SECURITY (2026-09-11 audit P0 fix): the Worker now requires a verified
+ * Firebase ID token on every request — uploadToStream() sends it as a
+ * Bearer Authorization header and returns the Worker's signed
+ * `ownershipToken` alongside the usual uid/playbackUrl/thumbnailUrl.
+ * Callers (Createreelscreen.tsx) MUST forward that token, unmodified,
+ * into submitSkillBattleReel / createBattleSubmission — those callables
+ * reject a submission with no valid token. See cloudflare-worker.js's
+ * header and functions/src/mediaOwnership.ts for the full design.
  */
 import {
   cacheDirectory,
@@ -15,9 +24,22 @@ import {
   deleteAsync,
   getInfoAsync,
 } from "expo-file-system/legacy";
+import { auth } from "@/lib/firebase";
 
 const CF_CUSTOMER_CODE = "cif09s9962jkfc36";
 const WORKER_URL       = process.env.EXPO_PUBLIC_CF_WORKER_URL ?? "";
+
+// SECURITY FIX (2026-09-11 audit P0): the Worker now requires a verified
+// Firebase ID token before issuing any upload authorization — see
+// cloudflare-worker.js's header for the full design. Same
+// getIdToken()-then-Authorization-header pattern already used throughout
+// services/*Api.ts for calling this app's other authenticated HTTP
+// endpoints (aiGuruApi.ts etc.) — not a new convention for this codebase.
+async function getAuthHeader(): Promise<string> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error("You must be signed in to upload.");
+  return `Bearer ${token}`;
+}
 
 export function streamPlaybackUrl(videoId: string): string {
   return `https://customer-${CF_CUSTOMER_CODE}.cloudflarestream.com/${videoId}/manifest/video.m3u8`;
@@ -71,9 +93,13 @@ export async function uploadToStream(
   localUri:    string,
   onProgress?: (pct: number) => void,
   title?:      string
-): Promise<{ uid: string; playbackUrl: string; thumbnailUrl: string }> {
+): Promise<{ uid: string; playbackUrl: string; thumbnailUrl: string; ownershipToken: string }> {
   console.log("[CF-2] localUri:", localUri.slice(0, 60));
   console.log("[CF-2] Uploading via worker proxy:", uploadURL);
+
+  // Fetched BEFORE the upload starts — fail fast on a signed-out user
+  // rather than after uploading a potentially large file for nothing.
+  const authHeader = await getAuthHeader();
 
   // Ensure stable file:// URI (content:// URIs crash XHR on Android)
   let uploadUri  = localUri;
@@ -91,7 +117,7 @@ export async function uploadToStream(
 
     console.log("[CF-2] Sending to worker via XHR...");
 
-    const result = await new Promise<{ uid: string; playbackUrl: string; thumbnailUrl: string }>(
+    const result = await new Promise<{ uid: string; playbackUrl: string; thumbnailUrl: string; ownershipToken: string }>(
       (resolve, reject) => {
         const xhr = new XMLHttpRequest();
 
@@ -113,16 +139,30 @@ export async function uploadToStream(
                 reject(new Error(`Worker response missing uid: ${xhr.responseText.slice(0, 200)}`));
                 return;
               }
+              // SECURITY FIX (2026-09-11 audit P0): a response with no
+              // ownershipToken means the Worker either hasn't been
+              // redeployed with the auth fix yet, or is misconfigured —
+              // either way, submission would be rejected server-side
+              // anyway (mediaOwnership.ts requires it), so fail here with
+              // an honest message rather than silently uploading media
+              // nothing can ever submit.
+              if (!data.ownershipToken) {
+                reject(new Error("Upload succeeded but the server did not return an ownership token. Please try again later."));
+                return;
+              }
               onProgress?.(100);
               console.log("[CF-2] ✅ Upload complete. uid:", data.uid);
               resolve({
-                uid:          data.uid,
-                playbackUrl:  data.playbackUrl  ?? streamPlaybackUrl(data.uid),
-                thumbnailUrl: data.thumbnailUrl ?? streamThumbnailUrl(data.uid),
+                uid:            data.uid,
+                playbackUrl:    data.playbackUrl  ?? streamPlaybackUrl(data.uid),
+                thumbnailUrl:   data.thumbnailUrl ?? streamThumbnailUrl(data.uid),
+                ownershipToken: data.ownershipToken,
               });
             } catch (e) {
               reject(new Error(`Failed to parse worker response: ${xhr.responseText.slice(0, 200)}`));
             }
+          } else if (xhr.status === 401) {
+            reject(new Error("Your session has expired. Please sign in again and retry the upload."));
           } else {
             reject(new Error(`Worker upload failed — HTTP ${xhr.status}: ${xhr.responseText?.slice(0, 300)}`));
           }
@@ -134,6 +174,7 @@ export async function uploadToStream(
         xhr.open("POST", uploadURL);
         xhr.setRequestHeader("Content-Type",  "video/mp4");
         xhr.setRequestHeader("X-Video-Title", title ?? "Vidya Reel");
+        xhr.setRequestHeader("Authorization", authHeader);
 
         // React Native XHR reads file:// URI natively and streams raw bytes
         xhr.send({ uri: uploadUri, type: "video/mp4", name: "upload.mp4" } as any);

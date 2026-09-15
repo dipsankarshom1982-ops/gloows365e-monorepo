@@ -40,6 +40,9 @@ export const TTL = {
   seekhoCourses:   86400,  // 1 day
   vcoinBalance:    300,    // 5 min
 
+  // Daily Streak Quiz
+  dailyStreakQuizQuestion: 3600, // 1 hr — today's resolved question per student
+
   // Discover AI
   discoverQuery:    3600,  // 1 hr — per-query response cache
   discoverTrending: 86400, // 1 day
@@ -49,6 +52,11 @@ export const TTL = {
 
   // Ask AI Guru
   askGuruAnswer: 3600, // 1 hr — cache answer per question hash
+
+  // AI Guru Credits (pay-as-you-go) — display/fast-path only; the debit
+  // transaction in aiGuruCreditDebit.ts always re-reads Firestore directly,
+  // so a stale cached cost can never authorize an over-spend.
+  aiGuruCreditCost: 300, // 5 min
 
   // Ads system
   ads:      300,   // 5 min — per-module ad list
@@ -84,6 +92,10 @@ export const RK = {
   vcoinCount:      (uid: string, activity: string, date: string) =>
                      `vcoin:count:${uid}:${activity}:${date}`,
 
+  // Daily Streak Quiz
+  streakQuizQuestion: (uid: string, date: string) => `streakquiz:q:${uid}:${date}`,
+  streakQuizSubmitLock: (uid: string, date: string) => `streakquiz:lock:${uid}:${date}`,
+
   // Discover AI
   discoverSearch:   (uid: string, date: string) => `discover:search:${uid}:${date}`,
   discoverQuery:    (hash: string)              => `discover:query:${hash}`,
@@ -95,6 +107,9 @@ export const RK = {
   // Ask AI Guru
   askGuruChat:      (uid: string, date: string) => `askguru:chat:${uid}:${date}`,
   askGuruAnswer:    (hash: string)              => `askguru:ans:${hash}`,
+
+  // AI Guru Credits (pay-as-you-go)
+  aiGuruCreditCost: ()                          => `aiguru:creditcost`,
 
   // Ads system
   ads:       (module: string, cls: string)   => `ads:${module}:${cls}`,

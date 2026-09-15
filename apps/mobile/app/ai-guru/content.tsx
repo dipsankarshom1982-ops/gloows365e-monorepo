@@ -13,6 +13,7 @@ import { auth } from "@/lib/firebase";
 import { generateLesson } from "@/services/aiGuruApi";
 import { getRemainingLessons } from "@/services/aiGuruFirestore";
 import PremiumLock from "@/components/aiGuru/PremiumLock";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 
 type Tab = "text" | "image" | "topic";
 
@@ -29,7 +30,11 @@ export default function ContentScreen() {
   const [imageBase64, setBase64]    = useState<string | null>(null);
   const [imageMime, setMime]        = useState<string>("image/jpeg");
   const [generating, setGenerating] = useState(false);
-  const [remaining, setRemaining]   = useState<number>(2);
+  // Optimistic default before getRemainingLessons() resolves — matches
+  // the "first one free, then upgrade" policy. The real count (and the
+  // actual server-side enforcement) comes from Firestore via
+  // getRemainingLessons(), which lives outside this repo.
+  const [remaining, setRemaining]   = useState<number>(1);
   const [limitReached, setLimitReached] = useState(false);
 
   useEffect(() => {
@@ -103,7 +108,7 @@ export default function ContentScreen() {
     return (
       <PremiumLock
         feature="unlimited AI lesson generation"
-        onUpgrade={() => {}}
+        onUpgrade={() => router.push("/ai-guru/subscription" as any)}
         onDismiss={() => setLimitReached(false)}
       />
     );
@@ -117,13 +122,7 @@ export default function ContentScreen() {
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           keyboardVerticalOffset={0}
         >
-          <View style={S.header}>
-            <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
-              <Ionicons name="chevron-back" size={22} color="#94a3b8" />
-            </TouchableOpacity>
-            <Text style={S.headerTitle}>Add Content</Text>
-            <View style={{ width: 40 }} />
-          </View>
+          <AiGuruHeader title="Add Content" showLanguageBadge />
 
           {/* Lesson info summary */}
           <View style={S.infoBar}>
@@ -246,9 +245,6 @@ export default function ContentScreen() {
 const S = StyleSheet.create({
   bg:               { flex: 1 },
   safeArea:         { flex: 1 },
-  header:           { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 8, paddingBottom: 12, paddingHorizontal: 16 },
-  backBtn:          { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.08)", justifyContent: "center", alignItems: "center" },
-  headerTitle:      { color: "#f1f5f9", fontSize: 18, fontWeight: "800" },
   infoBar:          { paddingHorizontal: 16, paddingBottom: 12 },
   infoText:         { color: "#475569", fontSize: 12 },
   scroll:           { paddingHorizontal: 16 },

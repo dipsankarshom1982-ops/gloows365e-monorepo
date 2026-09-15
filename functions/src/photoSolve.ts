@@ -12,6 +12,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { callGeminiWithImage, parseJsonFromResponse } from "./gemini";
 import { getRedis, todayIST, TTL, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
+import { resolveStudentLanguage, getLanguageInstruction } from "./aiLanguage";
 
 const db = admin.firestore();
 
@@ -32,6 +33,28 @@ async function verifyAuthToken(req: any): Promise<string> {
   return decoded.uid;
 }
 
+// Extracted as its own pure function (2026-09-06) so the language-isolation
+// guarantee below is directly unit-testable without mocking Redis/Gemini —
+// see __tests__/aiLanguage.test.ts's cache-key coverage. Exported for that
+// reason only; the handler below is still the only real caller.
+export function buildPhotoSolveCacheKey(
+  imageBase64: string,
+  classLevel: string | number,
+  board: string,
+  language: string
+): string {
+  const imageHash = createHash("sha256")
+    .update(`${imageBase64.slice(0, 500)}:${classLevel}:${board}`)
+    .digest("hex")
+    .slice(0, 16);
+  return `photosolve:cache:${imageHash}:${language}`;
+}
+
+// FIX (production, 2026-09-06): used to hardcode a 3-way ternary
+// (Hindi/Bengali/Assamese, else English) that silently forced English for
+// every other supported language regardless of the student's actual
+// selection. Now uses the shared, exhaustive instruction — see
+// functions/src/aiLanguage.ts's header comment for the full context.
 function buildPhotoSolvePrompt(
   classLevel: string | number,
   board: string,
@@ -41,7 +64,8 @@ function buildPhotoSolvePrompt(
 
 A student has photographed a question or problem. Analyse it carefully and provide a complete solution.
 
-Respond in ${language === "Hindi" ? "Hindi" : language === "Bengali" ? "Bengali" : language === "Assamese" ? "Assamese" : "English"}.
+${getLanguageInstruction(language)}
+This applies to every text field below — questionText, solution steps, finalAnswer, conceptExplained, examTip, and similarQuestions — not just the top-level summary.
 
 Return ONLY a valid JSON object with this exact structure:
 {
@@ -88,12 +112,17 @@ export const photoSolve = onRequest(
       return;
     }
 
-    const { imageBase64, imageMimeType, classLevel, board, language } = req.body ?? {};
+    const { imageBase64, imageMimeType, classLevel, board, language: requestedLanguage } = req.body ?? {};
 
     if (!imageBase64 || !imageMimeType) {
       res.status(400).json({ error: "imageBase64 and imageMimeType are required", code: "MISSING_IMAGE" });
       return;
     }
+
+    // Priority order per functions/src/aiLanguage.ts: this request's own
+    // language field → the student's saved preference looked up
+    // server-side → English. Never trusts an unrecognized client value.
+    const language = await resolveStudentLanguage(uid, db, requestedLanguage);
 
     // ── Rate limit check ────────────────────────────────────────────────────
     try {
@@ -122,12 +151,18 @@ export const photoSolve = onRequest(
       // On error, allow through (fail open for UX)
     }
 
-    // ── Check result cache (image hash + class + board) ──────────────────────
-    const imageHash = createHash("sha256")
-      .update(`${imageBase64.slice(0, 500)}:${classLevel}:${board}`)
-      .digest("hex")
-      .slice(0, 16);
-    const cacheKey = `photosolve:cache:${imageHash}`;
+    // ── Check result cache (image hash + class + board + language) ───────────
+    // FIX (production, 2026-09-06): this cache key used to omit language
+    // entirely — the identical photo solved once in English would then be
+    // served straight back to a Hindi-preference student (and vice versa)
+    // from cache, bypassing buildPhotoSolvePrompt's language instruction
+    // altogether. `language` here is already the fully-resolved value (see
+    // resolveStudentLanguage() above), so two students with different
+    // preferences solving the same photo now get separate cache entries,
+    // one per language — matching every other Ask AI Guru cache
+    // (askAiGuru.ts's cacheKey already included language for the same
+    // reason; examSimulator.ts's below does too).
+    const cacheKey = buildPhotoSolveCacheKey(imageBase64, classLevel, board, language);
 
     try {
       const cached = await getRedis().get<object>(cacheKey);
@@ -139,7 +174,7 @@ export const photoSolve = onRequest(
 
     // ── Call Gemini Vision ───────────────────────────────────────────────────
     try {
-      const prompt = buildPhotoSolvePrompt(classLevel ?? "10", board ?? "CBSE", language ?? "English");
+      const prompt = buildPhotoSolvePrompt(classLevel ?? "10", board ?? "CBSE", language);
       const raw = await callGeminiWithImage(prompt, imageBase64, imageMimeType);
       const parsed = parseJsonFromResponse(raw) as any;
 

@@ -52,7 +52,13 @@ export default function VCoinsHeaderBadge({ uid, onPress }: Props) {
   }
 
   return (
-    <TouchableOpacity onPress={handlePress} activeOpacity={0.85}>
+    <TouchableOpacity
+      onPress={handlePress}
+      activeOpacity={0.85}
+      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+      accessibilityRole="button"
+      accessibilityLabel={`V-Coins balance, ${balance}. Open wallet`}
+    >
       <LinearGradient
         colors={["#F59E0B", "#D97706"]}
         start={{ x: 0, y: 0 }}

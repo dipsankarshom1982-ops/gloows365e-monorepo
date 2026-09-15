@@ -3,10 +3,10 @@
 
 import ScholarshipAdCard from "@/components/ads/ScholarshipAdCard";
 import AiGuruAvatar from "@/components/aiGuru/AiGuruAvatar";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 import { useAppTranslation, useLanguage } from "@/context/LanguageContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile, useFeatureFlags } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
-import { useFeatureFlags } from "@/context/FeatureFlagsContext"; // ← NEW
 import { useAdFeed } from "@/hooks/useAdFeed";
 import { auth } from "@/lib/firebase";
 import { isSubscribed } from "@/services/aiGuruFirestore";
@@ -41,7 +41,7 @@ type MenuCardDef = {
 // and the keys used in FeatureControl.tsx AIGURU_FEATURES
 const MENU_CARD_DEFS: MenuCardDef[] = [
   { flagKey: "dashboard",      titleKey: "menuAiDashboard",    subtitleKey: "menuAiDashboardSub",    emoji: "🧠",  gradient: ["#1e1b4b", "#312e81", "#4f46e5"], route: "/ai-guru/dashboard",        premium: false, accentColor: "#818cf8" },
-  { flagKey: "vidyaguru",      titleKey: "menuVidyaGuruCard",  subtitleKey: "menuVidyaGuruCardSub",  emoji: "🧑‍🏫", gradient: ["#1a0533", "#4c1d95", "#7c3aed"], route: "/ai-guru/vidyaguru",        premium: false, accentColor: "#c4b5fd" },
+  { flagKey: "skillguru",      titleKey: "menuSkillGuruCard",  subtitleKey: "menuSkillGuruCardSub",  emoji: "🎯", gradient: ["#1a0533", "#4c1d95", "#7c3aed"], route: "/ai-guru/skillguru",        premium: false, accentColor: "#c4b5fd" },
   { flagKey: "photo_solve",    titleKey: "menuPhotoSolve",     subtitleKey: "menuPhotoSolveSub",     emoji: "📸",  gradient: ["#451a03", "#92400e", "#d97706"], route: "/ai-guru/photo-solve",      premium: false, accentColor: "#fbbf24" },
   { flagKey: "exam_simulator", titleKey: "menuExamSimulator",  subtitleKey: "menuExamSimulatorSub",  emoji: "🎯",  gradient: ["#450a0a", "#7f1d1d", "#dc2626"], route: "/ai-guru/exam-simulator",   premium: false, accentColor: "#fca5a5" },
   { flagKey: "voice_tutor",    titleKey: "menuVoiceTutor",     subtitleKey: "menuVoiceTutorSub",     emoji: "🎙️",  gradient: ["#2e1065", "#6d28d9", "#a855f7"], route: "/ai-guru/voice-tutor",      premium: false, accentColor: "#d8b4fe" },
@@ -120,7 +120,6 @@ export default function AiGuruHomeScreen() {
   const borderCol = isDarkMode ? "#334155" : colors.border;
   const textMain  = isDarkMode ? "#f1f5f9" : colors.text;
   const textSec   = isDarkMode ? "#64748b" : colors.textSecondary;
-  const backBtnBg = isDarkMode ? "rgba(255,255,255,0.08)" : colors.card;
 
   useFocusEffect(
     useCallback(() => {
@@ -156,22 +155,33 @@ export default function AiGuruHomeScreen() {
       )}
 
       <ScrollView contentContainerStyle={S.scroll} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <Animated.View entering={FadeIn.duration(400)} style={S.header}>
-          <Pressable
-            onPress={() => router.back()}
-            style={[S.backBtn, { backgroundColor: backBtnBg }]}
-          >
-            <Ionicons name="chevron-back" size={22} color={colors.textSecondary} />
-          </Pressable>
-
-          <View style={S.headerRight}>
-            <View style={[S.langBadge, { backgroundColor: isDarkMode ? "rgba(99,102,241,0.15)" : "#ede9fe", borderColor: "#6366f1" }]}>
-              <Ionicons name="globe-outline" size={12} color="#6366f1" />
-              <Text style={S.langBadgeText}>{languageName}</Text>
+        <AiGuruHeader
+          rightElement={
+            <View style={S.headerRightRow}>
+              {!subscribed && !loading && (
+                <Pressable
+                  onPress={() => router.push("/ai-guru/subscription")}
+                  android_ripple={{ color: "rgba(255,255,255,0.2)" }}
+                  style={({ pressed }) => [S.upgradeBadge, { opacity: pressed ? 0.85 : 1 }]}
+                >
+                  <LinearGradient
+                    colors={["#92400e", "#d97706", "#fbbf24"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={S.upgradeBadgeGrad}
+                  >
+                    <Ionicons name="star" size={12} color="#fff" />
+                    <Text style={S.upgradeBadgeText}>{t("upgrade") ?? "Upgrade"}</Text>
+                  </LinearGradient>
+                </Pressable>
+              )}
+              <View style={[S.langBadge, { backgroundColor: isDarkMode ? "rgba(99,102,241,0.15)" : "#ede9fe", borderColor: "#6366f1" }]}>
+                <Ionicons name="globe-outline" size={12} color="#6366f1" />
+                <Text style={S.langBadgeText}>{languageName}</Text>
+              </View>
             </View>
-          </View>
-        </Animated.View>
+          }
+        />
 
         {/* Hero */}
         <Animated.View entering={FadeInDown.duration(500).delay(100)} style={S.heroSection}>
@@ -195,6 +205,32 @@ export default function AiGuruHomeScreen() {
           </View>
 
           <Text style={[S.heroSubtitle, { color: textSec }]}>{t("aiClassroom")}</Text>
+        </Animated.View>
+
+        {/* Change Language card — a distinct button (not the passive badge
+            above), so students can switch straight from the AI Guru home
+            screen. Ask AI Guru now falls back to whatever this is set to
+            for English/ambiguous-language questions (see
+            functions/src/askAiGuru.ts) — questions clearly written in
+            another language still get answered in that language, unchanged. */}
+        <Animated.View entering={FadeInDown.duration(400).delay(180)}>
+          <Pressable
+            onPress={() => router.push("/language-settings")}
+            android_ripple={{ color: "rgba(255,255,255,0.1)" }}
+            style={({ pressed }) => [
+              S.langCard,
+              { backgroundColor: isDarkMode ? "rgba(99,102,241,0.1)" : "#ede9fe", borderColor: "#6366f1", opacity: pressed ? 0.85 : 1 },
+            ]}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Ionicons name="globe-outline" size={18} color="#6366f1" />
+              <View>
+                <Text style={[S.langCardTitle, { color: textMain }]}>{t("language") ?? "Language"}</Text>
+                <Text style={[S.langCardValue, { color: textSec }]}>{languageName}</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#6366f1" />
+          </Pressable>
         </Animated.View>
 
         {/* Scholarship ad — only for non-premium users */}
@@ -255,13 +291,17 @@ export default function AiGuruHomeScreen() {
 const S = StyleSheet.create({
   bg:           { flex: 1 },
   orb:          { position: "absolute", borderRadius: 999 },
-  scroll:       { paddingHorizontal: 16, paddingBottom: 24, paddingTop: 52 },
+  scroll:       { paddingHorizontal: 16, paddingBottom: 24 },
 
-  header:       { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingBottom: 8 },
-  backBtn:      { width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  headerRight:  { flexDirection: "row", alignItems: "center", gap: 8 },
+  headerRightRow:{ flexDirection: "row", alignItems: "center", gap: 6 },
+  upgradeBadge:  { borderRadius: 10, overflow: "hidden" },
+  upgradeBadgeGrad: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  upgradeBadgeText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   langBadge:    { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, borderWidth: 1 },
   langBadgeText:{ color: "#6366f1", fontSize: 11, fontWeight: "700" },
+  langCard:      { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 14, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16 },
+  langCardTitle: { fontSize: 13, fontWeight: "800" },
+  langCardValue: { fontSize: 11, marginTop: 1 },
 
   heroSection:  { alignItems: "center", paddingVertical: 28, gap: 12 },
   avatarWrap:   { alignItems: "center", justifyContent: "center", marginBottom: 4 },

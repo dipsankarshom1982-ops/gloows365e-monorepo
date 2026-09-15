@@ -9,6 +9,7 @@ import {
 } from "react-native";
 
 import VCoinsHeaderBadge from "@/components/VCoinsHeaderBadge";
+import TitleAvatar from "@/components/TitleAvatar";
 import { useTheme } from "@/context/ThemeContext";
 import { auth, db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
@@ -30,6 +31,14 @@ type Props = {
   hideMenu?: boolean;
   hideTitle?: boolean;
 };
+
+// Module-scoped (not per-mount) so the reload() network call happens once
+// per app session instead of on every screen that renders <Header/>, and so
+// a dismissal sticks while navigating between tabs. Both reset naturally on
+// app restart — exactly the "dismissible for this session" behaviour the
+// soft-gate reminder is meant to have.
+let emailReloadedThisSession = false;
+let verifyBannerDismissed = false;
 
 // ─── Brand logo component ─────────────────────────────────────────────────────
 function BrandLogo() {
@@ -104,7 +113,22 @@ export default function Header({
   const router = useRouter();
 
   const [profilePic, setProfilePic] = useState<string | null>(null);
+  const [studentTitle, setStudentTitle] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [emailVerified, setEmailVerified] = useState(auth.currentUser?.emailVerified ?? true);
+  const [bannerDismissed, setBannerDismissed] = useState(verifyBannerDismissed);
+
+  // Soft-gate reminder — never blocks navigation or feature access, just
+  // nudges. Firebase's client SDK doesn't push emailVerified changes to
+  // auth.currentUser on its own, so a reload() is needed to notice a
+  // verification click that happened elsewhere; done once per app session.
+  useEffect(() => {
+    if (!auth.currentUser || emailReloadedThisSession) return;
+    emailReloadedThisSession = true;
+    auth.currentUser.reload()
+      .then(() => setEmailVerified(auth.currentUser?.emailVerified ?? true))
+      .catch(() => { /* ignore — keep cached value */ });
+  }, []);
 
   // 📸 Fetch profile picture from database
   useEffect(() => {
@@ -112,8 +136,10 @@ export default function Header({
       try {
         if (!auth.currentUser) return;
         const studentDoc = await getDoc(doc(db, "students", auth.currentUser.uid));
-        if (studentDoc.exists() && studentDoc.data()?.profilePic) {
-          setProfilePic(studentDoc.data().profilePic);
+        if (studentDoc.exists()) {
+          const d = studentDoc.data();
+          if (d?.profilePic) setProfilePic(d.profilePic);
+          if (d?.title) setStudentTitle(d.title);
         }
       } catch (error) {
         console.log("Error fetching profile picture:", error);
@@ -171,7 +197,13 @@ export default function Header({
         {/* LEFT */}
         <View style={styles.leftSection}>
           {!hideMenu && (
-            <TouchableOpacity onPress={handleMenuPress} style={styles.menuBtn}>
+            <TouchableOpacity
+              onPress={handleMenuPress}
+              style={styles.menuBtn}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              accessibilityRole="button"
+              accessibilityLabel="Open menu"
+            >
               <View style={[styles.menuLines, { backgroundColor: isDarkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" }]}>
                 <Ionicons name="menu" size={22} color={isDarkMode ? "#C7D2FE" : "#4F46E5"} />
               </View>
@@ -191,6 +223,9 @@ export default function Header({
           <TouchableOpacity
             style={styles.iconBtn}
             onPress={() => router.push("/notifications")}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
           >
             <View style={[styles.iconBg, { backgroundColor: isDarkMode ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.05)" }]}>
               <Ionicons
@@ -209,24 +244,50 @@ export default function Header({
           </TouchableOpacity>
 
           {/* PROFILE */}
-          <TouchableOpacity onPress={handleProfilePress}>
+          <TouchableOpacity
+            onPress={handleProfilePress}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel="Your profile"
+          >
             <View style={styles.avatarRing}>
-              <Image
-                source={{
-                  uri:
-                    profilePic ||
-                    `https://i.pravatar.cc/100?u=${auth.currentUser?.uid || "user"}`,
-                }}
-                style={styles.avatar}
-                defaultSource={{
-                  uri: `https://i.pravatar.cc/100?u=${auth.currentUser?.uid || "user"}`,
-                }}
-              />
+              {profilePic ? (
+                <Image source={{ uri: profilePic }} style={styles.avatar} />
+              ) : (
+                // FIX (bug report — avatar problem): this used to fall back
+                // to `https://i.pravatar.cc/100?u=<uid>` — a random
+                // third-party cartoon avatar unrelated to the student.
+                // Registration now collects a Title (Mr/Ms/Mrs); use the
+                // matching silhouette instead.
+                <TitleAvatar title={studentTitle} size={28} />
+              )}
             </View>
           </TouchableOpacity>
 
         </View>
       </View>
+
+      {/* Soft-gate email verification reminder — dismissible for this app
+          session, never blocks navigation. Hidden automatically for Google
+          sign-ups (their email is already verified). */}
+      {!emailVerified && !bannerDismissed && (
+        <TouchableOpacity
+          style={[styles.verifyBanner, { backgroundColor: isDarkMode ? "rgba(245,158,11,0.14)" : "rgba(245,158,11,0.12)" }]}
+          onPress={() => router.push("/profile-settings")}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="mail-unread-outline" size={15} color="#F59E0B" />
+          <Text style={styles.verifyBannerText} numberOfLines={2}>
+            Please ask your parent to verify the email we sent — tap to resend
+          </Text>
+          <TouchableOpacity
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={() => { verifyBannerDismissed = true; setBannerDismissed(true); }}
+          >
+            <Ionicons name="close" size={16} color="#F59E0B" />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -320,5 +381,24 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
+  },
+
+  verifyBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+
+  verifyBannerText: {
+    flex: 1,
+    fontSize: 11.5,
+    fontWeight: "600",
+    color: "#F59E0B",
+    lineHeight: 15,
   },
 });

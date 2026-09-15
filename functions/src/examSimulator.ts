@@ -9,6 +9,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
 import { getRedis, todayIST, TTL, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
+import { resolveStudentLanguage, getLanguageInstruction } from "./aiLanguage";
 
 const db = admin.firestore();
 const FREE_EXAMS_DAILY    = 1;  // free: 1 exam/day
@@ -40,7 +41,9 @@ function buildExamPrompt(
   return `You are an expert ${board} exam question setter for Class ${classLevel} ${subject}.
 
 Generate a ${difficulty} difficulty mock test for the chapter/topic: "${chapter}".
-The student's preferred language is ${language} — write questions and options in ${language === "Hindi" ? "Hindi" : language === "Bengali" ? "Bengali" : "English"}.
+
+${getLanguageInstruction(language)}
+This applies to every text field below — examTitle, question, options, explanation, and concept — not just the questions themselves.
 
 Return ONLY a valid JSON object:
 {
@@ -149,12 +152,19 @@ export const generateExam = onRequest(
       return;
     }
 
-    const { classLevel, board, subject, chapter, difficulty = "Standard", language = "English", questionCount = 15 } = req.body ?? {};
+    const { classLevel, board, subject, chapter, difficulty = "Standard", language: requestedLanguage, questionCount = 15 } = req.body ?? {};
 
     if (!subject || !chapter) {
       res.status(400).json({ error: "subject and chapter are required", code: "MISSING_PARAMS" });
       return;
     }
+
+    // Priority order per functions/src/aiLanguage.ts: this request's own
+    // language field (already correctly sourced from studentProfile.
+    // preferredLanguage on the client) → the student's saved preference
+    // looked up server-side → English. Never trusts an unrecognized value
+    // the way the old `language = "English"` default silently did.
+    const language = await resolveStudentLanguage(uid, db, requestedLanguage);
 
     // ── Rate limit ───────────────────────────────────────────────────────────
     try {

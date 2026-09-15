@@ -2,11 +2,14 @@ import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
 import { validateLessonJson } from "./validateLesson";
+import { deriveAnswerKey, sanitizeQuizForClient, quizLooksUnsplit } from "./contestQuizAnswerKey";
 
-function buildContestLessonPrompt(title: string, description: string): string {
+function buildContestLessonPrompt(title: string, description: string, language: string): string {
   return `You are AI Guru, a friendly Indian AI teacher for school students.
 Convert the following contest topic into an interactive self-learning lesson.
-Rules: Teach at a general school level. Use English. Style: Simple Explanation. Difficulty: Standard.
+Rules: Teach at a general school level. Write ALL user-facing text (titles, narration,
+questions, options, explanations, everything except the JSON field names themselves)
+in ${language}. Style: Simple Explanation. Difficulty: Standard.
 Keep each narration under 120 words. Use Indian examples. Return ONLY valid JSON, no markdown.
 
 Contest Title: ${title}
@@ -16,7 +19,7 @@ Return exactly this JSON (populate ALL fields, minimum 5 scenes, 8 quiz, 8 flash
 {"lessonTitle":"","shortIntro":"","estimatedDurationMinutes":0,"learningObjectives":[""],"prerequisites":[""],"storyHook":{"title":"","narration":"","studentMission":""},"scenes":[{"sceneNumber":1,"sceneTitle":"","visualType":"animation","visualDescription":"","narration":"","keyConcept":"","example":"","studentAction":"","checkQuestion":{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":""}}],"keyConcepts":[{"term":"","simpleMeaning":"","realLifeExample":""}],"practicalActivity":{"title":"","instructions":[""],"expectedOutput":"","aiEvaluationCriteria":[""]},"flashcards":[{"front":"","back":""}],"quickRevisionNotes":[""],"quiz":[{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":"","difficulty":"easy","concept":""}],"finalMission":{"title":"","task":"","successCriteria":[""],"rewardText":""},"commonMistakes":[{"mistake":"","correction":""}],"examTips":[""],"followUpPrompts":[]}`;
 }
 
-function buildBannerPrompt(title: string, description: string): string {
+function buildBannerPrompt(title: string, description: string, language: string): string {
   return `You are a UI designer creating a banner for an educational contest.
 Contest Title: "${title}"
 Description: "${description}"
@@ -25,64 +28,152 @@ Generate a vibrant banner theme for students. Return ONLY this JSON, no markdown
 
 Rules:
 - emoji: a single relevant emoji for the topic (e.g. "🧬", "🔢", "🌍")
-- tagline: a catchy 5-8 word motivational phrase about the topic
+- tagline: a catchy 5-8 word motivational phrase about the topic, written in ${language}
 - gradientStart: a dark hex color (e.g. "#0f0c29")
 - gradientEnd: a vibrant/colorful hex color (e.g. "#7c3aed")`;
 }
 
-function setCorsHeaders(res: functionsV1.Response): void {
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+const FALLBACK_BANNER = { emoji: "🌟", tagline: "Learn, Compete & Shine!", gradientStart: "#0f0c29", gradientEnd: "#7c3aed" };
+
+// ── SECURITY (VidyaStar Phase 1 — score integrity) ──────────────────────────
+// The AI-generated quiz naturally comes back with correctAnswerIndex/
+// explanation embedded per question (see buildContestLessonPrompt above —
+// the model is asked for both, since the SAME quiz shape is reused for the
+// in-lesson scene checkQuestions, which legitimately do reveal their answer
+// immediately as a local, ungraded "check your understanding" prompt).
+//
+// The contest's final quiz (lessonJson.quiz) is different: it's what
+// functions/src/submitVidyastarContestQuiz.ts actually scores and rewards.
+// That answer key must never reach the client — not via a direct Firestore
+// read of this doc, and not via this callable's own return value (both were
+// previously true: contests/{id}/lessons/{language} was world-readable AND
+// this function returned lessonJson verbatim, answers included).
+//
+// Fix: split storage. The PUBLIC doc (this collection, still what the
+// callable returns) never carries quiz answers. A new PRIVATE doc —
+// contests/{id}/lessonAnswers/{language}, firestore.rules deny-all,
+// Admin-SDK-only — carries just the per-question answer key, index-aligned
+// with the public quiz array, and is read only by the grading function.
+//
+// scenes[].checkQuestion is intentionally left untouched: it's never
+// submitted anywhere or used for scoring/reward, so it isn't part of this
+// trust boundary.
+//
+// deriveAnswerKey/sanitizeQuizForClient/quizLooksUnsplit now live in
+// contestQuizAnswerKey.ts, shared with submitVidyastarContestQuiz.ts's own
+// historical-lesson fallback (see that file's header comment) — both need
+// the exact same extraction logic.
+function splitQuizAnswerKey(lessonJson: any): { publicLessonJson: any; answerKey: ReturnType<typeof deriveAnswerKey> } {
+  const rawQuiz: any[] = Array.isArray(lessonJson?.quiz) ? lessonJson.quiz : [];
+  const answerKey = deriveAnswerKey(rawQuiz, "getContestLesson");
+  const publicQuiz = sanitizeQuizForClient(rawQuiz);
+  return { publicLessonJson: { ...lessonJson, quiz: publicQuiz }, answerKey };
 }
 
-async function verifyAdminToken(req: functionsV1.https.Request): Promise<string> {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) throw new Error("UNAUTHENTICATED");
-  const decoded = await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
-
-  // Accept custom claim OR presence in admins collection (handles accounts set up outside createAdmin)
-  if (decoded.admin || decoded.superAdmin) return decoded.uid;
-
-  const adminDoc = await admin.firestore().collection("admins").doc(decoded.uid).get();
-  if (!adminDoc.exists) throw new Error("FORBIDDEN: Not an admin");
-  return decoded.uid;
+// Belt-and-suspenders for historical docs: any lesson doc written before
+// this fix shipped may still have the raw quiz (with answers) sitting in
+// its `lessonJson.quiz`. Rather than migrating that data (explicitly out of
+// scope — see the Phase 1 report), every return path re-sanitizes at read
+// time, so a pre-fix cached doc can never leak its embedded answer key
+// through this callable, regardless of when it was generated.
+function sanitizeForClient(lessonJson: any): any {
+  if (!lessonJson || !Array.isArray(lessonJson.quiz)) return lessonJson;
+  return { ...lessonJson, quiz: sanitizeQuizForClient(lessonJson.quiz) };
 }
 
-export const generateContestLesson = functionsV1
+// Lessons no longer live on the contest doc — a contest is now visible to
+// every student regardless of language (admin no longer picks one), and the
+// AI generates the lesson lazily, per (contest, language), the first time a
+// student in that language opens it. contests/{contestId}/lessons/{language}
+// holds one cached doc per language ever actually requested.
+//
+// Every viewer's request has to be atomic against every OTHER viewer of the
+// same (contest, language) hitting this at the same moment — two students
+// opening a brand-new Hindi lesson seconds apart must not both trigger a
+// full Gemini generation. The transaction below claims "generating" status
+// before any AI call happens; a second caller that finds "generating"
+// already claimed backs off with `already-exists` instead of racing.
+export const getContestLesson = functionsV1
   .runWith({ timeoutSeconds: 300, memory: "512MB", secrets: ["GEMINI_API_KEY"] })
-  .https.onRequest(async (req, res) => {
-    setCorsHeaders(res);
-    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
-    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
-
-    try {
-      await verifyAdminToken(req);
-    } catch (e: any) {
-      const status = e.message === "UNAUTHENTICATED" ? 401 : 403;
-      res.status(status).json({ error: e.message }); return;
+  .https.onCall(async (data: { contestId: string; language: string }, context) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
     }
 
-    const { contestId } = req.body;
-    if (!contestId) { res.status(400).json({ error: "contestId required" }); return; }
+    const contestId = (data?.contestId ?? "").trim();
+    const language  = (data?.language ?? "").trim() || "English";
+    if (!contestId) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "contestId is required");
+    }
 
     const db = admin.firestore();
-    const contestRef = db.collection("contests").doc(contestId);
+    const contestRef       = db.doc(`contests/${contestId}`);
+    const lessonRef        = contestRef.collection("lessons").doc(language);
+    // Private, Admin-SDK-only — firestore.rules denies all client access.
+    const lessonAnswersRef = contestRef.collection("lessonAnswers").doc(language);
+
+    const claim = await db.runTransaction(async (tx) => {
+      const lessonSnap = await tx.get(lessonRef);
+      if (lessonSnap.exists) {
+        const existing = lessonSnap.data()!;
+        if (existing.status === "completed") return { outcome: "cached" as const, data: existing };
+        if (existing.status === "generating") return { outcome: "in-progress" as const };
+        // status === "failed" — fall through and let this call retry it.
+      }
+      tx.set(lessonRef, {
+        status: "generating",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return { outcome: "claimed" as const };
+    });
+
+    if (claim.outcome === "cached") {
+      // Lazy backfill: contests/{id}.banners.{language} was added after
+      // some lessons already existed (see the write below and the
+      // COMPATIBILITY comment above it) — a pre-fix cached doc won't have
+      // populated it yet. Best-effort, never blocks the response.
+      contestRef.set({ banners: { [language]: claim.data.bannerMeta } }, { merge: true }).catch(() => {});
+
+      // COMPATIBILITY (historical contests, pre-Phase-1): a lesson
+      // generated before the public/private answer-key split shipped still
+      // has its raw quiz (with correctAnswerIndex/explanation) sitting in
+      // this doc's own lessonJson — submitVidyastarContestQuiz.ts derives
+      // the same key on-the-fly as a fallback so grading never breaks for
+      // these, but self-heals here too: the next time anyone re-opens this
+      // lesson, backfill lessonAnswers/{language} so that fallback path
+      // isn't needed again for this (contest, language). Best-effort,
+      // never blocks the response.
+      const rawQuiz = claim.data.lessonJson?.quiz;
+      if (quizLooksUnsplit(rawQuiz)) {
+        lessonAnswersRef.get().then((existing) => {
+          if (existing.exists) return;
+          const answerKey = deriveAnswerKey(rawQuiz, `getContestLesson backfill (contest=${contestId})`);
+          return lessonAnswersRef.set({ answerKey, updatedAt: admin.firestore.FieldValue.serverTimestamp(), backfilledFrom: "legacy-lessonJson" });
+        }).catch(() => {});
+      }
+
+      // sanitizeForClient covers historical docs generated before the
+      // public/private split shipped — see that function's header comment.
+      return { lessonJson: sanitizeForClient(claim.data.lessonJson), bannerMeta: claim.data.bannerMeta, status: "completed" as const };
+    }
+    if (claim.outcome === "in-progress") {
+      throw new functionsV1.https.HttpsError(
+        "already-exists",
+        "This lesson is already being generated — try again in a few seconds"
+      );
+    }
+
+    // claim.outcome === "claimed" — this call does the actual generation.
+    const contestSnap = await contestRef.get();
+    if (!contestSnap.exists) {
+      throw new functionsV1.https.HttpsError("not-found", "Contest not found");
+    }
+    const { title = "", description = "" } = contestSnap.data()!;
 
     try {
-      const contestSnap = await contestRef.get();
-      if (!contestSnap.exists) { res.status(404).json({ error: "Contest not found" }); return; }
-
-      const { title = "", description = "" } = contestSnap.data()!;
-
-      await contestRef.update({
-        lessonStatus: "generating",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
       const [lessonRaw, bannerRaw] = await Promise.all([
-        callGeminiText(buildContestLessonPrompt(title, description)),
-        callGeminiText(buildBannerPrompt(title, description)),
+        callGeminiText(buildContestLessonPrompt(title, description, language)),
+        callGeminiText(buildBannerPrompt(title, description, language)),
       ]);
 
       const lessonJson = parseJsonFromResponse(lessonRaw);
@@ -92,24 +183,43 @@ export const generateContestLesson = functionsV1
       try {
         bannerMeta = parseJsonFromResponse(bannerRaw) as object;
       } catch {
-        bannerMeta = { emoji: "🌟", tagline: "Learn, Compete & Shine!", gradientStart: "#0f0c29", gradientEnd: "#7c3aed" };
+        bannerMeta = FALLBACK_BANNER;
       }
 
-      await contestRef.update({
-        lessonJson,
+      const { publicLessonJson, answerKey } = splitQuizAnswerKey(lessonJson);
+
+      const batch = db.batch();
+      batch.set(lessonRef, {
+        lessonJson: publicLessonJson,
         bannerMeta,
-        lessonStatus: "completed",
+        status: "completed",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      batch.set(lessonAnswersRef, {
+        answerKey,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+      // COMPATIBILITY (VidyaStar Phase 1 validation): useContestBanner.ts
+      // (both platforms) reads bannerMeta with a plain, uncalled Firestore
+      // getDoc — deliberately not through this callable, since calling it
+      // would trigger a full Gemini generation just from rendering a
+      // contest card (see that hook's own header comment). Locking
+      // contests/{id}/lessons/{language} down to deny-all (Phase 1) broke
+      // that direct read. bannerMeta carries no quiz/answer data, so
+      // mirroring it onto the contest doc itself — already world-readable
+      // to any authenticated user, unaffected by the Phase 1 rule change —
+      // keeps that hook working without reopening the answer-key leak.
+      batch.set(contestRef, { banners: { [language]: bannerMeta } }, { merge: true });
+      await batch.commit();
 
-      res.status(200).json({ success: true, lessonStatus: "completed", bannerMeta });
+      return { lessonJson: publicLessonJson, bannerMeta, status: "completed" as const };
     } catch (err: any) {
       const msg: string = err?.message ?? "Unknown error";
-      console.error("generateContestLesson error:", msg);
-      await contestRef.update({
-        lessonStatus: "failed",
+      console.error(`getContestLesson error (contest=${contestId} language=${language}):`, msg);
+      await lessonRef.set({
+        status: "failed",
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }).catch(() => {});
-      res.status(500).json({ error: msg });
+      }, { merge: true }).catch(() => {});
+      throw new functionsV1.https.HttpsError("internal", "Failed to generate the lesson. Please try again.");
     }
   });

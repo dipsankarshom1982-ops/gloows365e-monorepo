@@ -12,10 +12,11 @@ interface AiFeature{ key: string; icon: string; label: string; description: stri
 
 // ─── Home page sections ────────────────────────────────────────────────────────
 const HOME_SECTIONS: Section[] = [
-  { key: "stories",          icon: "📖", label: "Stories ✅ LAUNCH",        description: "Horizontal story circles — LIVE DAY 1" },
-  { key: "aiguru",           icon: "🤖", label: "AI Guru Banner ✅ LAUNCH",  description: "AI Guru promo card — LIVE DAY 1" },
-  { key: "creator_reels",    icon: "🎬", label: "Short Reels ✅ LAUNCH",     description: "Admin-curated short reels — LIVE DAY 1" },
-  { key: "referral",         icon: "🎁", label: "Referral Card ✅ LAUNCH",   description: "Refer & Earn card — LIVE DAY 1" },
+  { key: "stories",          icon: "📖", label: "Stories",        description: "Horizontal story circles" },
+  { key: "aiguru",           icon: "🤖", label: "AI Guru Banner",  description: "AI Guru promo card" },
+  { key: "daily_streak_quiz", icon: "🔥", label: "Daily Streak Quiz Card", description: "Daily quiz streak promo card" },
+  { key: "creator_reels",    icon: "🎬", label: "Short Reels",     description: "Admin-curated short reels" },
+  { key: "referral",         icon: "🎁", label: "Referral Card",   description: "Refer & Earn card" },
   { key: "skillshorts",      icon: "⚡", label: "Skill Battle Reels",        description: "Student battle reels from approved posts" },
   { key: "skillbattle",      icon: "⚔️", label: "Skill Battle Preview",      description: "Live skill battle cards section" },
   { key: "home_ads",         icon: "📢", label: "Home Ads Carousel",         description: "Banner ads carousel" },
@@ -27,21 +28,16 @@ const HOME_SECTIONS: Section[] = [
   { key: "learning",         icon: "🎥", label: "Short Learning Reels",      description: "Learning reels injected between posts" },
   { key: "feed_posts",       icon: "📝", label: "Feed Posts",                description: "Student photo/video posts in feed" },
   { key: "feed_ads",         icon: "📣", label: "Feed Ads",                  description: "Ads injected between feed posts" },
+  { key: "glostore_preview", icon: "🛍️", label: "GloStore Preview",          description: "Affiliate product flash cards (max 20, picked below in Affiliate Products)" },
 ];
 
 // ─── AI Guru features ──────────────────────────────────────────────────────────
-// ─── 🚀 LAUNCH FEATURES — these 6 go live on day 1 ───────────────────────────
-const LAUNCH_HOME_KEYS   = ["stories", "aiguru", "creator_reels", "referral"];
-const LAUNCH_AI_KEYS     = ["ask_aiguru", "notebook"];
-const LAUNCH_DRAWER_KEYS = ["home", "wallet", "leaderboard", "language", "settings"];
 
 const AIGURU_FEATURES: AiFeature[] = [
-  // ── Launch day features ──
-  { key: "ask_aiguru",     icon: "🤖",  label: "Ask AI Guru ✅ LAUNCH",   description: "Q&A chat with prompt chips — LIVE DAY 1" },
-  { key: "notebook",       icon: "📓",  label: "My AI Notebook ✅ LAUNCH", description: "Saved AI conversations — LIVE DAY 1" },
-  // ── Post-launch features ──
+  { key: "ask_aiguru",     icon: "🤖",  label: "Ask AI Guru",   description: "Q&A chat with prompt chips" },
+  { key: "notebook",       icon: "📓",  label: "My AI Notebook", description: "Saved AI conversations" },
   { key: "dashboard",      icon: "🧠",  label: "AI Dashboard",             description: "Personal AI study dashboard" },
-  { key: "vidyaguru",      icon: "🧑‍🏫", label: "VidyaGuru Chat",           description: "AI tutor voice/text chat" },
+  { key: "skillguru",      icon: "🎯",  label: "Ask AI SkillGuru",         description: "AI skills coach voice/text chat (resume, interview, communication, coding, soft skills)" },
   { key: "photo_solve",    icon: "📸",  label: "PhotoSolve AI",             description: "Snap a question photo → instant solution" },
   { key: "exam_simulator", icon: "🎯",  label: "Exam Simulator",            description: "AI-generated board-pattern mock tests" },
   { key: "voice_tutor",    icon: "🎙️",  label: "Voice Tutor",               description: "Speak doubt in regional language, get answer" },
@@ -55,15 +51,17 @@ const AIGURU_FEATURES: AiFeature[] = [
 
 // ─── Drawer menu items ─────────────────────────────────────────────────────────
 const DRAWER_ITEMS: Section[] = [
-  { key: "home",        icon: "🏠", label: "Home",         description: "Home tab link",                  locked: true },
-  { key: "leaderboard", icon: "🏆", label: "Leaderboard",  description: "Pan India leaderboard" },
+  { key: "home",        icon: "🏠", label: "Home",         description: "Home tab link",                         locked: true },
+  { key: "starboard",   icon: "🏆", label: "Starboard",    description: "V-Coins annual rank & leaderboard" },
   { key: "wallet",      icon: "💰", label: "Wallet",       description: "VCoins wallet" },
   { key: "settings",    icon: "⚙️", label: "Settings",     description: "App settings" },
   { key: "dashboard",   icon: "📊", label: "Dashboard",    description: "Student dashboard" },
   { key: "aiguru",      icon: "🤖", label: "AI Guru",      description: "AI Guru main screen" },
-  { key: "learnfun",    icon: "📖", label: "LearnFun",     description: "LearnFun gamification screen" },
+  { key: "learnfun",    icon: "📖", label: "LearnFun",     description: "LearnFun gamification (drawer only)" },
+  { key: "skillboost",  icon: "⚡", label: "Skill Boost",  description: "Skill Boost screen (drawer only)" },
   { key: "language",    icon: "🌐", label: "Language",     description: "Language selector" },
   { key: "skillboard",  icon: "⚔️", label: "Skill Board",  description: "Skill battle leaderboard" },
+  { key: "glostore",    icon: "🛍️", label: "GloStore",     description: "Affiliate product store link" },
 ];
 
 // ─── Defaults ──────────────────────────────────────────────────────────────────
@@ -115,7 +113,7 @@ export default function FeatureControl() {
   const [homeFlags,   setHomeFlags]   = useState<Record<string, boolean>>(defaultHomeFlags);
   const [aiFlags,     setAiFlags]     = useState<Record<string, boolean>>(defaultAiFlags);
   const [drawerFlags, setDrawerFlags] = useState<Record<string, boolean>>(defaultDrawerFlags);
-  const [loading, setSaving_l] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [saving,  setSaving]   = useState(false);
   const [saved,   setSaved]    = useState(false);
 
@@ -128,17 +126,21 @@ export default function FeatureControl() {
       if (homeSnap.exists())   setHomeFlags({   ...defaultHomeFlags,   ...homeSnap.data()   });
       if (aiSnap.exists())     setAiFlags({     ...defaultAiFlags,     ...aiSnap.data()     });
       if (drawerSnap.exists()) setDrawerFlags({ ...defaultDrawerFlags, ...drawerSnap.data() });
-      setSaving_l(false);
-    }).catch(() => setSaving_l(false));
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
 
-  const save = async () => {
+  const save = async (overrides?: {
+    home?: Record<string, boolean>;
+    ai?: Record<string, boolean>;
+    drawer?: Record<string, boolean>;
+  }) => {
     setSaving(true); setSaved(false);
     try {
       await Promise.all([
-        setDoc(doc(db, "featureFlags", "homeSection"), homeFlags),
-        setDoc(doc(db, "featureFlags", "aiGuru"),      aiFlags),
-        setDoc(doc(db, "featureFlags", "drawerItems"), drawerFlags),
+        setDoc(doc(db, "featureFlags", "homeSection"), overrides?.home   ?? homeFlags),
+        setDoc(doc(db, "featureFlags", "aiGuru"),      overrides?.ai     ?? aiFlags),
+        setDoc(doc(db, "featureFlags", "drawerItems"), overrides?.drawer ?? drawerFlags),
       ]);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -158,7 +160,7 @@ export default function FeatureControl() {
   );
 
   const SaveBtn = ({ className = "" }) => (
-    <button onClick={save} disabled={saving}
+    <button onClick={() => save()} disabled={saving}
       className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${
         saved ? "bg-green-600 text-white" : "bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white"
       } ${className}`}>
@@ -179,52 +181,6 @@ export default function FeatureControl() {
         </div>
         <SaveBtn />
       </div>
-
-      {/* ── 🚀 Launch Features ──────────────────────────────────────────────── */}
-      <section className="border border-emerald-500/40 rounded-2xl p-5 bg-emerald-950/20">
-        <div className="flex items-center gap-3 mb-4">
-          <div>
-            <h2 className="text-xl font-black text-emerald-400">🚀 Launch Day Features</h2>
-            <p className="text-slate-400 text-xs mt-0.5">
-              These 6 features go live on Day 1. Everything else can be toggled post-launch.
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              const newHome = { ...homeFlags };
-              LAUNCH_HOME_KEYS.forEach((k) => (newHome[k] = true));
-              setHomeFlags(newHome);
-              const newAi = { ...aiFlags };
-              LAUNCH_AI_KEYS.forEach((k) => (newAi[k] = true));
-              setAiFlags(newAi);
-              const newDrawer = { ...drawerFlags };
-              LAUNCH_DRAWER_KEYS.forEach((k) => (newDrawer[k] = true));
-              setDrawerFlags(newDrawer);
-            }}
-            className="ml-auto text-xs px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold transition-colors"
-          >
-            ✅ Enable All Launch Features
-          </button>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {[
-            { label: "📖 Stories",        key: "stories",      flags: homeFlags,   setter: setHomeFlags   },
-            { label: "🤖 AI Guru Banner",  key: "aiguru",       flags: homeFlags,   setter: setHomeFlags   },
-            { label: "🎬 Short Reels",     key: "creator_reels",flags: homeFlags,   setter: setHomeFlags   },
-            { label: "🎁 Referral Card",   key: "referral",     flags: homeFlags,   setter: setHomeFlags   },
-            { label: "🤖 Ask AI Guru",     key: "ask_aiguru",   flags: aiFlags,     setter: setAiFlags     },
-            { label: "📓 AI Notebook",     key: "notebook",     flags: aiFlags,     setter: setAiFlags     },
-          ].map((f) => (
-            <div key={f.key} className={`flex items-center justify-between gap-3 rounded-xl px-4 py-3 border ${f.flags[f.key] ? "border-emerald-500/50 bg-emerald-900/20" : "border-slate-700 bg-slate-800/40"}`}>
-              <span className="text-sm font-bold text-white">{f.label}</span>
-              <ToggleSwitch
-                enabled={f.flags[f.key] ?? true}
-                onToggle={() => f.setter((prev: Record<string,boolean>) => ({ ...prev, [f.key]: !prev[f.key] }))}
-              />
-            </div>
-          ))}
-        </div>
-      </section>
 
       {/* ── Drawer Items ────────────────────────────────────────────────────── */}
       <section>

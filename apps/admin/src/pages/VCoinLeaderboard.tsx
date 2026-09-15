@@ -1,22 +1,48 @@
 // PATH: admin-web/src/pages/VCoinLeaderboard.tsx
 // New admin page:
 //  • Shows top 100 users ranked by vCoinsYear_{currentYear}
-//  • Year selector to view historical rankings
 //  • Assign surprise gifts to specific users or top-N users
 //  • View gift claim status and delivery address
-
+//
+// Surprise gifts are prizeClaims/{id} docs (periodType "surprise_gift"),
+// the exact same collection/workflow VidyaStar Starboard prizes use — see
+// apps/admin/src/pages/PrizeDeliveries.tsx (fulfillment: shipped/delivered)
+// and apps/mobile/app/my-prizes.tsx (student claim UI). This used to write
+// a bespoke users/{uid}.surpriseGift field with no fulfillment tracking at
+// all (no status beyond claimed/unclaimed, no delivery visibility in any
+// admin screen); moving it onto prizeClaims gets courier/tracking/
+// expected-delivery-date tracking for free instead of building a second,
+// parallel system. Pre-migration surpriseGift data on old user docs is
+// left as-is (historical record) — this only changes how NEW gifts are
+// assigned going forward.
 import { useEffect, useState } from "react";
 import {
+  addDoc,
   collection,
+  deleteDoc,
   doc,
   getDocs,
   limit,
   orderBy,
   query,
+  serverTimestamp,
   updateDoc,
-  getDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
+
+type GiftPrizeType = "physical" | "gift_voucher";
+type GiftStatus = "unclaimed" | "claimed" | "shipped" | "delivered";
+
+interface ClaimInfo { name: string; address: string; whatsapp: string; email: string; }
+interface Gift {
+  claimId: string;
+  prizeType: GiftPrizeType;
+  prizeValue: string;
+  status: GiftStatus;
+  claimInfo?: ClaimInfo;
+  expectedDeliveryDate?: string;
+}
 
 interface RankEntry {
   uid:        string;
@@ -28,13 +54,7 @@ interface RankEntry {
   profilePic: string;
   yearCoins:  number;
   rank:       number;
-  gift?: {
-    available:       boolean;
-    claimed:         boolean;
-    giftDescription: string;
-    deliveryAddress?: any;
-    claimedAt?:       any;
-  };
+  gift?: Gift;
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -45,20 +65,46 @@ export default function VCoinLeaderboard() {
   const [loading, setLoading]     = useState(false);
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
   const [giftDesc, setGiftDesc]   = useState("");
+  const [giftType, setGiftType]   = useState<GiftPrizeType>("physical");
   const [bulkN, setBulkN]         = useState(10);
   const [saving, setSaving]       = useState(false);
   const [viewAddr, setViewAddr]   = useState<RankEntry | null>(null);
 
   const yearField = `vCoinsYear_${year}`;
+  const periodKey = `surprise_gift_${year}`;
 
   useEffect(() => { fetchLeaderboard(); }, [year]);
 
   const fetchLeaderboard = async () => {
     setLoading(true);
     try {
-      const q    = query(collection(db, "users"), orderBy(yearField, "desc"), limit(100));
-      const snap = await getDocs(q);
-      const list: RankEntry[] = snap.docs.map((d, i) => ({
+      const [rankSnap, giftSnap] = await Promise.all([
+        getDocs(query(collection(db, "users"), orderBy(yearField, "desc"), limit(100))),
+        // Two equality filters, no orderBy — doesn't need a composite
+        // index. One query for every gift this year, mapped by uid below,
+        // rather than one query per row (Firestore has no cheap "give me
+        // these 100 uids" filter beyond a 30-item `in` clause).
+        getDocs(query(
+          collection(db, "prizeClaims"),
+          where("periodType", "==", "surprise_gift"),
+          where("periodKey", "==", periodKey)
+        )),
+      ]);
+
+      const giftByUid = new Map<string, Gift>();
+      giftSnap.docs.forEach((d) => {
+        const data = d.data();
+        giftByUid.set(data.uid, {
+          claimId: d.id,
+          prizeType: data.prizeType,
+          prizeValue: data.prizeValue,
+          status: data.status,
+          claimInfo: data.claimInfo,
+          expectedDeliveryDate: data.expectedDeliveryDate,
+        });
+      });
+
+      const list: RankEntry[] = rankSnap.docs.map((d, i) => ({
         uid:        d.id,
         name:       d.data().name       || "—",
         school:     d.data().school     || "—",
@@ -68,7 +114,7 @@ export default function VCoinLeaderboard() {
         profilePic: d.data().profilePic || "",
         yearCoins:  d.data()[yearField] ?? 0,
         rank:       i + 1,
-        gift:       d.data().surpriseGift,
+        gift:       giftByUid.get(d.id),
       }));
       setEntries(list);
     } finally {
@@ -76,19 +122,25 @@ export default function VCoinLeaderboard() {
     }
   };
 
+  const createGiftClaim = (uid: string) => addDoc(collection(db, "prizeClaims"), {
+    uid,
+    prizeType: giftType,
+    prizeValue: giftDesc.trim(),
+    medalEmoji: "🎁",
+    rank: 0,
+    periodType: "surprise_gift",
+    periodKey,
+    payoutLabel: `Surprise Gift ${year}`,
+    wonAt: serverTimestamp(),
+    status: "unclaimed" as GiftStatus,
+  });
+
   // Assign gift to a single user
   const assignGiftToUser = async (uid: string) => {
     if (!giftDesc.trim()) { alert("Please enter a gift description."); return; }
     setSaving(true);
     try {
-      await updateDoc(doc(db, "users", uid), {
-        surpriseGift: {
-          available:       true,
-          year,
-          claimed:         false,
-          giftDescription: giftDesc.trim(),
-        },
-      });
+      await createGiftClaim(uid);
       await fetchLeaderboard();
       setSelectedUid(null);
       setGiftDesc("");
@@ -103,17 +155,8 @@ export default function VCoinLeaderboard() {
     if (!window.confirm(`Assign gift to top ${bulkN} users?`)) return;
     setSaving(true);
     try {
-      const targets = entries.slice(0, bulkN);
-      await Promise.all(targets.map((e) =>
-        updateDoc(doc(db, "users", e.uid), {
-          surpriseGift: {
-            available:       true,
-            year,
-            claimed:         false,
-            giftDescription: giftDesc.trim(),
-          },
-        })
-      ));
+      const targets = entries.slice(0, bulkN).filter((e) => !e.gift);
+      await Promise.all(targets.map((e) => createGiftClaim(e.uid)));
       await fetchLeaderboard();
       setGiftDesc("");
     } finally {
@@ -121,12 +164,13 @@ export default function VCoinLeaderboard() {
     }
   };
 
-  // Revoke gift
-  const revokeGift = async (uid: string) => {
+  // Revoke gift — only possible while still unclaimed (firestore.rules
+  // enforces this too); once a student has submitted delivery details,
+  // fulfillment continues in Prize Deliveries same as any other prize.
+  const revokeGift = async (e: RankEntry) => {
+    if (!e.gift) return;
     if (!window.confirm("Revoke this gift?")) return;
-    await updateDoc(doc(db, "users", uid), {
-      "surpriseGift.available": false,
-    });
+    await deleteDoc(doc(db, "prizeClaims", e.gift.claimId));
     await fetchLeaderboard();
   };
 
@@ -140,7 +184,8 @@ export default function VCoinLeaderboard() {
         <div>
           <h1 className="text-3xl font-black text-white">🏆 V-Coins Leaderboard</h1>
           <p className="text-slate-400 text-sm mt-1">
-            Top 100 users ranked by V-Coins earned. Assign surprise gifts and track claims.
+            Top 100 users ranked by V-Coins earned. Assign surprise gifts and track claims —
+            fulfillment (shipping, tracking, expected delivery date) happens in 📦 Prize Deliveries.
           </p>
         </div>
         <select
@@ -172,6 +217,17 @@ export default function VCoinLeaderboard() {
             />
           </div>
           <div>
+            <label className="block text-slate-400 text-xs font-semibold mb-1">Type</label>
+            <select
+              value={giftType}
+              onChange={(e) => setGiftType(e.target.value as GiftPrizeType)}
+              className="bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500"
+            >
+              <option value="physical">Physical (ships)</option>
+              <option value="gift_voucher">Gift Voucher</option>
+            </select>
+          </div>
+          <div>
             <label className="block text-slate-400 text-xs font-semibold mb-1">Top N Users</label>
             <input
               type="number"
@@ -196,8 +252,8 @@ export default function VCoinLeaderboard() {
       <div className="grid grid-cols-3 gap-4">
         {[
           { label: "Total in Top 100", value: entries.length },
-          { label: "Gifts Assigned",   value: entries.filter((e) => e.gift?.available).length },
-          { label: "Gifts Claimed",    value: entries.filter((e) => e.gift?.claimed).length },
+          { label: "Gifts Assigned",   value: entries.filter((e) => !!e.gift).length },
+          { label: "Gifts Claimed",    value: entries.filter((e) => e.gift && e.gift.status !== "unclaimed").length },
         ].map((s) => (
           <div key={s.label} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
             <div className="text-2xl font-black text-white">{s.value}</div>
@@ -284,23 +340,29 @@ export default function VCoinLeaderboard() {
 
                     {/* Gift description */}
                     <td className="p-4 text-center text-xs text-slate-400">
-                      {e.gift?.available
-                        ? e.gift.giftDescription || "—"
-                        : "—"}
+                      {e.gift ? e.gift.prizeValue || "—" : "—"}
                     </td>
 
                     {/* Status */}
                     <td className="p-4 text-center">
-                      {e.gift?.available && e.gift?.claimed ? (
-                        <span className="inline-flex items-center gap-1 bg-green-500/10 text-green-400 text-xs font-bold px-2 py-1 rounded-full">
-                          ✓ Claimed
-                        </span>
-                      ) : e.gift?.available ? (
+                      {!e.gift ? (
+                        <span className="text-slate-600 text-xs">—</span>
+                      ) : e.gift.status === "unclaimed" ? (
                         <span className="inline-flex items-center gap-1 bg-amber-500/10 text-amber-400 text-xs font-bold px-2 py-1 rounded-full">
                           ⏳ Pending
                         </span>
+                      ) : e.gift.status === "delivered" ? (
+                        <span className="inline-flex items-center gap-1 bg-green-500/10 text-green-400 text-xs font-bold px-2 py-1 rounded-full">
+                          ✅ Delivered
+                        </span>
+                      ) : e.gift.status === "shipped" ? (
+                        <span className="inline-flex items-center gap-1 bg-sky-500/10 text-sky-400 text-xs font-bold px-2 py-1 rounded-full">
+                          🚚 Shipped
+                        </span>
                       ) : (
-                        <span className="text-slate-600 text-xs">—</span>
+                        <span className="inline-flex items-center gap-1 bg-green-500/10 text-green-400 text-xs font-bold px-2 py-1 rounded-full">
+                          ✓ Claimed
+                        </span>
                       )}
                     </td>
 
@@ -308,7 +370,7 @@ export default function VCoinLeaderboard() {
                     <td className="p-4">
                       <div className="flex items-center justify-center gap-2">
                         {/* Assign gift inline */}
-                        {!e.gift?.available ? (
+                        {!e.gift ? (
                           selectedUid === e.uid ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -338,17 +400,19 @@ export default function VCoinLeaderboard() {
                               🎁 Assign Gift
                             </button>
                           )
-                        ) : (
+                        ) : e.gift.status === "unclaimed" ? (
                           <button
-                            onClick={() => revokeGift(e.uid)}
+                            onClick={() => revokeGift(e)}
                             className="text-red-400 hover:text-red-300 text-xs border border-red-800 rounded-lg px-2 py-1 transition-colors"
                           >
                             Revoke
                           </button>
+                        ) : (
+                          <span className="text-slate-600 text-xs">See Prize Deliveries →</span>
                         )}
 
                         {/* View address (if claimed) */}
-                        {e.gift?.claimed && e.gift?.deliveryAddress && (
+                        {e.gift?.claimInfo && (
                           <button
                             onClick={() => setViewAddr(e)}
                             className="text-indigo-400 hover:text-indigo-300 text-xs border border-indigo-800 rounded-lg px-2 py-1 transition-colors"
@@ -367,7 +431,7 @@ export default function VCoinLeaderboard() {
       </div>
 
       {/* ── Address Modal ── */}
-      {viewAddr && (
+      {viewAddr && viewAddr.gift?.claimInfo && (
         <div
           className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
           onClick={() => setViewAddr(null)}
@@ -387,29 +451,19 @@ export default function VCoinLeaderboard() {
             <div className="mb-3">
               <div className="text-slate-400 text-xs font-semibold mb-1">Recipient</div>
               <div className="text-white font-semibold">{viewAddr.name}</div>
-              <div className="text-slate-400 text-sm">{viewAddr.gift?.giftDescription}</div>
+              <div className="text-slate-400 text-sm">{viewAddr.gift.prizeValue}</div>
             </div>
 
-            {viewAddr.gift?.deliveryAddress && (
-              <div className="bg-slate-800 rounded-xl p-4 space-y-1 text-sm">
-                <div className="text-white font-semibold">{viewAddr.gift.deliveryAddress.fullName}</div>
-                <div className="text-slate-300">{viewAddr.gift.deliveryAddress.phone}</div>
-                <div className="text-slate-300">{viewAddr.gift.deliveryAddress.addressLine1}</div>
-                {viewAddr.gift.deliveryAddress.addressLine2 && (
-                  <div className="text-slate-300">{viewAddr.gift.deliveryAddress.addressLine2}</div>
-                )}
-                <div className="text-slate-300">
-                  {viewAddr.gift.deliveryAddress.city}, {viewAddr.gift.deliveryAddress.pincode}
-                </div>
-                <div className="text-slate-300">{viewAddr.gift.deliveryAddress.state}</div>
-              </div>
-            )}
+            <div className="bg-slate-800 rounded-xl p-4 space-y-1 text-sm">
+              <div className="text-white font-semibold">{viewAddr.gift.claimInfo.name}</div>
+              <div className="text-slate-300">{viewAddr.gift.claimInfo.address}</div>
+              <div className="text-slate-300">📱 {viewAddr.gift.claimInfo.whatsapp} · ✉️ {viewAddr.gift.claimInfo.email}</div>
+            </div>
 
             <button
               onClick={() => {
-                if (!viewAddr.gift?.deliveryAddress) return;
-                const a = viewAddr.gift.deliveryAddress;
-                const text = `${a.fullName}\n${a.phone}\n${a.addressLine1}\n${a.addressLine2 || ""}\n${a.city}, ${a.pincode}\n${a.state}`;
+                const c = viewAddr.gift!.claimInfo!;
+                const text = `${c.name}\n${c.address}\n${c.whatsapp}\n${c.email}`;
                 navigator.clipboard.writeText(text);
               }}
               className="mt-4 w-full bg-slate-800 hover:bg-slate-700 text-white rounded-xl py-2 text-sm font-semibold transition-colors"
