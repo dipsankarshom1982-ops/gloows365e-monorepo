@@ -320,7 +320,10 @@ export default function DailyStreakQuizScreen() {
                       activeOpacity={0.85}
                     >
                       {submitting ? (
-                        <ActivityIndicator color="#fff" />
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                          <ActivityIndicator color="#fff" size="small" />
+                          <Text style={styles.submitButtonText}>Please Wait..</Text>
+                        </View>
                       ) : (
                         <Text style={styles.submitButtonText}>Submit Answer</Text>
                       )}

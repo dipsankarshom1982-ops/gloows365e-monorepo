@@ -284,19 +284,32 @@ export default function DailyStreakQuizPage() {
                   </div>
 
                   {!result && (
-                    <button
-                      onClick={handleSubmit}
-                      disabled={!selected || submitting}
-                      style={{
-                        width: "100%", borderRadius: 16, padding: "15px 0",
-                        border: "none", cursor: selected && !submitting ? "pointer" : "not-allowed",
-                        marginTop: 6,
-                        background: selected ? "var(--accent)" : "var(--border)",
-                        color: "#fff", fontWeight: 800, fontSize: 15,
-                      }}
-                    >
-                      {submitting ? "Submitting…" : "Submit Answer"}
-                    </button>
+                    <>
+                      <button
+                        onClick={handleSubmit}
+                        disabled={!selected || submitting}
+                        style={{
+                          width: "100%", borderRadius: 16, padding: "15px 0",
+                          border: "none", cursor: selected && !submitting ? "pointer" : "not-allowed",
+                          marginTop: 6,
+                          background: selected ? "var(--accent)" : "var(--border)",
+                          color: "#fff", fontWeight: 800, fontSize: 15,
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                        }}
+                      >
+                        {submitting && (
+                          <span
+                            style={{
+                              width: 14, height: 14, borderRadius: "50%",
+                              border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff",
+                              animation: "dsq-submit-spin 0.7s linear infinite",
+                            }}
+                          />
+                        )}
+                        {submitting ? "Please Wait.." : "Submit Answer"}
+                      </button>
+                      <style>{`@keyframes dsq-submit-spin { to { transform: rotate(360deg); } }`}</style>
+                    </>
                   )}
 
                   {result && <ResultPanel result={result} />}
