@@ -131,18 +131,30 @@ exports.getTodaysStreakQuizQuestion = functionsV1
     }
     const student = studentSnap.data();
     const studentClass = Number(student.class ?? 0);
+    const studentStream = student.stream ?? null;
     const preferredLanguage = student.preferredLanguage ?? "English";
     const today = (0, redish_1.todayIST)();
     // Canonical question is always authored in English by admin — see the
     // translation section above for how non-English students get it.
-    const snap = await db
+    //
+    // Stream (Class 11/12 only, added 2026-09-14): filtered ONLY when the
+    // student actually has one set — classes 6–10's query here is
+    // byte-for-byte what it was before streams existed. A Class 11/12
+    // student who hasn't picked a stream yet gets NO stream filter at all
+    // (falls through to whatever active question exists for their class —
+    // a legacy stream-less admin question if one exists, otherwise
+    // arbitrarily one of the 3 stream-specific ones) rather than "no quiz
+    // today" — see dailyStreakQuizGeneration.ts's header for why this is
+    // the deliberate, safe fallback instead of guessing a stream.
+    let query = db
         .collection("dailyStreakQuizQuestions")
         .where("status", "==", "active")
         .where("class", "==", studentClass)
         .where("language", "==", "English")
-        .where("publishDate", "==", today)
-        .limit(1)
-        .get();
+        .where("publishDate", "==", today);
+    if (studentStream)
+        query = query.where("stream", "==", studentStream);
+    const snap = await query.limit(1).get();
     if (snap.empty)
         return null;
     const questionId = snap.docs[0].id;
@@ -197,13 +209,15 @@ exports.submitDailyStreakQuizAnswer = functionsV1
     const yesterday = yesterdayIST();
     // ── Redis fast-path lock (best effort — Firestore transaction below is
     // the real source of truth if Redis is unavailable or this races) ──
+    const lockKey = redish_1.RK.streakQuizSubmitLock(uid, today);
+    let redisLockAcquired = false;
     try {
-        const lockKey = redish_1.RK.streakQuizSubmitLock(uid, today);
         const locked = await (0, redish_1.getRedis)().setnx(lockKey, 1);
         if (locked === 0) {
             throw new functionsV1.https.HttpsError("already-exists", "Already submitted today");
         }
         await (0, redish_1.getRedis)().expire(lockKey, 86400);
+        redisLockAcquired = true;
     }
     catch (e) {
         if (e instanceof functionsV1.https.HttpsError && e.code === "already-exists")
@@ -214,106 +228,144 @@ exports.submitDailyStreakQuizAnswer = functionsV1
     const progressRef = db.doc(`studentDailyStreakProgress/${uid}`);
     const dayRef = progressRef.collection("days").doc(today);
     const studentRef = db.doc(`students/${uid}`);
-    const result = await db.runTransaction(async (tx) => {
-        const [questionSnap, progressSnap, daySnap, studentSnap] = await Promise.all([
-            tx.get(questionRef),
-            tx.get(progressRef),
-            tx.get(dayRef),
-            tx.get(studentRef),
-        ]);
-        if (!questionSnap.exists) {
-            throw new functionsV1.https.HttpsError("not-found", "Question not found");
-        }
-        if (daySnap.exists) {
-            throw new functionsV1.https.HttpsError("already-exists", "Already submitted today");
-        }
-        const question = questionSnap.data();
-        const student = studentSnap.data() ?? {};
-        // The student was shown a translated version already (translation
-        // happened during getTodaysStreakQuizQuestion, before they could ever
-        // reach submit) — this is a cache read only, never a new generation.
-        // Falls back to the canonical English explanation if for some reason
-        // it's missing (translation failed, or somehow never ran).
-        const preferredLanguage = student.preferredLanguage ?? "English";
-        let explanation = question.explanation ?? "";
-        if (preferredLanguage !== "English") {
-            const translationSnap = await tx.get(db.doc(`dailyStreakQuizQuestions/${questionId}/translations/${preferredLanguage}`));
-            if (translationSnap.exists && translationSnap.data()?.status === "completed") {
-                explanation = translationSnap.data()?.explanation ?? explanation;
+    // BUG FIX (real-browser repro — "clicking Submit does nothing"):
+    // the Redis lock above is acquired BEFORE the Firestore transaction
+    // runs. If the transaction then fails for any reason (a transient
+    // Firestore/cold-start error, a legitimate rejection, anything) without
+    // this try/catch, the Redis lock — which has an 86400s TTL — is never
+    // released. The student is then permanently stuck for 24h: every
+    // retry hits the Redis fast-path above, sees the key already set, and
+    // throws "already-exists" without ever reaching Firestore again — even
+    // though Firestore has NO record of any submission (confirmed via a
+    // real repro: a stuck uid returned "already-exists" on every retry
+    // while studentDailyStreakProgress/{uid}/days/{today} never existed).
+    // The client's own already-exists handling (silently reloading the
+    // question) then loops forever with no visible error, matching exactly
+    // "Submit does nothing." Releasing the lock on any transaction failure
+    // makes a transient hiccup retryable instead of a 24h lockout — it
+    // never fires on the happy path, and re-releasing on a legitimate
+    // Firestore-side "already-exists" is harmless (the next attempt just
+    // hits the same, correct rejection again).
+    let result;
+    try {
+        result = await db.runTransaction(async (tx) => {
+            const [questionSnap, progressSnap, daySnap, studentSnap] = await Promise.all([
+                tx.get(questionRef),
+                tx.get(progressRef),
+                tx.get(dayRef),
+                tx.get(studentRef),
+            ]);
+            if (!questionSnap.exists) {
+                throw new functionsV1.https.HttpsError("not-found", "Question not found");
             }
-        }
-        // Re-validate this is genuinely today's question for this student —
-        // never trust the client just because it knows a questionId.
-        if (question.status !== "active" ||
-            question.publishDate !== today ||
-            Number(question.class) !== Number(student.class ?? -1)) {
-            throw new functionsV1.https.HttpsError("failed-precondition", "This question is no longer valid for today");
-        }
-        const isCorrect = selectedOption === question.correctOption;
-        const progress = progressSnap.exists
-            ? { ...EMPTY_PROGRESS, ...progressSnap.data() }
-            : EMPTY_PROGRESS;
-        let weeklyProgress = progress.weeklyProgress;
-        let completedWeeks = progress.completedWeeks;
-        let vCoinsAwarded = 0;
-        let xpAwarded = 0;
-        if (isCorrect) {
-            const continuingStreak = progress.lastCompletedDate === yesterday;
-            weeklyProgress = continuingStreak ? weeklyProgress + 1 : 1;
-            if (weeklyProgress >= MAX_WEEKLY_PROGRESS) {
-                if (completedWeeks < AMBASSADOR_WEEKS)
-                    completedWeeks += 1;
-                weeklyProgress = 0;
+            if (daySnap.exists) {
+                throw new functionsV1.https.HttpsError("already-exists", "Already submitted today");
             }
-            xpAwarded = XP_REWARD;
-            // vCoinsAwarded is reported optimistically here for the response —
-            // the actual credit happens via claimVCoinReward below, AFTER this
-            // transaction commits (Firestore transactions can't call other
-            // Cloud Functions / Redis-gated logic mid-transaction). If that
-            // claim is rejected (e.g. Redis lock race), the streak/XP for this
-            // answer still stand — a student should never lose streak progress
-            // because of a wallet-side hiccup.
-            vCoinsAwarded = 5;
-            tx.set(studentRef, {
-                LearnFunXP: admin.firestore.FieldValue.increment(xpAwarded),
-            }, { merge: true });
-        }
-        const ambassadorEligible = completedWeeks >= AMBASSADOR_WEEKS;
-        tx.set(progressRef, {
-            currentStreak: weeklyProgress,
-            weeklyProgress,
-            completedWeeks,
-            lastCompletedDate: isCorrect ? today : progress.lastCompletedDate ?? null,
-            ambassadorEligible,
-        }, { merge: true });
-        tx.set(dayRef, {
-            date: today,
-            questionId,
-            selectedOption,
-            isCorrect,
-            dailyStreak: weeklyProgress,
-            weeklyProgress,
-            completedWeeks,
-            vCoinsEarned: vCoinsAwarded,
-            xpEarned: xpAwarded,
-            submittedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        return {
-            isCorrect,
-            correctOption: question.correctOption,
-            explanation,
-            vCoinsAwarded,
-            xpAwarded,
-            streak: {
+            const question = questionSnap.data();
+            const student = studentSnap.data() ?? {};
+            // The student was shown a translated version already (translation
+            // happened during getTodaysStreakQuizQuestion, before they could ever
+            // reach submit) — this is a cache read only, never a new generation.
+            // Falls back to the canonical English explanation if for some reason
+            // it's missing (translation failed, or somehow never ran).
+            const preferredLanguage = student.preferredLanguage ?? "English";
+            let explanation = question.explanation ?? "";
+            if (preferredLanguage !== "English") {
+                const translationSnap = await tx.get(db.doc(`dailyStreakQuizQuestions/${questionId}/translations/${preferredLanguage}`));
+                if (translationSnap.exists && translationSnap.data()?.status === "completed") {
+                    explanation = translationSnap.data()?.explanation ?? explanation;
+                }
+            }
+            // Re-validate this is genuinely today's question for this student —
+            // never trust the client just because it knows a questionId.
+            //
+            // Stream check: reject ONLY when BOTH the question and the student
+            // have a stream set and they disagree. Never rejects when either
+            // side is null — that's the exact fallback case
+            // getTodaysStreakQuizQuestion intentionally serves to a Class 11/12
+            // student who hasn't picked a stream yet, and it must never be
+            // submit-blocked.
+            const questionStream = question.stream ?? null;
+            const studentStream = student.stream ?? null;
+            const streamMismatch = questionStream !== null && studentStream !== null && questionStream !== studentStream;
+            if (question.status !== "active" ||
+                question.publishDate !== today ||
+                Number(question.class) !== Number(student.class ?? -1) ||
+                streamMismatch) {
+                throw new functionsV1.https.HttpsError("failed-precondition", "This question is no longer valid for today");
+            }
+            const isCorrect = selectedOption === question.correctOption;
+            const progress = progressSnap.exists
+                ? { ...EMPTY_PROGRESS, ...progressSnap.data() }
+                : EMPTY_PROGRESS;
+            let weeklyProgress = progress.weeklyProgress;
+            let completedWeeks = progress.completedWeeks;
+            let vCoinsAwarded = 0;
+            let xpAwarded = 0;
+            if (isCorrect) {
+                const continuingStreak = progress.lastCompletedDate === yesterday;
+                weeklyProgress = continuingStreak ? weeklyProgress + 1 : 1;
+                if (weeklyProgress >= MAX_WEEKLY_PROGRESS) {
+                    if (completedWeeks < AMBASSADOR_WEEKS)
+                        completedWeeks += 1;
+                    weeklyProgress = 0;
+                }
+                xpAwarded = XP_REWARD;
+                // vCoinsAwarded is reported optimistically here for the response —
+                // the actual credit happens via claimVCoinReward below, AFTER this
+                // transaction commits (Firestore transactions can't call other
+                // Cloud Functions / Redis-gated logic mid-transaction). If that
+                // claim is rejected (e.g. Redis lock race), the streak/XP for this
+                // answer still stand — a student should never lose streak progress
+                // because of a wallet-side hiccup.
+                vCoinsAwarded = 5;
+                tx.set(studentRef, {
+                    LearnFunXP: admin.firestore.FieldValue.increment(xpAwarded),
+                }, { merge: true });
+            }
+            const ambassadorEligible = completedWeeks >= AMBASSADOR_WEEKS;
+            tx.set(progressRef, {
                 currentStreak: weeklyProgress,
                 weeklyProgress,
                 completedWeeks,
                 lastCompletedDate: isCorrect ? today : progress.lastCompletedDate ?? null,
                 ambassadorEligible,
-            },
-            ambassadorEligible,
-        };
-    });
+            }, { merge: true });
+            tx.set(dayRef, {
+                date: today,
+                questionId,
+                selectedOption,
+                isCorrect,
+                dailyStreak: weeklyProgress,
+                weeklyProgress,
+                completedWeeks,
+                vCoinsEarned: vCoinsAwarded,
+                xpEarned: xpAwarded,
+                submittedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            return {
+                isCorrect,
+                correctOption: question.correctOption,
+                explanation,
+                vCoinsAwarded,
+                xpAwarded,
+                streak: {
+                    currentStreak: weeklyProgress,
+                    weeklyProgress,
+                    completedWeeks,
+                    lastCompletedDate: isCorrect ? today : progress.lastCompletedDate ?? null,
+                    ambassadorEligible,
+                },
+                ambassadorEligible,
+            };
+        });
+    }
+    catch (e) {
+        if (redisLockAcquired) {
+            await (0, redish_1.getRedis)().del(lockKey).catch(() => { });
+        }
+        throw e;
+    }
     // ── Credit V-Coins via the existing, authoritative reward path ──────
     // Runs after the transaction commits so streak/XP are never blocked
     // by Redis/wallet issues. referenceId = questionId means this can
