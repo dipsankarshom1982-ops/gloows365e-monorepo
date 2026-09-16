@@ -153,7 +153,20 @@ export default function DailyStreakQuizPage() {
         confettiTimeout.current = setTimeout(() => setShowConfetti(false), 2200);
       }
     } catch (e: any) {
-      if (e?.code === "already-exists" || e?.message?.includes("already-exists")) {
+      // BUG FIX (real browser evidence — "loading then nothing", console
+      // showed a 409 "Already submitted today" falling through to the
+      // generic error branch below): Firebase callable errors carry
+      // code "functions/already-exists" (prefixed), never the bare
+      // "already-exists" this checked for, and the message is the
+      // human-readable "Already submitted today" — it never contains the
+      // literal substring "already-exists" either. Both conditions were
+      // always false, so a real already-submitted response silently fell
+      // into the else branch: no reload, no visible feedback, submitting
+      // just cleared — exactly the reported symptom. Matches the
+      // already-correct check this same file's service layer uses
+      // (dailyStreakQuizService.ts's fetchTodaysStreakQuizQuestion).
+      const code = String(e?.code ?? "");
+      if (code.endsWith("already-exists") || e?.message?.includes("Already submitted")) {
         await loadQuestion();
       } else {
         console.error("[DailyStreakQuiz] submit error:", e);

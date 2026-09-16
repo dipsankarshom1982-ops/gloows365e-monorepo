@@ -140,7 +140,16 @@ export default function DailyStreakQuizScreen() {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
     } catch (e: any) {
-      if (e?.code === "already-exists") {
+      // BUG FIX (mirrors the same fix on web — real browser evidence showed
+      // a genuine 409 "Already submitted today" falling through to the
+      // generic error branch below): Firebase callable errors carry code
+      // "functions/already-exists" (prefixed), never the bare
+      // "already-exists" this checked for, so the condition was always
+      // false. Matches the already-correct check this same file's service
+      // layer uses (services/dailyStreakQuizService.ts's
+      // fetchTodaysStreakQuizQuestion).
+      const code = String(e?.code ?? "");
+      if (code.endsWith("already-exists") || e?.message?.includes("Already submitted")) {
         // Already submitted today (e.g. duplicate tap / stale screen) —
         // re-sync rather than show an error.
         await loadQuestion();
