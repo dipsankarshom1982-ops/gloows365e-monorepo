@@ -194,8 +194,24 @@ exports.getTodaysStreakQuizQuestion = functionsV1
     };
 });
 // ─── submitDailyStreakQuizAnswer ────────────────────────────────────────────
+// BUG FIX (real production evidence — a student repeatedly gets
+// "Already submitted today" and the question just reloads, with NO
+// Firestore submission record ever created): the Redis submission lock
+// (see the "BUG FIX" comment below on redisLockAcquired) is acquired
+// before this function's real work runs, but on a genuine Cloud Functions
+// TIMEOUT — not a catchable JS exception — the whole process is killed by
+// the platform, bypassing the try/catch that releases it entirely. That
+// leaves the lock stuck for its full 24h TTL: every retry hits it and
+// gets rejected before ever reaching Firestore again.
+// 128MB/30s (vs. the sibling getTodaysStreakQuizQuestion's 256MB/60s) is
+// unusually tight for a function that reads 4 documents in a transaction,
+// runs a second Firestore batch, and touches Redis twice — and real
+// traffic has been observed taking 12-19s on a cold instance. Matching
+// the sibling function's memory (more memory also means more allocated
+// CPU on gen1 Cloud Functions, so cold starts finish faster) and timeout
+// gives a cold start real room to finish instead of hitting a hard kill.
 exports.submitDailyStreakQuizAnswer = functionsV1
-    .runWith({ timeoutSeconds: 30, memory: "128MB", secrets: ["REDIS_URL", "REDIS_TOKEN"] })
+    .runWith({ timeoutSeconds: 60, memory: "256MB", secrets: ["REDIS_URL", "REDIS_TOKEN"] })
     .https.onCall(async (data, context) => {
     if (!context.auth) {
         throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
