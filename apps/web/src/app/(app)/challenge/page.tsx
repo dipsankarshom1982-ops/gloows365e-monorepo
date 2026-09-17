@@ -12,7 +12,11 @@ const MODULES = [
   { id: "vidyastar",   label: "VidyaStar",            emoji: "⭐", href: "/vidyastar" },
   { id: "dsq",         label: "Daily Streak Quiz",     emoji: "🔥", href: "/daily-streak-quiz" },
   { id: "skillbattle", label: "SkillBattle",           emoji: "🏆", href: "/battle" },
-  { id: "leaderboard", label: "Leaderboard (V-Coins)", emoji: "🥇", href: "/leaderboard" },
+  // Leaderboard (V-Coins) → existing Wallet page, which already has its
+  // own "Leaderboard" tab ranking by vCoinsYear_* (wallet/page.tsx:5).
+  // The generic /leaderboard page is a different, points-based India
+  // leaderboard unrelated to V-Coins — not the right destination here.
+  { id: "leaderboard", label: "Leaderboard (V-Coins)", emoji: "🥇", href: "/wallet" },
   { id: "starboard",   label: "Starboard",             emoji: "✨", href: "/starboard" },
   { id: "skillboard",  label: "SkillBoard",            emoji: "🎖️", href: "/skillboard" },
 ];

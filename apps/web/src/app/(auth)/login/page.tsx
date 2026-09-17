@@ -14,7 +14,8 @@
 //        - has restart indicator fields → same
 //        - otherwise fall through
 //     2. Check students/{uid}
-//        - onboardingComplete true  → /home
+//        - onboardingComplete true  → /reels (post-login landing — see the
+//          navigation restructure)
 //        - onboardingComplete false → /register
 //     3. Neither found → /register
 //
@@ -198,7 +199,9 @@ export default function LoginPage() {
         return;
       }
       setMessage("Login successful!");
-      setTimeout(() => router.replace("/home"), 500);
+      // Post-login landing is Reels (+ Stories), not Home — see the
+      // navigation restructure. Home stays reachable via the bottom nav.
+      setTimeout(() => router.replace("/reels"), 500);
       return;
     }
 
@@ -218,7 +221,7 @@ export default function LoginPage() {
         "chain never resolved. Check the network tab for a stuck request."
       );
       setMessage("Login successful! Redirecting...");
-      router.replace("/home");
+      router.replace("/reels");
     }, 8000);
 
     try {
@@ -231,7 +234,7 @@ export default function LoginPage() {
         // the login screen over a routing-check failure. Send them
         // somewhere real and let AuthGuard/onboarding checks downstream
         // sort out where they actually belong.
-        router.replace("/home");
+        router.replace("/reels");
       }
     } finally {
       settled = true;

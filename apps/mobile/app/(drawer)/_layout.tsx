@@ -372,10 +372,6 @@ export default function DrawerLayout() {
                   t={t}
                 />
               )}
-              {drawerItem("settings") && (
-                <DrawerItem icon="settings-outline" label={t("settings")}
-                  onPress={() => router.push("/settings")} colors={colors} />
-              )}
               {drawerItem("dashboard") && (
                 <DrawerItem icon="grid-outline" label={t("dashboard")}
                   onPress={() => router.push("/dashboard")} colors={colors} />
@@ -422,6 +418,42 @@ export default function DrawerLayout() {
               )}
               {drawerItem("glostore") && (
                 <GloStoreItem onPress={() => router.push("/glostore" as any)} />
+              )}
+
+              {/* ACCOUNT — reorganized grouping of existing routes, per the
+                  nav-fix spec. "Subscription" has no dedicated screen on
+                  its own; the closest existing equivalent is Billing
+                  History, so that's what it opens. */}
+              <SectionHeader label={t("account") ?? "Account"} colors={colors} />
+              {drawerItem("myProfile") && (
+                <DrawerItem icon="person-circle-outline" label={t("myProfile") ?? "My Profile"}
+                  onPress={() => router.push("/profile-settings")} colors={colors} />
+              )}
+              {drawerItem("subscription") && (
+                <DrawerItem icon="receipt-outline" label={t("subscription") ?? "Subscription"}
+                  onPress={() => router.push("/billing-history" as any)} colors={colors} />
+              )}
+              {drawerItem("settings") && (
+                <DrawerItem icon="settings-outline" label={t("settings")}
+                  onPress={() => router.push("/settings")} colors={colors} />
+              )}
+
+              {/* SUPPORT — reorganized grouping of existing routes. "Help &
+                  Support" and "Terms" have no existing screen anywhere in
+                  the app, so they're intentionally left out rather than
+                  invented — see this task's report for that gap. */}
+              <SectionHeader label={t("support") ?? "Support"} colors={colors} />
+              {drawerItem("feedback") && (
+                <DrawerItem icon="star-outline" label={t("feedbackRatings") ?? "Feedback"}
+                  onPress={() => router.push("/feedback" as any)} colors={colors} />
+              )}
+              {drawerItem("about") && (
+                <DrawerItem icon="information-circle-outline" label={t("aboutGloows365") ?? "About Gloows365"}
+                  onPress={() => router.push("/about" as any)} colors={colors} />
+              )}
+              {drawerItem("privacy") && (
+                <DrawerItem icon="lock-closed-outline" label={t("privacy")}
+                  onPress={() => router.push("/privacy" as any)} colors={colors} />
               )}
             </View>
           </ScrollView>
@@ -509,6 +541,14 @@ function GloStoreItem({ onPress }: { onPress: () => void }) {
   );
 }
 
+function SectionHeader({ label, colors }: { label: string; colors: any }) {
+  return (
+    <Text style={[styles.sectionHeader, { color: colors.textSecondary, borderTopColor: colors.border }]}>
+      {label.toUpperCase()}
+    </Text>
+  );
+}
+
 function DrawerItem({ icon, label, onPress, active, colors }: any) {
   return (
     <TouchableOpacity
@@ -586,6 +626,11 @@ const styles = StyleSheet.create({
   giftTitle: { color: "#fff", fontSize: 13, fontWeight: "800" },
   giftSub:   { color: "rgba(255,255,255,0.8)", fontSize: 11, fontWeight: "500" },
   menu:     { marginTop: 20 },
+  sectionHeader: {
+    fontSize: 11, fontWeight: "800", letterSpacing: 0.8,
+    marginTop: 18, marginBottom: 6, paddingTop: 14,
+    borderTopWidth: 1,
+  },
   item:     { flexDirection: "row", alignItems: "center", paddingVertical: 14 },
   label:    { marginLeft: 15, fontSize: 15 },
   streakQuizItem: {

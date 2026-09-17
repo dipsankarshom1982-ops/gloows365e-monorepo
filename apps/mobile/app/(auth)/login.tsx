@@ -211,7 +211,9 @@ export default function LoginScreen() {
       }
 
       setMessage("Login successful!");
-      setTimeout(() => router.replace("/(drawer)/(tabs)/home" as any), 500);
+      // Post-login landing is Reels (+ Stories), not Home — see the
+      // navigation restructure. Home stays reachable via the bottom nav.
+      setTimeout(() => router.replace("/(drawer)/(tabs)/reels" as any), 500);
     } catch (err: any) {
       if (err.code === "auth/account-exists-with-different-credential") {
         setError("This email is already registered with a password. Please log in with email & password instead.");
@@ -275,7 +277,9 @@ export default function LoginScreen() {
       }
 
       setMessage("Login successful!");
-      setTimeout(() => router.replace("/(drawer)/(tabs)/home" as any), 500);
+      // Post-login landing is Reels (+ Stories), not Home — see the
+      // navigation restructure. Home stays reachable via the bottom nav.
+      setTimeout(() => router.replace("/(drawer)/(tabs)/reels" as any), 500);
     } catch (err: any) {
       switch (err.code) {
         case "auth/user-not-found":        setError("Account not found. Please sign up first."); break;

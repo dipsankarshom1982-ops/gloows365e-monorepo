@@ -14,7 +14,11 @@ const MODULES: { key: string; label: string; icon: keyof typeof Ionicons.glyphMa
   { key: "vidyastar",   label: "VidyaStar",              icon: "star-outline",       route: "/vidyastar" },
   { key: "dsq",         label: "Daily Streak Quiz",       icon: "flame-outline",      route: "/daily-streak-quiz" },
   { key: "skillbattle", label: "SkillBattle",             icon: "trophy-outline",     route: "/skillbattle" },
-  { key: "leaderboard", label: "Leaderboard (V-Coins)",   icon: "podium-outline",     route: "/leaderboard" },
+  // Leaderboard (V-Coins) → existing Wallet screen, which already has its
+  // own "Leaderboard" tab ranking by vCoinsYear_* (vcoins/wallet.tsx:3-5).
+  // The generic /leaderboard screen is a different, points-based India
+  // leaderboard unrelated to V-Coins — not the right destination here.
+  { key: "leaderboard", label: "Leaderboard (V-Coins)",   icon: "podium-outline",     route: "/vcoins/wallet" },
   { key: "starboard",   label: "Starboard",               icon: "sparkles-outline",   route: "/starboard" },
   { key: "skillboard",  label: "SkillBoard",              icon: "ribbon-outline",     route: "/skillboard" },
 ];

@@ -142,8 +142,51 @@ function Icon({ name, size = 20, color }: { name: string; size?: number; color: 
         <path d="M256 192c-20-64-80-96-128-64-32 22-16 64 32 64h96zM256 192c20-64 80-96 128-64 32 22 16 64-32 64h-96z" stroke={color} strokeWidth={24} strokeLinejoin="round"/>
       </svg>
     ),
+    // Same 4 icons as apps/web/src/app/(app)/settings/page.tsx's Icon()
+    // component, for visual consistency with the Account/Support items
+    // that open those same destinations.
+    "person-circle-outline": (
+      <svg width={s} height={s} viewBox="0 0 512 512" fill="none">
+        <circle cx="256" cy="256" r="208" stroke={color} strokeWidth={32}/>
+        <path d="M256 272a80 80 0 100-160 80 80 0 000 160z" stroke={color} strokeWidth={32}/>
+        <path d="M96.9 432.8A160 160 0 01256 336a160 160 0 01159.1 96.8" stroke={color} strokeWidth={32} strokeLinecap="round"/>
+      </svg>
+    ),
+    "star-outline": (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="none">
+        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
+          stroke={color} strokeWidth={1.6} strokeLinejoin="round"/>
+      </svg>
+    ),
+    "information-circle-outline": (
+      <svg width={s} height={s} viewBox="0 0 512 512" fill="none">
+        <circle cx="256" cy="256" r="208" stroke={color} strokeWidth={32}/>
+        <path d="M256 176v16M256 336V240" stroke={color} strokeWidth={32} strokeLinecap="round"/>
+      </svg>
+    ),
+    "lock-closed-outline": (
+      <svg width={s} height={s} viewBox="0 0 512 512" fill="none">
+        <rect x="96" y="208" width="320" height="272" rx="32" stroke={color} strokeWidth={32}/>
+        <path d="M176 208v-48a80 80 0 01160 0v48" stroke={color} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round"/>
+        <circle cx="256" cy="320" r="32" fill={color}/>
+        <path d="M256 352v48" stroke={color} strokeWidth={32} strokeLinecap="round"/>
+      </svg>
+    ),
   };
   return icons[name] ?? <svg width={s} height={s}/>;
+}
+
+// ─── Section header (Account / Support groupings) ──────────────
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <div style={{
+      fontSize: 11, fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase",
+      color: "#64748b", marginTop: 18, marginBottom: 6, paddingTop: 14,
+      paddingLeft: 20, borderTop: "1px solid #1e293b",
+    }}>
+      {label}
+    </div>
+  );
 }
 
 // ─── Drawer item ──────────────────────────────────────────────
@@ -552,10 +595,6 @@ export default function Drawer({ open, onClose }: Props) {
             {drawerItem("dailyStreakQuiz") && (
               <DailyStreakQuizItem label="Daily Streak Quiz" onClick={() => navTo("/daily-streak-quiz")}/>
             )}
-            {drawerItem("settings") && (
-              <DrawerItem iconName="settings-outline" label={t("settings")}
-                active={isActive("/settings")} onClick={() => navTo("/settings")}/>
-            )}
             {drawerItem("dashboard") && (
               <DrawerItem iconName="grid-outline" label={t("dashboard")}
                 active={isActive("/dashboard")} onClick={() => navTo("/dashboard")}/>
@@ -580,6 +619,39 @@ export default function Drawer({ open, onClose }: Props) {
             )}
             {drawerItem("glostore") && (
               <GloStoreItem onClick={() => navTo("/glostore")} label={t("gloStore") || "GloStore"}/>
+            )}
+
+            {/* ACCOUNT — reorganized grouping of existing routes, per the
+                nav-fix spec. There's no dedicated "Subscription" screen on
+                web (mobile has one — Billing History — with no web
+                counterpart), so it's intentionally left out rather than
+                invented — see this task's report for that gap. */}
+            <SectionHeader label={t("account") || "Account"}/>
+            {drawerItem("myProfile") && (
+              <DrawerItem iconName="person-circle-outline" label={t("myProfile") || "My Profile"}
+                active={isActive("/settings/profile")} onClick={() => navTo("/settings/profile")}/>
+            )}
+            {drawerItem("settings") && (
+              <DrawerItem iconName="settings-outline" label={t("settings")}
+                active={isActive("/settings")} onClick={() => navTo("/settings")}/>
+            )}
+
+            {/* SUPPORT — reorganized grouping of existing routes. "Help &
+                Support" and "Terms" have no existing screen anywhere in the
+                app, so they're intentionally left out rather than invented
+                — see this task's report for that gap. */}
+            <SectionHeader label={t("support") || "Support"}/>
+            {drawerItem("feedback") && (
+              <DrawerItem iconName="star-outline" label={t("feedbackRatings") || "Feedback"}
+                active={isActive("/settings/feedback")} onClick={() => navTo("/settings/feedback")}/>
+            )}
+            {drawerItem("about") && (
+              <DrawerItem iconName="information-circle-outline" label={t("aboutGloows365") || "About Gloows365"}
+                active={isActive("/settings/about")} onClick={() => navTo("/settings/about")}/>
+            )}
+            {drawerItem("privacy") && (
+              <DrawerItem iconName="lock-closed-outline" label={t("privacy")}
+                active={isActive("/settings/privacy")} onClick={() => navTo("/settings/privacy")}/>
             )}
           </div>
         </div>
