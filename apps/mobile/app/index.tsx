@@ -106,7 +106,7 @@ export default function Index() {
   if (route === "register")           return <Redirect href="/(auth)/register" />;
   if (route === "restart-onboarding") return <Redirect href="/restart-education/onboarding" />;
   if (route === "restart-home")       return <Redirect href="/restart-education/home" />;
-  return                                     <Redirect href="/(drawer)/(tabs)/home" />;
+  return                                     <Redirect href="/(drawer)/(tabs)/reels" />;
 }
 
 // ─── Firestore routing logic ──────────────────────────────────────────────────

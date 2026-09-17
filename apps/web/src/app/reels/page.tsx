@@ -10,6 +10,11 @@
 // z-index:100 would otherwise sit underneath the video) instead of relying
 // on (app)/layout.tsx's copy.
 //
+// Navigation restructure: this is now the post-login landing screen (see
+// app/page.tsx), so it also mounts its own <Stories /> overlay and its own
+// <Drawer /> instance (same components (app)/layout.tsx/home/page.tsx use)
+// so "Menu" has something to open before a user ever visits an (app) page.
+//
 // FIX (bug report — "reels not showing after tapping from home"): this file
 // previously lived at apps/web/src/reels/page.tsx, OUTSIDE the Next.js
 // app-router folder (apps/web/src/app/). Next.js only creates routes for
@@ -37,6 +42,8 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/layout/AuthGuard";
 import BottomNav from "@/components/layout/BottomNav";
+import Drawer from "@/components/layout/Drawer";
+import StoryComponent from "@/components/Story";
 import { useTheme } from "@/context/ThemeContext";
 import { auth, db } from "@/lib/firebase";
 import {
@@ -606,6 +613,24 @@ function ReelItem({
 // The page then rendered its normal "No videos available" empty state,
 // indistinguishable from an actually-empty feed. This helper retries a
 // failed read a couple of times with a short backoff before giving up.
+// Reels is the post-login landing screen (navigation restructure) — Stories
+// renders as a fixed overlay strip above every state below (loading/error/
+// empty/feed), same StoryComponent (app)/home/page.tsx already uses, just
+// mounted here too. "Menu" (BottomNav's onMenuOpen) needs a Drawer to open
+// from this page specifically — reels/page.tsx lives outside the (app)
+// route group's shared Drawer, so it mounts its own instance below, same
+// component/props as (app)/layout.tsx uses.
+// top:110 keeps this below each reel's back/create buttons (positioned at
+// top:50, see ReelItem's "Back" button and the "+" button in the main
+// return below) so the two don't overlap.
+function StoriesOverlay() {
+  return (
+    <div style={{ position: "fixed", top: 110, left: 0, right: 0, zIndex: 2100 }}>
+      <StoryComponent />
+    </div>
+  );
+}
+
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 600): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -640,6 +665,7 @@ function ReelsContent() {
   const [paused,       setPaused]       = useState(false);
   const [feedLoading,  setFeedLoading]  = useState(true);
   const [feedError,    setFeedError]    = useState(false);
+  const [drawerOpen,   setDrawerOpen]   = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewed        = useRef(new Set<string>());
@@ -978,7 +1004,11 @@ function ReelsContent() {
         <div style={{ height: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: colors.background }}>
           <div style={{ width: 36, height: 36, border: `3px solid ${colors.border}`, borderTop: `3px solid ${colors.accent}`, borderRadius: "50%", animation: "reels-spin 0.8s linear infinite" }}/>
           <style>{`@keyframes reels-spin { to { transform: rotate(360deg); } }`}</style>
-          <BottomNav />
+          <StoriesOverlay />
+          <BottomNav onMenuOpen={() => setDrawerOpen(true)} />
+          <div style={{ position: "fixed", inset: 0, zIndex: 2200, pointerEvents: drawerOpen ? "auto" : "none" }}>
+            <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+          </div>
         </div>
       );
     }
@@ -994,7 +1024,11 @@ function ReelsContent() {
           >
             <span style={{ fontWeight: 700, fontSize: 15, color: colors.background }}>Retry</span>
           </button>
-          <BottomNav />
+          <StoriesOverlay />
+          <BottomNav onMenuOpen={() => setDrawerOpen(true)} />
+          <div style={{ position: "fixed", inset: 0, zIndex: 2200, pointerEvents: drawerOpen ? "auto" : "none" }}>
+            <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+          </div>
         </div>
       );
     }
@@ -1007,7 +1041,11 @@ function ReelsContent() {
         >
           <span style={{ fontWeight: 700, fontSize: 16, color: colors.background }}>Upload First Video ＋</span>
         </button>
-        <BottomNav />
+        <StoriesOverlay />
+        <BottomNav onMenuOpen={() => setDrawerOpen(true)} />
+        <div style={{ position: "fixed", inset: 0, zIndex: 2200, pointerEvents: drawerOpen ? "auto" : "none" }}>
+          <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+        </div>
       </div>
     );
   }
@@ -1068,7 +1106,11 @@ function ReelsContent() {
         </button>
       )}
 
-      <BottomNav />
+      <StoriesOverlay />
+      <BottomNav onMenuOpen={() => setDrawerOpen(true)} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 2200, pointerEvents: drawerOpen ? "auto" : "none" }}>
+        <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      </div>
     </div>
   );
 }

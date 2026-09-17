@@ -59,6 +59,11 @@ import { auth, db, functions } from "@/lib/firebase";
 import { scoreReel, matchesClassFilter, toMillis, type ScoringProfile } from "@/lib/reelScoring";
 import ReelMoreMenu from "@/components/ReelMoreMenu";
 import ReportVideoModal from "@/components/ReportVideoModal";
+// Reels is now the post-login landing screen (navigation restructure) —
+// Stories renders as a floating overlay strip near the top, below the
+// existing back/create buttons. Same component home.tsx already uses,
+// just mounted in a second place.
+import Stories from "@/components/Story";
 import { isPubliclyVisible } from "@/lib/feedVisibility";
 import { httpsCallable } from "firebase/functions";
 import {
@@ -1013,72 +1018,86 @@ export default function Reels() {
     length: windowHeight, offset: windowHeight * index, index,
   });
 
-  if (videos.length === 0) {
-    if (feedLoading) {
+  // Reels is the post-login landing screen — Stories renders as a floating
+  // overlay strip above every state below (loading/error/empty/feed), same
+  // component/data as home.tsx's Stories, just mounted here too.
+  const content = (() => {
+    if (videos.length === 0) {
+      if (feedLoading) {
+        return (
+          <View style={[styles.emptyContainer, { backgroundColor: colors.background }]}>
+            <ActivityIndicator size="large" color={colors.accent} />
+          </View>
+        );
+      }
+      if (feedError) {
+        return (
+          <View style={[styles.emptyContainer, { backgroundColor: colors.background }]}>
+            <Text style={{ fontSize: 34 }}>⚠️</Text>
+            <Text style={[styles.emptyText, { color: colors.text, marginTop: 12 }]}>Couldn't load reels</Text>
+            <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: 13 }]}>Check your connection and try again.</Text>
+            <TouchableOpacity style={[styles.uploadBtn, { backgroundColor: colors.accent }]} onPress={() => setReloadTick((t) => t + 1)}>
+              <Text style={[styles.uploadBtnText, { color: colors.background }]}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        );
+      }
       return (
         <View style={[styles.emptyContainer, { backgroundColor: colors.background }]}>
-          <ActivityIndicator size="large" color={colors.accent} />
-        </View>
-      );
-    }
-    if (feedError) {
-      return (
-        <View style={[styles.emptyContainer, { backgroundColor: colors.background }]}>
-          <Text style={{ fontSize: 34 }}>⚠️</Text>
-          <Text style={[styles.emptyText, { color: colors.text, marginTop: 12 }]}>Couldn't load reels</Text>
-          <Text style={[styles.emptyText, { color: colors.textSecondary, fontSize: 13 }]}>Check your connection and try again.</Text>
-          <TouchableOpacity style={[styles.uploadBtn, { backgroundColor: colors.accent }]} onPress={() => setReloadTick((t) => t + 1)}>
-            <Text style={[styles.uploadBtnText, { color: colors.background }]}>Retry</Text>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No videos available</Text>
+          <TouchableOpacity style={[styles.uploadBtn, { backgroundColor: colors.accent }]} onPress={() => router.push("/skillbattle")}>
+            <Text style={[styles.uploadBtnText, { color: colors.background }]}>Upload First Video ＋</Text>
           </TouchableOpacity>
         </View>
       );
     }
+
     return (
-      <View style={[styles.emptyContainer, { backgroundColor: colors.background }]}>
-        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No videos available</Text>
-        <TouchableOpacity style={[styles.uploadBtn, { backgroundColor: colors.accent }]} onPress={() => router.push("/skillbattle")}>
-          <Text style={[styles.uploadBtnText, { color: colors.background }]}>Upload First Video ＋</Text>
+      <View style={{ flex: 1, backgroundColor: "#000" }}>
+        <FlatList
+          ref={flatListRef}
+          data={videos}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+          pagingEnabled
+          snapToInterval={windowHeight}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          disableIntervalMomentum
+          getItemLayout={getItemLayout}
+          initialNumToRender={1}
+          maxToRenderPerBatch={2}
+          windowSize={3}
+          removeClippedSubviews
+          onEndReachedThreshold={0.5}
+          onMomentumScrollEnd={(e) => {
+            setCurrentIndex(Math.round(e.nativeEvent.contentOffset.y / windowHeight));
+          }}
+          onScrollToIndexFailed={(info) => {
+            setTimeout(() => {
+              flatListRef.current?.scrollToIndex({ index: Math.min(info.index, videos.length - 1), animated: false });
+            }, 300);
+          }}
+          showsVerticalScrollIndicator={false}
+        />
+        <TouchableOpacity style={[styles.backBtn, { backgroundColor: colors.accent }]} onPress={() => router.push("/(drawer)/(tabs)/home")}>
+          <Text style={[styles.btnText, { color: colors.background }]}>⬅</Text>
         </TouchableOpacity>
+        {!isShortTab && (
+          <TouchableOpacity style={[styles.createBtn, { backgroundColor: colors.accent }]} onPress={() => router.push("/skillbattle")}>
+            <Text style={[styles.btnText, { color: colors.background }]}>＋</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
-  }
+  })();
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
-      <FlatList
-        ref={flatListRef}
-        data={videos}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        pagingEnabled
-        snapToInterval={windowHeight}
-        snapToAlignment="start"
-        decelerationRate="fast"
-        disableIntervalMomentum
-        getItemLayout={getItemLayout}
-        initialNumToRender={1}
-        maxToRenderPerBatch={2}
-        windowSize={3}
-        removeClippedSubviews
-        onEndReachedThreshold={0.5}
-        onMomentumScrollEnd={(e) => {
-          setCurrentIndex(Math.round(e.nativeEvent.contentOffset.y / windowHeight));
-        }}
-        onScrollToIndexFailed={(info) => {
-          setTimeout(() => {
-            flatListRef.current?.scrollToIndex({ index: Math.min(info.index, videos.length - 1), animated: false });
-          }, 300);
-        }}
-        showsVerticalScrollIndicator={false}
-      />
-      <TouchableOpacity style={[styles.backBtn, { backgroundColor: colors.accent }]} onPress={() => router.push("/(drawer)/(tabs)/home")}>
-        <Text style={[styles.btnText, { color: colors.background }]}>⬅</Text>
-      </TouchableOpacity>
-      {!isShortTab && (
-        <TouchableOpacity style={[styles.createBtn, { backgroundColor: colors.accent }]} onPress={() => router.push("/skillbattle")}>
-          <Text style={[styles.btnText, { color: colors.background }]}>＋</Text>
-        </TouchableOpacity>
-      )}
+      {content}
+      <View style={styles.storiesOverlay} pointerEvents="box-none">
+        <Stories />
+      </View>
     </View>
   );
 }
@@ -1113,6 +1132,7 @@ const styles = StyleSheet.create({
   emptyText:         { fontSize: 18, marginBottom: 20, fontWeight: "600" },
   uploadBtn:         { paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12, elevation: 8 },
   uploadBtnText:     { fontWeight: "700", fontSize: 16 },
+  storiesOverlay:    { position: "absolute", top: 110, left: 0, right: 0, zIndex: 15, elevation: 9 },
   backBtn:           { position: "absolute", top: 50, left: 20, width: 50, height: 50, borderRadius: 25, justifyContent: "center", alignItems: "center", zIndex: 10, elevation: 8 },
   createBtn:         { position: "absolute", top: 50, right: 20, width: 50, height: 50, borderRadius: 25, justifyContent: "center", alignItems: "center", zIndex: 10, elevation: 8 },
   btnText:           { fontSize: 24, fontWeight: "bold" },

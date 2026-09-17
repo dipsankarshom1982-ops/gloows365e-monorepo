@@ -12,7 +12,9 @@
 //        onboardingComplete true  → /restart-education/home
 //        onboardingComplete false → /restart-education/onboarding
 //   4. Signed in, students/{uid} exists:
-//        onboardingComplete true  → /home
+//        onboardingComplete true  → /reels (post-login landing — see the
+//          navigation restructure: Reels + Stories is now the initial
+//          post-login screen, Home stays reachable via the bottom nav)
 //        onboardingComplete false → /register
 //   5. Signed in, neither doc found → /register
 //
@@ -82,7 +84,7 @@ export default function RootPage() {
         const studentSnap = await getDoc(doc(db, "students", user.uid));
         if (studentSnap.exists()) {
           const onboarding = studentSnap.data()?.onboardingComplete ?? false;
-          router.replace(onboarding ? "/home" : "/register");
+          router.replace(onboarding ? "/reels" : "/register");
           return;
         }
 

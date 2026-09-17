@@ -54,7 +54,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
         <AppHeader onMenuOpen={() => setDrawerOpen(true)} />
         <main className="page-scroll">{children}</main>
-        <BottomNav />
+        <BottomNav onMenuOpen={() => setDrawerOpen(true)} />
       </div>
       {/* ShikshaHub Phase 4 — global, not per-page: see
          InstantHelpBar.tsx's header comment. */}
