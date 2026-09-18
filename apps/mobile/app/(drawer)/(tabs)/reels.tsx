@@ -26,6 +26,7 @@
 
 import { useTheme } from "@/context/ThemeContext";
 import { streamPlaybackUrl } from "@/lib/cloudflareStream";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useFocusEffect } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -638,6 +639,19 @@ export default function Reels() {
     startIndex?: string;   // index within the short_reels list
   }>();
   const { height: windowHeight } = useWindowDimensions();
+  // LAYOUT FIX — Stories used to be an absolute overlay sitting on top of
+  // the reel video (covering part of it). Stories now renders in normal
+  // flow above the reel area (see the return statement below), so the
+  // reel's own height must shrink to the space actually left over: full
+  // window height minus the bottom tab bar (a real, opaque bar — see
+  // (tabs)/_layout.tsx's tabBarStyle — so it already claims its own
+  // layout space via the navigator, but useWindowDimensions() reports the
+  // raw device height regardless, hence subtracting it explicitly here)
+  // minus however tall Stories actually renders (measured via onLayout,
+  // since Story.tsx's own height isn't a fixed constant).
+  const tabBarHeight = useBottomTabBarHeight();
+  const [storiesHeight, setStoriesHeight] = useState(0);
+  const reelAreaHeight = Math.max(windowHeight - tabBarHeight - storiesHeight, 0);
 
   const [reels,        setReels]        = useState<Post[]>([]);
   const [ownPending,   setOwnPending]   = useState<Post[]>([]);
@@ -993,7 +1007,7 @@ export default function Reels() {
   const renderItem = ({ item, index }: { item: Post; index: number }) => {
     if (!isShortTab && index !== 0 && index % 5 === 0) {
       return (
-        <View style={[styles.adContainer, { height: windowHeight, backgroundColor: colors.background }]}>
+        <View style={[styles.adContainer, { height: reelAreaHeight, backgroundColor: colors.background }]}>
           <Text style={[styles.adText, { color: colors.accent }]}>🔥 Sponsored Ad</Text>
         </View>
       );
@@ -1003,7 +1017,7 @@ export default function Reels() {
         item={item}
         isActive={ready && index === currentIndex}
         paused={paused}
-        itemHeight={windowHeight}
+        itemHeight={reelAreaHeight}
         isShortReel={item.isShortReel ?? isShortTab}
         onPauseToggle={() => setPaused((p) => !p)}
         onLike={handleLike}
@@ -1015,12 +1029,13 @@ export default function Reels() {
   };
 
   const getItemLayout = (_: any, index: number) => ({
-    length: windowHeight, offset: windowHeight * index, index,
+    length: reelAreaHeight, offset: reelAreaHeight * index, index,
   });
 
-  // Reels is the post-login landing screen — Stories renders as a floating
-  // overlay strip above every state below (loading/error/empty/feed), same
-  // component/data as home.tsx's Stories, just mounted here too.
+  // Reels is the post-login landing screen — Stories renders in normal
+  // layout flow above the reel area (not overlaid on top of it — see the
+  // reelAreaHeight comment above), same component/data as home.tsx's
+  // Stories, just mounted here too.
   const content = (() => {
     if (videos.length === 0) {
       if (feedLoading) {
@@ -1060,7 +1075,7 @@ export default function Reels() {
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
           pagingEnabled
-          snapToInterval={windowHeight}
+          snapToInterval={reelAreaHeight}
           snapToAlignment="start"
           decelerationRate="fast"
           disableIntervalMomentum
@@ -1071,7 +1086,7 @@ export default function Reels() {
           removeClippedSubviews
           onEndReachedThreshold={0.5}
           onMomentumScrollEnd={(e) => {
-            setCurrentIndex(Math.round(e.nativeEvent.contentOffset.y / windowHeight));
+            setCurrentIndex(Math.round(e.nativeEvent.contentOffset.y / reelAreaHeight));
           }}
           onScrollToIndexFailed={(info) => {
             setTimeout(() => {
@@ -1094,9 +1109,11 @@ export default function Reels() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
-      {content}
-      <View style={styles.storiesOverlay} pointerEvents="box-none">
+      <View onLayout={(e) => setStoriesHeight(e.nativeEvent.layout.height)}>
         <Stories />
+      </View>
+      <View style={{ flex: 1 }}>
+        {content}
       </View>
     </View>
   );
@@ -1132,7 +1149,6 @@ const styles = StyleSheet.create({
   emptyText:         { fontSize: 18, marginBottom: 20, fontWeight: "600" },
   uploadBtn:         { paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12, elevation: 8 },
   uploadBtnText:     { fontWeight: "700", fontSize: 16 },
-  storiesOverlay:    { position: "absolute", top: 110, left: 0, right: 0, zIndex: 15, elevation: 9 },
   backBtn:           { position: "absolute", top: 50, left: 20, width: 50, height: 50, borderRadius: 25, justifyContent: "center", alignItems: "center", zIndex: 10, elevation: 8 },
   createBtn:         { position: "absolute", top: 50, right: 20, width: 50, height: 50, borderRadius: 25, justifyContent: "center", alignItems: "center", zIndex: 10, elevation: 8 },
   btnText:           { fontSize: 24, fontWeight: "bold" },

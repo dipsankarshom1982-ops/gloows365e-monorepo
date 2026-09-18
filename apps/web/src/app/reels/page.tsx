@@ -375,7 +375,12 @@ function ReelItem({
 
   return (
     <div style={{
-      height: "100dvh", width: "100%", position: "relative",
+      // LAYOUT FIX: was 100dvh (full device height) — now 100% of the
+      // scroll container's own box, which is sized to the space actually
+      // left over after Stories (see the scroll container's wrapper in
+      // ReelsContent's main return), so this item no longer extends
+      // behind Stories or beyond the visible area.
+      height: "100%", width: "100%", position: "relative",
       scrollSnapAlign: "start", scrollSnapStop: "always",
       background: "#000", overflow: "hidden", flexShrink: 0,
     }}>
@@ -614,18 +619,25 @@ function ReelItem({
 // indistinguishable from an actually-empty feed. This helper retries a
 // failed read a couple of times with a short backoff before giving up.
 // Reels is the post-login landing screen (navigation restructure) — Stories
-// renders as a fixed overlay strip above every state below (loading/error/
-// empty/feed), same StoryComponent (app)/home/page.tsx already uses, just
-// mounted here too. "Menu" (BottomNav's onMenuOpen) needs a Drawer to open
-// from this page specifically — reels/page.tsx lives outside the (app)
-// route group's shared Drawer, so it mounts its own instance below, same
-// component/props as (app)/layout.tsx uses.
-// top:110 keeps this below each reel's back/create buttons (positioned at
-// top:50, see ReelItem's "Back" button and the "+" button in the main
-// return below) so the two don't overlap.
-function StoriesOverlay() {
+// renders in normal document flow above the reel area in every state below
+// (loading/error/empty/feed), same StoryComponent (app)/home/page.tsx
+// already uses, just mounted here too.
+//
+// LAYOUT FIX: this used to be `position: fixed` with a fixed `top: 110`
+// offset, floating on top of the video instead of pushing it down — a
+// large chunk of the reel ended up hidden behind the Stories strip. It's
+// now a plain flex child (flexShrink: 0 so it keeps its natural height
+// instead of being squashed by its flex:1 sibling), and every caller wraps
+// it in a column flex container with the actual content sized to fill
+// (flex: 1) whatever space is left over — see ReelsContent's return.
+//
+// "Menu" (BottomNav's onMenuOpen) needs a Drawer to open from this page
+// specifically — reels/page.tsx lives outside the (app) route group's
+// shared Drawer, so it mounts its own instance below, same component/
+// props as (app)/layout.tsx uses.
+function StoriesSection() {
   return (
-    <div style={{ position: "fixed", top: 110, left: 0, right: 0, zIndex: 2100 }}>
+    <div style={{ flexShrink: 0 }}>
       <StoryComponent />
     </div>
   );
@@ -1001,10 +1013,12 @@ function ReelsContent() {
     // a failure short of a full page reload.
     if (feedLoading) {
       return (
-        <div style={{ height: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: colors.background }}>
-          <div style={{ width: 36, height: 36, border: `3px solid ${colors.border}`, borderTop: `3px solid ${colors.accent}`, borderRadius: "50%", animation: "reels-spin 0.8s linear infinite" }}/>
-          <style>{`@keyframes reels-spin { to { transform: rotate(360deg); } }`}</style>
-          <StoriesOverlay />
+        <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: colors.background }}>
+          <StoriesSection />
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: 36, height: 36, border: `3px solid ${colors.border}`, borderTop: `3px solid ${colors.accent}`, borderRadius: "50%", animation: "reels-spin 0.8s linear infinite" }}/>
+            <style>{`@keyframes reels-spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
           <BottomNav onMenuOpen={() => setDrawerOpen(true)} />
           <div style={{ position: "fixed", inset: 0, zIndex: 2200, pointerEvents: drawerOpen ? "auto" : "none" }}>
             <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
@@ -1014,17 +1028,19 @@ function ReelsContent() {
     }
     if (feedError) {
       return (
-        <div style={{ height: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: colors.background, padding: 24, textAlign: "center" }}>
-          <span style={{ fontSize: 34 }}>⚠️</span>
-          <span style={{ fontSize: 16, fontWeight: 700, color: colors.text }}>Couldn't load reels</span>
-          <span style={{ fontSize: 13, color: colors.textSecondary, maxWidth: 260 }}>Check your connection and try again.</span>
-          <button
-            onClick={() => setReloadTick((t) => t + 1)}
-            style={{ padding: "12px 24px", borderRadius: 12, background: colors.accent, border: "none", cursor: "pointer" }}
-          >
-            <span style={{ fontWeight: 700, fontSize: 15, color: colors.background }}>Retry</span>
-          </button>
-          <StoriesOverlay />
+        <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: colors.background }}>
+          <StoriesSection />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 24, textAlign: "center" }}>
+            <span style={{ fontSize: 34 }}>⚠️</span>
+            <span style={{ fontSize: 16, fontWeight: 700, color: colors.text }}>Couldn't load reels</span>
+            <span style={{ fontSize: 13, color: colors.textSecondary, maxWidth: 260 }}>Check your connection and try again.</span>
+            <button
+              onClick={() => setReloadTick((t) => t + 1)}
+              style={{ padding: "12px 24px", borderRadius: 12, background: colors.accent, border: "none", cursor: "pointer" }}
+            >
+              <span style={{ fontWeight: 700, fontSize: 15, color: colors.background }}>Retry</span>
+            </button>
+          </div>
           <BottomNav onMenuOpen={() => setDrawerOpen(true)} />
           <div style={{ position: "fixed", inset: 0, zIndex: 2200, pointerEvents: drawerOpen ? "auto" : "none" }}>
             <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
@@ -1033,15 +1049,17 @@ function ReelsContent() {
       );
     }
     return (
-      <div style={{ height: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, background: colors.background }}>
-        <span style={{ fontSize: 18, fontWeight: 600, color: colors.textSecondary }}>No videos available</span>
-        <button
-          onClick={() => router.push("/battle")}
-          style={{ padding: "14px 24px", borderRadius: 12, background: colors.accent, border: "none", cursor: "pointer" }}
-        >
-          <span style={{ fontWeight: 700, fontSize: 16, color: colors.background }}>Upload First Video ＋</span>
-        </button>
-        <StoriesOverlay />
+      <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: colors.background }}>
+        <StoriesSection />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20 }}>
+          <span style={{ fontSize: 18, fontWeight: 600, color: colors.textSecondary }}>No videos available</span>
+          <button
+            onClick={() => router.push("/battle")}
+            style={{ padding: "14px 24px", borderRadius: 12, background: colors.accent, border: "none", cursor: "pointer" }}
+          >
+            <span style={{ fontWeight: 700, fontSize: 16, color: colors.background }}>Upload First Video ＋</span>
+          </button>
+        </div>
         <BottomNav onMenuOpen={() => setDrawerOpen(true)} />
         <div style={{ position: "fixed", inset: 0, zIndex: 2200, pointerEvents: drawerOpen ? "auto" : "none" }}>
           <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
@@ -1051,62 +1069,71 @@ function ReelsContent() {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 2000 }}>
-      <div
-        ref={containerRef}
-        onScroll={handleScroll}
-        style={{
-          height: "100dvh", overflowY: "auto", scrollSnapType: "y mandatory",
-          scrollBehavior: "smooth",
-        }}
-      >
-        {videos.map((item, idx) => {
-          if (!isShortTab && idx !== 0 && idx % 5 === 0) {
-            return (
-              <div
-                key={`ad-${idx}`}
-                style={{
-                  height: "100dvh", scrollSnapAlign: "start", display: "flex",
-                  alignItems: "center", justifyContent: "center", background: colors.background,
-                }}
-              >
-                <span style={{ fontSize: 20, fontWeight: 700, color: colors.accent }}>🔥 Sponsored Ad</span>
-              </div>
-            );
-          }
-          return (
-            <ReelItem
-              key={item.id}
-              item={item}
-              isActive={idx === currentIndex}
-              paused={paused}
-              isShortReel={item.isShortReel ?? isShortTab}
-              onPauseToggle={() => setPaused((p) => !p)}
-              onLike={handleLike}
-              onShare={handleShare}
-              onView={handleView}
-              onBack={() => router.push("/home")}
-              colors={colors}
-            />
-          );
-        })}
-      </div>
+    <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 2000, display: "flex", flexDirection: "column" }}>
+      <StoriesSection />
 
-      {!isShortTab && (
-        <button
-          onClick={() => router.push("/battle")}
+      {/* LAYOUT FIX: this wrapper is `flex: 1` so it gets exactly the
+          space left over after Stories (and, implicitly, the bottom nav
+          keeps its own pre-existing translucent-overlay treatment — see
+          BottomNav's CSS, unchanged). `position: relative` makes it the
+          positioning root for the "+" button below, so `top: 50` lands
+          near the top of the actual reel area instead of under Stories. */}
+      <div style={{ position: "relative", flex: 1, overflow: "hidden" }}>
+        <div
+          ref={containerRef}
+          onScroll={handleScroll}
           style={{
-            position: "absolute", top: 50, right: 20, width: 50, height: 50, borderRadius: 25,
-            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10,
-            background: colors.accent, border: "none", cursor: "pointer",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            height: "100%", overflowY: "auto", scrollSnapType: "y mandatory",
+            scrollBehavior: "smooth",
           }}
         >
-          <span style={{ fontSize: 24, fontWeight: 700, color: colors.background }}>＋</span>
-        </button>
-      )}
+          {videos.map((item, idx) => {
+            if (!isShortTab && idx !== 0 && idx % 5 === 0) {
+              return (
+                <div
+                  key={`ad-${idx}`}
+                  style={{
+                    height: "100%", scrollSnapAlign: "start", display: "flex",
+                    alignItems: "center", justifyContent: "center", background: colors.background,
+                  }}
+                >
+                  <span style={{ fontSize: 20, fontWeight: 700, color: colors.accent }}>🔥 Sponsored Ad</span>
+                </div>
+              );
+            }
+            return (
+              <ReelItem
+                key={item.id}
+                item={item}
+                isActive={idx === currentIndex}
+                paused={paused}
+                isShortReel={item.isShortReel ?? isShortTab}
+                onPauseToggle={() => setPaused((p) => !p)}
+                onLike={handleLike}
+                onShare={handleShare}
+                onView={handleView}
+                onBack={() => router.push("/home")}
+                colors={colors}
+              />
+            );
+          })}
+        </div>
 
-      <StoriesOverlay />
+        {!isShortTab && (
+          <button
+            onClick={() => router.push("/battle")}
+            style={{
+              position: "absolute", top: 50, right: 20, width: 50, height: 50, borderRadius: 25,
+              display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10,
+              background: colors.accent, border: "none", cursor: "pointer",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+            }}
+          >
+            <span style={{ fontSize: 24, fontWeight: 700, color: colors.background }}>＋</span>
+          </button>
+        )}
+      </div>
+
       <BottomNav onMenuOpen={() => setDrawerOpen(true)} />
       <div style={{ position: "fixed", inset: 0, zIndex: 2200, pointerEvents: drawerOpen ? "auto" : "none" }}>
         <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
