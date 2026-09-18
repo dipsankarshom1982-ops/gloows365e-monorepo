@@ -138,10 +138,27 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
           }
         );
       } else {
+        // Normal user: fetch ALL modules (not just isEnabled==true), leaving
+        // the raw isEnabled value intact. Learn/Challenge (app)/learn and
+        // (app)/challenge pages use `modules.find(m => m.id === key)
+        // ?.isEnabled !== false`, which treats "no doc" as visible on
+        // purpose. With the old isEnabled-filtered query a DISABLED module
+        // was also simply absent, so it looked identical to "no doc" and
+        // stayed visible — disabling it in Admin > App Structure had no
+        // effect on web.
+        //
+        // No orderBy("order") here on purpose: Firestore silently drops any
+        // document that lacks the ordered field, and Admin > App Structure
+        // creates a module's doc on first toggle as just { name, isEnabled }
+        // (no `order`). With orderBy, those docs never reached this client,
+        // so the module looked "unconfigured" and stayed visible. Sort
+        // client-side instead (missing order sorts as 0).
         unsub = onSnapshot(
-          query(collection(db, "appModules"), where("isEnabled", "==", true), orderBy("order", "asc")),
+          collection(db, "appModules"),
           (snap) => {
-            const fresh = snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppModule));
+            const fresh = snap.docs
+              .map((d) => ({ id: d.id, ...d.data() } as AppModule))
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
             setModules(fresh.length > 0 ? fresh : DEFAULT_MODULES);
             setConfigLoading(false);
           },
@@ -152,9 +169,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
               return;
             }
             try {
-              const snap = await getDocs(
-                query(collection(db, "appModules"), where("isEnabled", "==", true))
-              );
+              const snap = await getDocs(collection(db, "appModules"));
               const fresh = snap.docs
                 .map((d) => ({ id: d.id, ...d.data() } as AppModule))
                 .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));

@@ -10,6 +10,7 @@
 
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
+import { useAppConfig } from "@/context/AppConfigContext";
 
 const MODULES = [
   { id: "ai-guru",      label: "AI Guru",       emoji: "🎓", href: "/ai-guru" },
@@ -23,6 +24,12 @@ const MODULES = [
 export default function LearnPage() {
   const { isDarkMode, colors } = useTheme();
   const router = useRouter();
+  const { modules } = useAppConfig();
+
+  // Admin > App Structure module toggle: a module with no appModules doc
+  // stays visible; only an explicit isEnabled:false hides it. Same rule as
+  // apps/mobile's learn.tsx (ids are shared with the appModules doc ids).
+  const visibleModules = MODULES.filter((m) => modules.find((am) => am.id === m.id)?.isEnabled !== false);
 
   const surfaceBg = isDarkMode ? "#1e293b" : "#f8fafc";
   const borderCol = isDarkMode ? "#334155" : "#e2e8f0";
@@ -37,7 +44,7 @@ export default function LearnPage() {
       </div>
 
       <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {MODULES.map((m) => (
+        {visibleModules.map((m) => (
           <div
             key={m.id}
             onClick={() => router.push(m.href)}
