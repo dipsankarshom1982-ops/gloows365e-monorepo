@@ -1,10 +1,23 @@
 // PATH: apps/mobile/app/(drawer)/(tabs)/learn.tsx
 // Learn tab — navigation-only grouping of existing learning modules.
 // No new business logic; every card routes to an already-built screen.
+//
+// FEATURE CONTROL + APP MODULE RESTRUCTURE (audit finding C): this screen
+// used to render every module unconditionally — Admin had no way to hide
+// any of them. Module-level enable/disable now reuses the existing
+// (previously orphaned — no consumer read `modules` from useAppConfig()
+// before this) appModules collection, the same one apps/admin/src/pages/
+// AppModules.tsx already manages, with its existing tester/admin bypass
+// (AppConfigContext forces isEnabled:true for every module when the
+// signed-in user's users/{uid}.role is "tester" or "admin" — satisfying
+// "tester gets full access" for free, no new mechanism). A module with no
+// matching appModules doc yet (nothing configured for it in Admin) stays
+// visible — same as today's behavior — rather than disappearing by default.
 
 import Header from "@/components/header";
 import { useTheme } from "@/context/ThemeContext";
 import { useAppTranslation } from "@/context/LanguageContext";
+import { useAppConfig } from "@/context/AppConfigContext";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -12,6 +25,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 // CourseHub is listed in the nav spec but doesn't exist anywhere in this
 // codebase (confirmed via repo-wide search) — omitted rather than invented.
+// Each `key` doubles as the appModules/{key} document id (Admin's "Add
+// Module" form on the rebuilt App Structure page writes these same ids).
 const MODULES: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap; route: string }[] = [
   { key: "ai-guru",       label: "AI Guru",       icon: "school-outline",   route: "/ai-guru" },
   { key: "shikshahub",    label: "ShikshaHub",    icon: "ribbon-outline",   route: "/shikshahub" },
@@ -24,12 +39,18 @@ const MODULES: { key: string; label: string; icon: keyof typeof Ionicons.glyphMa
 export default function Learn() {
   const { colors } = useTheme();
   const { t } = useAppTranslation();
+  const { modules } = useAppConfig();
+
+  // Visible unless Admin has explicitly configured this exact module id as
+  // disabled — see header comment. Never hides a module Admin hasn't
+  // touched yet.
+  const visibleModules = MODULES.filter((m) => modules.find((am) => am.id === m.key)?.isEnabled !== false);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <Header title={t("learn") ?? "Learn"} />
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {MODULES.map((m) => (
+        {visibleModules.map((m) => (
           <TouchableOpacity
             key={m.key}
             style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}

@@ -59,9 +59,13 @@ const NAV_GROUPS = [
     { path: "/feedback-features", label: "⭐ Feedback Features",  permKey: "feedback-features" },
   ]},
   { section: "APP CONFIG", items: [
-    { path: "/feature-control",    label: "🎛️ Feature Control",   permKey: "modules" },
+    // Replaces the two separate "Feature Control" / "App Modules" links
+    // with one unified Super Module -> Module -> Feature view (Feature
+    // Control + App Module restructure). Both old pages/routes are left
+    // intact and still reachable directly (/feature-control, /modules)
+    // for raw flat management — just no longer in the primary sidebar.
+    { path: "/app-structure",      label: "📐 App Structure",      permKey: "modules" },
     { path: "/referrals",          label: "🎁 Referrals",          permKey: "modules" },
-    { path: "/modules",            label: "🧩 App Modules",        permKey: "modules" },
     { path: "/subscription-plans", label: "💎 Plans",              permKey: "subscription-plans" },
     { path: "/ai-guru-credits",    label: "🎫 AI Guru Credits",    permKey: "subscription-plans" },
     { path: "/coupons",            label: "🎟️ Coupons",            permKey: "coupons" },

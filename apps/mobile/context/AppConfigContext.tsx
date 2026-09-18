@@ -124,13 +124,26 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
         }
       );
     } else {
-      // Normal user: only enabled modules
+      // Normal user: fetch ALL modules (not just isEnabled==true).
+      //
+      // FIX (App Structure verification pass): this used to query
+      // where("isEnabled","==",true), which means Firestore itself
+      // filtered out a disabled module's doc before it ever reached the
+      // client — a disabled module and a module with NO doc at all were
+      // then indistinguishable here (both simply absent from `modules`).
+      // Learn/Challenge (apps/mobile/app/(drawer)/(tabs)/learn.tsx,
+      // challenge.tsx) rely on exactly that distinction —
+      // `modules.find(m => m.id === key)?.isEnabled !== false` treats
+      // "absent" as visible on purpose, so a module Admin hasn't
+      // configured yet doesn't wrongly vanish. With the old
+      // isEnabled-filtered query, an explicitly DISABLED module was
+      // ALSO absent, so it stayed visible too — disabling a module via
+      // AppStructure had no actual effect on normal students. Fetching
+      // every doc (isEnabled true or false) and leaving the raw value
+      // intact — never forced, unlike the tester branch above — lets
+      // consumers see the real disabled state and correctly hide it.
       unsubModules = onSnapshot(
-        query(
-          collection(db, "appModules"),
-          where("isEnabled", "==", true),
-          orderBy("order", "asc")
-        ),
+        query(collection(db, "appModules"), orderBy("order", "asc")),
         (snap) => {
           const fresh = snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppModule));
           setModules(fresh);
@@ -138,11 +151,9 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
           AsyncStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(fresh)).catch(() => {});
         },
         async () => {
-          // Composite index not ready — fallback to client-side filter
+          // Fallback: getDocs without orderBy (e.g. transient listener error)
           try {
-            const snap = await getDocs(
-              query(collection(db, "appModules"), where("isEnabled", "==", true))
-            );
+            const snap = await getDocs(collection(db, "appModules"));
             const fresh = snap.docs
               .map((d) => ({ id: d.id, ...d.data() } as AppModule))
               .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));

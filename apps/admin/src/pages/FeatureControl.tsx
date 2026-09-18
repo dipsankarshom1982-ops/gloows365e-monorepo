@@ -50,18 +50,34 @@ const AIGURU_FEATURES: AiFeature[] = [
 ];
 
 // ─── Drawer menu items ─────────────────────────────────────────────────────────
+// CORRECTED (Feature Control + App Module restructure audit): the previous
+// list here (home, starboard, dashboard, aiguru, learnfun, skillboost,
+// skillboard) predates the bottom-nav restructure — those were Drawer
+// shortcuts before Home/Dashboard/Learn/Challenge became fixed tabs, and
+// the actual Drawer (apps/mobile/app/(drawer)/_layout.tsx) has never
+// checked drawerItem() for any of them since. Toggling them here had zero
+// effect. Meanwhile the Drawer DOES check reels/myPrizes/myProfile/
+// subscription/feedback/about/privacy, none of which were toggleable here
+// — they silently defaulted to always-visible with no admin control at
+// all. This list is now the exact 11 keys the real Drawer checks, grouped
+// to match its actual on-screen sections (Quick Access / Account /
+// Support / Other) for clarity.
 const DRAWER_ITEMS: Section[] = [
-  { key: "home",        icon: "🏠", label: "Home",         description: "Home tab link",                         locked: true },
-  { key: "starboard",   icon: "🏆", label: "Starboard",    description: "V-Coins annual rank & leaderboard" },
-  { key: "wallet",      icon: "💰", label: "Wallet",       description: "VCoins wallet" },
-  { key: "settings",    icon: "⚙️", label: "Settings",     description: "App settings" },
-  { key: "dashboard",   icon: "📊", label: "Dashboard",    description: "Student dashboard" },
-  { key: "aiguru",      icon: "🤖", label: "AI Guru",      description: "AI Guru main screen" },
-  { key: "learnfun",    icon: "📖", label: "LearnFun",     description: "LearnFun gamification (drawer only)" },
-  { key: "skillboost",  icon: "⚡", label: "Skill Boost",  description: "Skill Boost screen (drawer only)" },
-  { key: "language",    icon: "🌐", label: "Language",     description: "Language selector" },
-  { key: "skillboard",  icon: "⚔️", label: "Skill Board",  description: "Skill battle leaderboard" },
-  { key: "glostore",    icon: "🛍️", label: "GloStore",     description: "Affiliate product store link" },
+  // Quick Access
+  { key: "reels",        icon: "🎬", label: "Reels",          description: "Quick Access — reels feed" },
+  { key: "wallet",       icon: "💰", label: "Wallet",         description: "Quick Access — VCoins wallet" },
+  { key: "myPrizes",     icon: "🎁", label: "My Prizes",      description: "Quick Access — prize claims" },
+  // Account
+  { key: "myProfile",    icon: "👤", label: "My Profile",     description: "Account — profile settings" },
+  { key: "subscription", icon: "🧾", label: "Subscription",   description: "Account — billing history" },
+  { key: "settings",     icon: "⚙️", label: "Settings",       description: "Account — app settings" },
+  // Support
+  { key: "feedback",     icon: "⭐", label: "Feedback",       description: "Support — feedback & ratings" },
+  { key: "about",        icon: "ℹ️", label: "About Gloows365", description: "Support — about screen" },
+  { key: "privacy",      icon: "🔒", label: "Privacy",        description: "Support — privacy policy" },
+  // Other
+  { key: "language",     icon: "🌐", label: "Language",       description: "Other — language selector" },
+  { key: "glostore",     icon: "🛍️", label: "GloStore",       description: "Other — affiliate product store" },
 ];
 
 // ─── Defaults ──────────────────────────────────────────────────────────────────

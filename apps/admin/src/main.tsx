@@ -51,6 +51,7 @@ const SkillCategories      = lazy(() => import("./pages/SkillCategories"));
 const LearnFun             = lazy(() => import("./pages/LearnFun"));
 const BadgesAndStars       = lazy(() => import("./pages/BadgesAndStars"));
 
+const AppStructure         = lazy(() => import("./pages/AppStructure"));
 const AppModules           = lazy(() => import("./pages/AppModules"));
 const FeatureControl       = lazy(() => import("./pages/FeatureControl"));
 const FeedbackFeatures     = lazy(() => import("./pages/FeedbackFeatures"));
@@ -203,6 +204,7 @@ function ProtectedRoutes() {
           <Route path="/learnfun"                  element={<LearnFun />} />
           <Route path="/badges"                    element={<BadgesAndStars />} />
 
+          <Route path="/app-structure"      element={<AppStructure />} />
           <Route path="/feature-control"    element={<FeatureControl />} />
           <Route path="/referrals"          element={<Referrals />} />
           <Route path="/modules"            element={<AppModules />} />
