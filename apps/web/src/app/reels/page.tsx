@@ -11,9 +11,9 @@
 // on (app)/layout.tsx's copy.
 //
 // Navigation restructure: this is now the post-login landing screen (see
-// app/page.tsx), so it also mounts its own <Stories /> overlay and its own
-// <Drawer /> instance (same components (app)/layout.tsx/home/page.tsx use)
-// so "Menu" has something to open before a user ever visits an (app) page.
+// app/page.tsx), so it shows a "Create Reel" tab at the top and mounts its
+// own <Drawer /> instance (same component (app)/layout.tsx uses) so "Menu"
+// has something to open before a user ever visits an (app) page.
 //
 // FIX (bug report — "reels not showing after tapping from home"): this file
 // previously lived at apps/web/src/reels/page.tsx, OUTSIDE the Next.js
@@ -43,7 +43,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/layout/AuthGuard";
 import BottomNav from "@/components/layout/BottomNav";
 import Drawer from "@/components/layout/Drawer";
-import StoryComponent from "@/components/Story";
 import { useTheme } from "@/context/ThemeContext";
 import { auth, db } from "@/lib/firebase";
 import {
@@ -618,27 +617,39 @@ function ReelItem({
 // The page then rendered its normal "No videos available" empty state,
 // indistinguishable from an actually-empty feed. This helper retries a
 // failed read a couple of times with a short backoff before giving up.
-// Reels is the post-login landing screen (navigation restructure) — Stories
-// renders in normal document flow above the reel area in every state below
-// (loading/error/empty/feed), same StoryComponent (app)/home/page.tsx
-// already uses, just mounted here too.
+// Reels is the post-login landing screen (navigation restructure). The
+// "Create Reel" tab renders in normal document flow above the reel area in
+// every state below (loading/error/empty/feed) — it replaced the Stories
+// strip that used to sit here (Stories still live on Home). It's a plain
+// flex child (flexShrink: 0 so it keeps its natural height instead of
+// being squashed by its flex:1 sibling), and every caller wraps it in a
+// column flex container with the actual content sized to fill (flex: 1)
+// whatever space is left over — see ReelsContent's return.
 //
-// LAYOUT FIX: this used to be `position: fixed` with a fixed `top: 110`
-// offset, floating on top of the video instead of pushing it down — a
-// large chunk of the reel ended up hidden behind the Stories strip. It's
-// now a plain flex child (flexShrink: 0 so it keeps its natural height
-// instead of being squashed by its flex:1 sibling), and every caller wraps
-// it in a column flex container with the actual content sized to fill
-// (flex: 1) whatever space is left over — see ReelsContent's return.
+// It goes to /battle, same as the "＋" button: creating a reel means
+// picking a Skill Battle first, since /create-reel can't submit without a
+// battleId ("No battle selected.").
 //
 // "Menu" (BottomNav's onMenuOpen) needs a Drawer to open from this page
 // specifically — reels/page.tsx lives outside the (app) route group's
 // shared Drawer, so it mounts its own instance below, same component/
 // props as (app)/layout.tsx uses.
-function StoriesSection() {
+function CreateReelTab() {
+  const router = useRouter();
+  const { colors } = useTheme();
   return (
-    <div style={{ flexShrink: 0 }}>
-      <StoryComponent />
+    <div style={{ flexShrink: 0, padding: "10px 16px", background: "#000" }}>
+      <button
+        onClick={() => router.push("/battle")}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          padding: "12px 0", borderRadius: 12, border: "none", cursor: "pointer",
+          background: colors.accent,
+        }}
+      >
+        <span style={{ fontSize: 18 }}>🎬</span>
+        <span style={{ fontSize: 15, fontWeight: 800, color: colors.background }}>Create Reel</span>
+      </button>
     </div>
   );
 }
@@ -993,7 +1004,7 @@ function ReelsContent() {
 
   const handleShare = async (item: Post) => {
     const deepLink = `https://gloows365.in/reels?postId=${item.id}`;
-    const shareText = `${item.title || "Vidya Reel"}\n\n${item.description || ""}\n\nWatch on Gloows365E: ${deepLink}`.trim();
+    const shareText = `${item.title || "Vidya Reel"}\n\n${item.description || ""}\n\nWatch on Gloows365: ${deepLink}`.trim();
     try {
       if (navigator.share) {
         await navigator.share({ title: item.title || "Vidya Reel", text: shareText, url: deepLink });
@@ -1014,7 +1025,7 @@ function ReelsContent() {
     if (feedLoading) {
       return (
         <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: colors.background }}>
-          <StoriesSection />
+          <CreateReelTab />
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ width: 36, height: 36, border: `3px solid ${colors.border}`, borderTop: `3px solid ${colors.accent}`, borderRadius: "50%", animation: "reels-spin 0.8s linear infinite" }}/>
             <style>{`@keyframes reels-spin { to { transform: rotate(360deg); } }`}</style>
@@ -1029,7 +1040,7 @@ function ReelsContent() {
     if (feedError) {
       return (
         <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: colors.background }}>
-          <StoriesSection />
+          <CreateReelTab />
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 24, textAlign: "center" }}>
             <span style={{ fontSize: 34 }}>⚠️</span>
             <span style={{ fontSize: 16, fontWeight: 700, color: colors.text }}>Couldn't load reels</span>
@@ -1050,7 +1061,7 @@ function ReelsContent() {
     }
     return (
       <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: colors.background }}>
-        <StoriesSection />
+        <CreateReelTab />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20 }}>
           <span style={{ fontSize: 18, fontWeight: 600, color: colors.textSecondary }}>No videos available</span>
           <button
@@ -1070,7 +1081,7 @@ function ReelsContent() {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 2000, display: "flex", flexDirection: "column" }}>
-      <StoriesSection />
+      <CreateReelTab />
 
       {/* LAYOUT FIX: this wrapper is `flex: 1` so it gets exactly the
           space left over after Stories (and, implicitly, the bottom nav

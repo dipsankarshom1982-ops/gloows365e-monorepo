@@ -60,11 +60,7 @@ import { auth, db, functions } from "@/lib/firebase";
 import { scoreReel, matchesClassFilter, toMillis, type ScoringProfile } from "@/lib/reelScoring";
 import ReelMoreMenu from "@/components/ReelMoreMenu";
 import ReportVideoModal from "@/components/ReportVideoModal";
-// Reels is now the post-login landing screen (navigation restructure) —
-// Stories renders as a floating overlay strip near the top, below the
-// existing back/create buttons. Same component home.tsx already uses,
-// just mounted in a second place.
-import Stories from "@/components/Story";
+import { Ionicons } from "@expo/vector-icons";
 import { isPubliclyVisible } from "@/lib/feedVisibility";
 import { httpsCallable } from "firebase/functions";
 import {
@@ -639,19 +635,19 @@ export default function Reels() {
     startIndex?: string;   // index within the short_reels list
   }>();
   const { height: windowHeight } = useWindowDimensions();
-  // LAYOUT FIX — Stories used to be an absolute overlay sitting on top of
-  // the reel video (covering part of it). Stories now renders in normal
-  // flow above the reel area (see the return statement below), so the
-  // reel's own height must shrink to the space actually left over: full
-  // window height minus the bottom tab bar (a real, opaque bar — see
-  // (tabs)/_layout.tsx's tabBarStyle — so it already claims its own
-  // layout space via the navigator, but useWindowDimensions() reports the
-  // raw device height regardless, hence subtracting it explicitly here)
-  // minus however tall Stories actually renders (measured via onLayout,
-  // since Story.tsx's own height isn't a fixed constant).
+  // LAYOUT — the "Create Reel" tab (see the return statement below) sits in
+  // normal flow above the reel area, not over it, so the reel's own height
+  // is the space actually left over: full window height minus the bottom
+  // tab bar (a real, opaque bar — see (tabs)/_layout.tsx's tabBarStyle — so
+  // it already claims its own layout space via the navigator, but
+  // useWindowDimensions() reports the raw device height regardless, hence
+  // subtracting it explicitly here) minus however tall the Create Reel tab
+  // renders (measured via onLayout, since it includes the top safe-area
+  // inset, which varies by device).
+  const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
-  const [storiesHeight, setStoriesHeight] = useState(0);
-  const reelAreaHeight = Math.max(windowHeight - tabBarHeight - storiesHeight, 0);
+  const [topBarHeight, setTopBarHeight] = useState(0);
+  const reelAreaHeight = Math.max(windowHeight - tabBarHeight - topBarHeight, 0);
 
   const [reels,        setReels]        = useState<Post[]>([]);
   const [ownPending,   setOwnPending]   = useState<Post[]>([]);
@@ -1032,10 +1028,6 @@ export default function Reels() {
     length: reelAreaHeight, offset: reelAreaHeight * index, index,
   });
 
-  // Reels is the post-login landing screen — Stories renders in normal
-  // layout flow above the reel area (not overlaid on top of it — see the
-  // reelAreaHeight comment above), same component/data as home.tsx's
-  // Stories, just mounted here too.
   const content = (() => {
     if (videos.length === 0) {
       if (feedLoading) {
@@ -1109,9 +1101,20 @@ export default function Reels() {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
-      <View onLayout={(e) => setStoriesHeight(e.nativeEvent.layout.height)}>
-        <Stories />
-      </View>
+      {/* "Create Reel" tab — replaces the Stories strip that used to sit
+          here on the Reels landing (Stories still live on Home). Goes to
+          the Skill Battle list, same as the ＋ button below: creating a
+          reel means picking a battle first, since Createreelscreen can't
+          submit without a battleId. */}
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onLayout={(e) => setTopBarHeight(e.nativeEvent.layout.height)}
+        onPress={() => router.push("/skillbattle")}
+        style={[styles.createReelTab, { paddingTop: insets.top + 10, backgroundColor: colors.accent }]}
+      >
+        <Ionicons name="videocam" size={20} color={colors.background} />
+        <Text style={[styles.createReelTabText, { color: colors.background }]}>Create Reel</Text>
+      </TouchableOpacity>
       <View style={{ flex: 1 }}>
         {content}
       </View>
@@ -1149,6 +1152,8 @@ const styles = StyleSheet.create({
   emptyText:         { fontSize: 18, marginBottom: 20, fontWeight: "600" },
   uploadBtn:         { paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12, elevation: 8 },
   uploadBtnText:     { fontWeight: "700", fontSize: 16 },
+  createReelTab:     { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingBottom: 10 },
+  createReelTabText: { fontSize: 15, fontWeight: "800" },
   backBtn:           { position: "absolute", top: 50, left: 20, width: 50, height: 50, borderRadius: 25, justifyContent: "center", alignItems: "center", zIndex: 10, elevation: 8 },
   createBtn:         { position: "absolute", top: 50, right: 20, width: 50, height: 50, borderRadius: 25, justifyContent: "center", alignItems: "center", zIndex: 10, elevation: 8 },
   btnText:           { fontSize: 24, fontWeight: "bold" },
