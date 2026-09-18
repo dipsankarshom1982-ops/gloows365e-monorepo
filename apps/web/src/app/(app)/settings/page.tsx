@@ -196,7 +196,7 @@ export default function SettingsPage() {
     { id: "notifications", title: "Notifications",      description: "Receive push notifications",                       icon: "notifications-outline",       accentColor: "#10b981", isToggle: true, toggleValue: notificationsEnabled, onToggle: toggleNotifications },
     { id: "password",      title: "Change Password",    description: "Update your account password",                     icon: "key-outline",                 accentColor: "#8b5cf6", route: "/settings/change-password" },
     { id: "privacy",       title: "Privacy",            description: "Manage your privacy settings",                     icon: "lock-closed-outline",         accentColor: "#ef4444", route: "/settings/privacy" },
-    { id: "about",         title: "About",              description: "Learn more about GLOOWS365E",                      icon: "information-circle-outline",  accentColor: "#64748b", route: "/settings/about" },
+    { id: "about",         title: "About",              description: "Learn more about Gloows365",                       icon: "information-circle-outline",  accentColor: "#64748b", route: "/settings/about" },
     { id: "feedback",      title: "Feedback & Ratings", description: "Rate features & share your suggestions",           icon: "star-outline",                accentColor: "#f59e0b", route: "/settings/feedback" },
     { id: "report-bug",    title: "Report a Bug",       description: "Tell us what went wrong",                          icon: "bug-outline",                 accentColor: "#ef4444", route: "/settings/report-bug" },
   ] as const;

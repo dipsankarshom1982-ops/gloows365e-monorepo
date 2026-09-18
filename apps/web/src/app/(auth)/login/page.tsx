@@ -365,10 +365,9 @@ export default function LoginPage() {
             WebkitTextFillColor: "transparent",
             fontSize: 29,
           }}>365</span>
-          <span style={{ color: "#FBBF24", fontSize: 31 }}>E</span>
         </div>
         <div style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 5 }}>
-          Learn • Compete • Earn 🚀
+          People • Learning • Opportunities
         </div>
       </div>
 

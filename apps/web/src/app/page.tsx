@@ -114,10 +114,9 @@ export default function RootPage() {
         <span style={{ color: "#A5B4FC" }}>Gl</span>
         <span style={{ color: "#F1F5F9" }}>oows</span>
         <span style={{ color: "#818CF8", fontSize: 36 }}>365</span>
-        <span style={{ color: "#FBBF24", fontSize: 38 }}>E</span>
       </div>
       <div style={{ color: "#94a3b8", marginTop: 12, fontSize: 14 }}>
-        Learn • Compete • Earn 🚀
+        People • Learning • Opportunities
       </div>
       <div style={{
         marginTop: 32, width: 32, height: 32,

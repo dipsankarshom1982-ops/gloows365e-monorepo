@@ -248,10 +248,9 @@ export default function SignupPage() {
             WebkitTextFillColor: "transparent",
             fontSize: 30,
           }}>365</span>
-          <span style={{ color: "#FBBF24", fontSize: 32 }}>E</span>
         </div>
         <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 6 }}>
-          Learn • Compete • Earn 🚀
+          People • Learning • Opportunities
         </div>
       </div>
 

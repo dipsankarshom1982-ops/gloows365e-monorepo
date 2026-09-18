@@ -110,10 +110,6 @@ export default function WelcomePage() {
             display: "inline-flex",
             alignItems: "center",
           }}>365</span>
-          <span style={{
-            fontSize: 16, fontWeight: 900, color: "#FBBF24",
-            marginBottom: 18,
-          }}>E</span>
         </div>
       </div>
 

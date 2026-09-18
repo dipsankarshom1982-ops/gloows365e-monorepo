@@ -92,7 +92,7 @@ export default function FeedbackPage() {
       <div style={{ padding: "16px 20px 20px" }}>
         <div style={{ fontSize: 26, fontWeight: 800, color: accent, marginBottom: 6 }}>⭐ Feedback & Ratings</div>
         <div style={{ fontSize: 13, fontWeight: 500, color: textSec, lineHeight: "20px" }}>
-          Rate the features you use and tell us how to make Gloows365E better.
+          Rate the features you use and tell us how to make Gloows365 better.
         </div>
       </div>
 
@@ -137,7 +137,7 @@ export default function FeedbackPage() {
               onChange={(e) => { setSuggestion(e.target.value); setSaved(false); }}
               maxLength={1000}
               rows={4}
-              placeholder="What would make Gloows365E better for you?"
+              placeholder="What would make Gloows365 better for you?"
               style={{
                 width: "100%", resize: "none", padding: 12, borderRadius: 12,
                 border: `1px solid ${borderCol}`, background: isDarkMode ? "#0f172a" : "#ffffff",

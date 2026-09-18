@@ -122,9 +122,9 @@ export default function ReferralPage() {
   };
 
   const handleShare = async () => {
-    const text = `Join me on Gloows365E — India's smartest learning app! 🚀\n\nUse my referral code: ${referralCode}\n\nYou'll get ${config.refereeCoins} VCoins as a welcome bonus!\n\nDownload now: https://gloows365.in`;
+    const text = `Join me on Gloows365 — India's smartest learning app! 🚀\n\nUse my referral code: ${referralCode}\n\nYou'll get ${config.refereeCoins} VCoins as a welcome bonus!\n\nDownload now: https://gloows365.in`;
     if (navigator.share) {
-      await navigator.share({ title: "Join Gloows365E with my code", text }).catch(() => {});
+      await navigator.share({ title: "Join Gloows365 with my code", text }).catch(() => {});
     } else {
       await navigator.clipboard.writeText(text).catch(() => {});
       setCopied(true);

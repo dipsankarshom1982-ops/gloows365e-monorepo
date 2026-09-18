@@ -42,15 +42,15 @@ const SECTIONS: Section[] = [
   },
   {
     id: "use", icon: "⚙️", title: "How We Use Your Data",
-    body: "Your data is used to deliver and improve the GLOOWS365E learning experience, including personalised content recommendations, progress tracking, leaderboards, and notifications. We do not sell your personal data to third parties.",
+    body: "Your data is used to deliver and improve the Gloows365 learning experience, including personalised content recommendations, progress tracking, leaderboards, and notifications. We do not sell your personal data to third parties.",
   },
   {
     id: "storage", icon: "🗄️", title: "Data Storage & Security",
-    body: "All data is stored securely on Google Firebase servers. We apply industry-standard encryption in transit (TLS) and at rest. Access to your data is restricted to authorised GLOOWS365E systems and personnel.",
+    body: "All data is stored securely on Google Firebase servers. We apply industry-standard encryption in transit (TLS) and at rest. Access to your data is restricted to authorised Gloows365 systems and personnel.",
   },
   {
     id: "third", icon: "🔗", title: "Third-Party Services",
-    body: "GLOOWS365E integrates with trusted third-party services including Google Firebase (auth, database, storage), Cloudflare Stream (video delivery), and Razorpay (payments). Each service operates under its own privacy policy.",
+    body: "Gloows365 integrates with trusted third-party services including Google Firebase (auth, database, storage), Cloudflare Stream (video delivery), and Razorpay (payments). Each service operates under its own privacy policy.",
   },
   {
     id: "rights", icon: "✅", title: "Your Rights",
@@ -58,7 +58,7 @@ const SECTIONS: Section[] = [
   },
   {
     id: "children", icon: "👧", title: "Children's Privacy",
-    body: "GLOOWS365E is designed for students and may be used by children under 13 with parental consent. We encourage parents to review their child's account activity. We do not knowingly collect sensitive data from children without verifiable parental consent.",
+    body: "Gloows365 is designed for students and may be used by children under 13 with parental consent. We encourage parents to review their child's account activity. We do not knowingly collect sensitive data from children without verifiable parental consent.",
   },
   {
     id: "updates", icon: "🔄", title: "Policy Updates",

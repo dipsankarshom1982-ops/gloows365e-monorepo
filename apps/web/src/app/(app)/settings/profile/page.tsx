@@ -563,7 +563,7 @@ export default function ProfileSettingsPage() {
   };
 
   const handleDelete = async () => {
-    if (!confirm("⚠️ This permanently deletes your GLOOWS365E profile and cannot be undone. Continue?")) return;
+    if (!confirm("⚠️ This permanently deletes your Gloows365 profile and cannot be undone. Continue?")) return;
     if (!user) return;
     setDeleting(true);
     try {
@@ -921,7 +921,7 @@ export default function ProfileSettingsPage() {
       <div style={{ margin: "28px 20px 0", padding: 16, borderRadius: 12, border: "1px solid rgba(255,77,77,0.2)", background: "rgba(255,77,77,0.05)", display: "flex", flexDirection: "column", gap: 8 }}>
         <span style={{ fontSize: 14, fontWeight: 700, color: "#FF4D4D" }}>⚠️ Danger Zone</span>
         <span style={{ fontSize: 12, fontWeight: 500, color: textSec, lineHeight: "18px" }}>
-          Deleting your account removes all your GLOOWS365E data permanently.
+          Deleting your account removes all your Gloows365 data permanently.
         </span>
         <button
           onClick={handleDelete} disabled={deleting}

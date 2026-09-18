@@ -91,7 +91,7 @@ export function RazorpayCheckout({ orderId, amount, description, onSuccess, onEr
         key:         keyId,
         amount,
         currency:    "INR",
-        name:        "Gloows365E",
+        name:        "Gloows365",
         description: description ?? "Subscription",
         order_id:    orderId,
         prefill: {

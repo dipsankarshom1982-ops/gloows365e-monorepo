@@ -1045,7 +1045,7 @@ function ReferralCard() {
   const handleShare = () => {
     if (navigator.share) {
       navigator.share({
-        title: "Join Gloows365E",
+        title: "Join Gloows365",
         text: `${t("referEarn", "Refer & Earn")} — India's smartest learning app! 🚀\n\nUse my referral code: ${referralCode}\n\nDownload: https://gloows365.in`,
       }).catch(() => {});
     } else {

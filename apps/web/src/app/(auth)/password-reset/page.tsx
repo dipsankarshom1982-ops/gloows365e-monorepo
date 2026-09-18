@@ -168,7 +168,7 @@ function PasswordResetForm() {
               )}
               {!error && (
                 <p style={{ color: "#64748B", fontSize: 12, marginTop: 8, lineHeight: "17px" }}>
-                  We&apos;ll only send a link if this email is registered with GLOOWS365E.
+                  We&apos;ll only send a link if this email is registered with Gloows365.
                 </p>
               )}
             </div>

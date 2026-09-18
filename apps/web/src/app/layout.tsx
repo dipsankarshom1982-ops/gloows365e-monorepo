@@ -24,13 +24,13 @@ import InstallDialog from "@/components/InstallDialog";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Gloows365E — Learn · Compete · Earn",
+  title: "Gloows365 — People • Learning • Opportunities",
   description: "AI-powered learning platform for Indian students Class 6–12",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Gloows365E",
+    title: "Gloows365",
   },
 };
 

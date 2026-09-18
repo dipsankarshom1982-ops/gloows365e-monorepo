@@ -74,10 +74,11 @@ export default function AboutPage() {
           background: accent + "15", display: "flex", alignItems: "center", justifyContent: "center",
           marginBottom: 12,
         }}>
-          <span style={{ fontSize: 30, fontWeight: 900, color: "#6366f1" }}>GL</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Gloows365 logo" style={{ width: 48, height: 48 }} />
         </div>
-        <div style={{ fontSize: 28, fontWeight: 900, color: textMain, marginBottom: 4 }}>GLOOWS365E</div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: accent, marginBottom: 10 }}>Learn. Compete. Grow.</div>
+        <div style={{ fontSize: 28, fontWeight: 900, color: textMain, marginBottom: 4 }}>Gloows365</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: accent, marginBottom: 10 }}>People • Learning • Opportunities</div>
         <div style={{ padding: "4px 14px", borderRadius: 20, background: accent + "15" }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: accent }}>Version 1.0.0</span>
         </div>
@@ -87,7 +88,7 @@ export default function AboutPage() {
       <div style={{ margin: "0 20px 24px", padding: 16, borderRadius: 14, border: `1px solid ${borderCol}`, background: surfaceBg }}>
         <div style={{ fontSize: 16, fontWeight: 800, color: textMain }}>🎯 Our Mission</div>
         <div style={{ fontSize: 13, lineHeight: 1.7, fontWeight: 500, color: textSec, marginTop: 8 }}>
-          GLOOWS365E is a gamified learning platform built for students from Class 4 to 12.
+          Gloows365 is a gamified learning platform built for students from Class 4 to 12.
           We combine structured courses, AI-powered guidance, and competitive quizzes to make
           education engaging, accessible, and effective — in every Indian language.
         </div>
@@ -147,7 +148,7 @@ export default function AboutPage() {
 
       {/* Legal */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 20px", marginBottom: 20 }}>
-        <span style={{ fontSize: 11, fontWeight: 500, color: textSec }}>© 2026 GLOOWS365E. All rights reserved.</span>
+        <span style={{ fontSize: 11, fontWeight: 500, color: textSec }}>© 2026 Gloows365. All rights reserved.</span>
         <Link href="/settings/privacy" style={{ fontSize: 11, fontWeight: 700, color: accent, textDecoration: "none" }}>
           Privacy Policy
         </Link>

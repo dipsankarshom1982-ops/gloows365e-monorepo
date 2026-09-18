@@ -113,7 +113,7 @@ export default function InstallDialog() {
     return (
       <DialogShell onClose={handleDismiss}>
         <div style={iconCircleStyle}>✅</div>
-        <h2 style={titleStyle}>Gloows365E is already installed</h2>
+        <h2 style={titleStyle}>Gloows365 is already installed</h2>
         <p style={bodyStyle}>You're all set — open it from your home screen or app list anytime.</p>
         <button onClick={handleDismiss} style={primaryButtonStyle}>OK</button>
       </DialogShell>
@@ -125,7 +125,7 @@ export default function InstallDialog() {
     return (
       <DialogShell onClose={handleDismiss}>
         <div style={iconCircleStyle}>🎉</div>
-        <h2 style={titleStyle}>Gloows365E installed!</h2>
+        <h2 style={titleStyle}>Gloows365 installed!</h2>
         <p style={bodyStyle}>You can now open it directly from your home screen or app list.</p>
         <button onClick={handleDismiss} style={primaryButtonStyle}>OK</button>
       </DialogShell>
@@ -137,7 +137,7 @@ export default function InstallDialog() {
     return (
       <DialogShell onClose={handleDismiss}>
         <div style={iconCircleStyle}>📲</div>
-        <h2 style={titleStyle}>Install Gloows365E</h2>
+        <h2 style={titleStyle}>Install Gloows365</h2>
         <ol style={stepsListStyle}>
           <li>Tap the <strong>Share</strong> icon (square with an arrow ↑) in the toolbar</li>
           <li>Scroll down and tap <strong>"Add to Home Screen"</strong></li>
@@ -163,7 +163,7 @@ export default function InstallDialog() {
   return (
     <DialogShell onClose={handleDismiss}>
       <div style={iconCircleStyle}>📲</div>
-      <h2 style={titleStyle}>Install Gloows365E?</h2>
+      <h2 style={titleStyle}>Install Gloows365?</h2>
       <p style={bodyStyle}>
         {wasEverInstalled
           ? "Add it back to your home screen for faster access and offline support."

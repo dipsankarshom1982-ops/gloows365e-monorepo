@@ -193,7 +193,7 @@ export default function ThemeSettingsPage() {
           {isDarkMode ? "🌙" : "☀️"} Theme
         </div>
         <div style={{ fontSize: 14, fontWeight: 500, color: textSec }}>
-          Choose how Gloows365E looks to you
+          Choose how Gloows365 looks to you
         </div>
       </div>
 

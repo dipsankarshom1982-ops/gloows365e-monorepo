@@ -80,7 +80,6 @@ function BrandLogo({ textColor }: { textColor: string }) {
       }}>
         <span style={{ color: "#fff", fontSize: 13, fontWeight: 900, letterSpacing: 0.5 }}>365</span>
       </div>
-      <span style={{ fontSize: 12, fontWeight: 900, color: "#FBBF24", marginBottom: 8, lineHeight: 1 }}>E</span>
     </div>
   );
 }

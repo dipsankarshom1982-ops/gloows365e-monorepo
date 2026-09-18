@@ -116,7 +116,7 @@ function RestartEducationBlock({ age, onRestart }: { age: number; onRestart: () 
       }}>
         <p style={{ color: "#a3e635", fontSize: 13, fontWeight: 700, marginBottom: 8 }}>About this platform</p>
         <p style={{ color: "#d1fae5", fontSize: 14, lineHeight: "22px" }}>
-          GLOOWS365E is designed for current school students in Class 6–12 (under 18 years of age).{" "}
+          Gloows365 is designed for current school students in Class 6–12 (under 18 years of age).{" "}
           Based on your age ({age} years), you are eligible for our{" "}
           <strong style={{ color: "#4ade80" }}>Restart My Education</strong> programme — a dedicated
           space for learners who want to continue their education journey after a break.
@@ -561,7 +561,6 @@ export default function RegisterPage() {
               background: "linear-gradient(90deg,#6366F1,#8B5CF6,#EC4899)",
               WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontSize: 28,
             }}>365</span>
-            <span style={{ color: "#FBBF24" }}>E</span>
           </div>
           <p style={{ color: "#c7d2fe", fontSize: 15, marginTop: 4 }}>Create Your Profile 🚀</p>
         </div>
