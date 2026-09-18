@@ -8,10 +8,14 @@
 // ✅ XP progress bar with label row
 // ✅ VCoins annual rank banner (🏆 + rank + View → /wallet)
 // ✅ Surprise gift banner
-// ✅ Menu: home · wallet · starboard · settings · dashboard · AI Guru
-//         learnfun · skillboost · language · skillboard gradient btn
-//         (wallet RESTORED to nav — see FIX comment below; still also
-//         reachable via the rank banner's "View" button)
+// ✅ Menu: Quick Access (Reels, Wallet, My Prizes) · Account (My Profile,
+//         Settings) · Support (Feedback, About Gloows365, Privacy) ·
+//         Other (Language, GloStore). Home/Dashboard/AI Guru/LearnFun/
+//         SkillBoost/Starboard/Daily Streak Quiz/SkillBoard dropped as
+//         Drawer shortcuts — all already reachable via the bottom nav's
+//         Home/Dashboard/Learn/Challenge tabs (wallet RESTORED to nav —
+//         see FIX comment below; still also reachable via the rank
+//         banner's "View" button)
 // ✅ Active item: accent bg + accent icon/text
 // ✅ Logout pinned at bottom
 
@@ -172,6 +176,14 @@ function Icon({ name, size = 20, color }: { name: string; size?: number; color: 
         <path d="M256 352v48" stroke={color} strokeWidth={32} strokeLinecap="round"/>
       </svg>
     ),
+    // Vertical "phone screen" with a play triangle — same glyph as
+    // BottomNav.tsx's Reels tab used before the nav restructure.
+    "film-outline": (
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="none">
+        <rect x="6" y="2" width="12" height="20" rx="3" stroke={color} strokeWidth="1.8"/>
+        <path d="M10.5 8.5L15 12L10.5 15.5V8.5Z" fill={color}/>
+      </svg>
+    ),
   };
   return icons[name] ?? <svg width={s} height={s}/>;
 }
@@ -224,65 +236,6 @@ function LanguageItem({ language, onClick, label }: { language: string; onClick:
         </div>
       </div>
       <Icon name="chevron-forward" size={16} color="#475569"/>
-    </button>
-  );
-}
-
-// ─── SkillBoard gradient button ───────────────────────────────
-function SkillBoardItem({ onClick, label }: { onClick: () => void; label: string }) {
-  return (
-    <div style={{ padding: "6px 16px" }}>
-      <button
-        onClick={onClick}
-        style={{
-          width: "100%", border: "none", cursor: "pointer", borderRadius: 14,
-          background: "linear-gradient(90deg, #92400e, #d97706, #fbbf24)",
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "14px 16px",
-          boxShadow: "0 4px 12px rgba(217,119,6,0.4)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Icon name="trophy" size={22} color="#fff"/>
-          <span style={{ color: "#fff", fontSize: 16, fontWeight: 800, letterSpacing: 0.3 }}>{label}</span>
-        </div>
-        <div style={{
-          background: "rgba(255,255,255,0.25)", border: "1px solid rgba(255,255,255,0.4)",
-          borderRadius: 8, padding: "4px 8px",
-        }}>
-          <span style={{ color: "#fff", fontSize: 11, fontWeight: 800 }}>⭐ TOP</span>
-        </div>
-      </button>
-    </div>
-  );
-}
-
-// ─── Daily Streak Quiz item ───────────────────────────────────
-// Flame + quiz icon combo, "NEW" badge — mirrors mobile
-// app/(drawer)/_layout.tsx's DailyStreakQuizDrawerItem exactly.
-function DailyStreakQuizItem({ onClick, label }: { onClick: () => void; label: string }) {
-  return (
-    <button
-      onClick={onClick}
-      className="drawer-item"
-      style={{
-        gap: 8, border: "1px solid rgba(249,115,22,0.3)", borderRadius: 12,
-        margin: "4px 16px", width: "calc(100% - 32px)",
-      }}
-    >
-      <span style={{ position: "relative", width: 24, display: "flex", justifyContent: "center" }}>
-        <Icon name="help-circle-outline" size={20} color="#f97316" />
-        <span style={{ position: "absolute", bottom: -6, fontSize: 11 }}>🔥</span>
-      </span>
-      <span style={{ flex: 1, textAlign: "left" }}>{label}</span>
-      <span
-        style={{
-          background: "#f97316", borderRadius: 6, padding: "2px 6px",
-          color: "#fff", fontSize: 9, fontWeight: 800,
-        }}
-      >
-        NEW
-      </span>
     </button>
   );
 }
@@ -570,9 +523,18 @@ export default function Drawer({ open, onClose }: Props) {
 
           {/* ═══ MENU ════════════════════════════════════════ */}
           <div style={{ paddingTop: 8, paddingBottom: 12 }}>
-            {drawerItem("home") && (
-              <DrawerItem iconName="home" label={t("home")}
-                active={isActive("/home")} onClick={() => navTo("/home")}/>
+            {/* QUICK ACCESS — Home, Dashboard, and the Learn/Challenge
+                module shortcuts (AI Guru, LearnFun, SkillBoost, Starboard,
+                Daily Streak Quiz, SkillBoard) were removed from here: they
+                now live in the bottom nav's Home/Dashboard/Learn/Challenge
+                tabs, so keeping a Drawer shortcut too was a duplicate.
+                Reels, Wallet, and My Prizes don't have another Drawer-free
+                path (Reels is reachable via the tab bar too, but the nav
+                spec explicitly wants a Drawer shortcut for it as well). */}
+            <SectionHeader label={t("quickAccess") || "Quick Access"}/>
+            {drawerItem("reels") && (
+              <DrawerItem iconName="film-outline" label={t("reels") || "Reels"}
+                active={isActive("/reels")} onClick={() => navTo("/reels")}/>
             )}
             {/* FIX (bug report — "wallet not showing in drawer"): wallet
                 was intentionally removed from this menu in favor of the
@@ -584,41 +546,9 @@ export default function Drawer({ open, onClose }: Props) {
                 reach directly, not something admin toggles off. */}
             <DrawerItem iconName="wallet-outline" label={t("wallet") || "Wallet"}
               active={isActive("/wallet")} onClick={() => navTo("/wallet")}/>
-            {drawerItem("starboard") && (
-              <DrawerItem iconName="trophy-outline" label={t("starboard")}
-                active={isActive("/starboard")} onClick={() => navTo("/starboard")}/>
-            )}
             {drawerItem("myPrizes") && (
               <DrawerItem iconName="gift-outline" label="My Prizes"
                 active={isActive("/my-prizes")} onClick={() => navTo("/my-prizes")}/>
-            )}
-            {drawerItem("dailyStreakQuiz") && (
-              <DailyStreakQuizItem label="Daily Streak Quiz" onClick={() => navTo("/daily-streak-quiz")}/>
-            )}
-            {drawerItem("dashboard") && (
-              <DrawerItem iconName="grid-outline" label={t("dashboard")}
-                active={isActive("/dashboard")} onClick={() => navTo("/dashboard")}/>
-            )}
-            {drawerItem("aiguru") && (
-              <DrawerItem iconName="school-outline" label={t("aiGuru")}
-                active={isActive("/ai-guru")} onClick={() => navTo("/ai-guru")}/>
-            )}
-            {drawerItem("learnfun") && (
-              <DrawerItem iconName="book-outline" label={t("learnfun")}
-                active={isActive("/learnfun")} onClick={() => navTo("/learnfun")}/>
-            )}
-            {drawerItem("skillboost") && (
-              <DrawerItem iconName="flash-outline" label={t("skillBoost")}
-                active={isActive("/skillboost")} onClick={() => navTo("/skillboost")}/>
-            )}
-            {drawerItem("language") && (
-              <LanguageItem language={language} onClick={() => navTo("/settings")} label={t("language")}/>
-            )}
-            {drawerItem("skillboard") && (
-              <SkillBoardItem onClick={() => navTo("/skillboard")} label={t("skillBoard")}/>
-            )}
-            {drawerItem("glostore") && (
-              <GloStoreItem onClick={() => navTo("/glostore")} label={t("gloStore") || "GloStore"}/>
             )}
 
             {/* ACCOUNT — reorganized grouping of existing routes, per the
@@ -652,6 +582,16 @@ export default function Drawer({ open, onClose }: Props) {
             {drawerItem("privacy") && (
               <DrawerItem iconName="lock-closed-outline" label={t("privacy")}
                 active={isActive("/settings/privacy")} onClick={() => navTo("/settings/privacy")}/>
+            )}
+
+            {/* OTHER — Language selector and GloStore, moved here from the
+                old flat list. Neither duplicates a bottom-nav tab. */}
+            <SectionHeader label={t("other") || "Other"}/>
+            {drawerItem("language") && (
+              <LanguageItem language={language} onClick={() => navTo("/settings")} label={t("language")}/>
+            )}
+            {drawerItem("glostore") && (
+              <GloStoreItem onClick={() => navTo("/glostore")} label={t("gloStore") || "GloStore"}/>
             )}
           </div>
         </div>

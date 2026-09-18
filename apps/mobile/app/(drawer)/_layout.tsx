@@ -349,47 +349,66 @@ export default function DrawerLayout() {
 
             {/* MENU */}
             <View style={styles.menu}>
-              {drawerItem("home") && (
-                <DrawerItem icon="home" label={t("home")}
-                  onPress={() => router.push("/(drawer)/(tabs)/home")} active colors={colors} />
-              )}
-              {drawerItem("starboard") && (
-                <DrawerItem icon="trophy-outline" label={t("Starboard")}
-                 onPress={() => router.push("/starboard")} colors={colors} />
-              )}
-              {drawerItem("myPrizes") && (
-                <DrawerItem icon="gift-outline" label={t("myPrizes")}
-                 onPress={() => router.push("/my-prizes" as any)} colors={colors} />
+              {/* QUICK ACCESS — Home, Dashboard, and the Learn/Challenge
+                  module shortcuts (AI Guru, LearnFun, SkillBoost, Starboard,
+                  Daily Streak Quiz, SkillBoard) were removed from here: they
+                  now live in the bottom nav's Home/Dashboard/Learn/Challenge
+                  tabs, so keeping a Drawer shortcut too was a duplicate.
+                  Reels, Wallet, and My Prizes don't have another Drawer-free
+                  path (Reels is reachable via the tab bar too, but the nav
+                  spec explicitly wants a Drawer shortcut for it as well). */}
+              <SectionHeader label={t("quickAccess") ?? "Quick Access"} colors={colors} />
+              {drawerItem("reels") && (
+                <DrawerItem icon="film-outline" label={t("reels") ?? "Reels"}
+                  onPress={() => router.push("/(drawer)/(tabs)/reels")} colors={colors} />
               )}
               {drawerItem("wallet") && (
                 <DrawerItem icon="wallet-outline" label={t("wallet")}
                   onPress={() => router.push("/vcoins/wallet")} colors={colors} />
               )}
-              {drawerItem("dailyStreakQuiz") && (
-                <DailyStreakQuizDrawerItem
-                  onPress={() => router.push("/daily-streak-quiz" as any)}
-                  colors={colors}
-                  t={t}
-                />
-              )}
-              {drawerItem("dashboard") && (
-                <DrawerItem icon="grid-outline" label={t("dashboard")}
-                  onPress={() => router.push("/dashboard")} colors={colors} />
-              )}
-              {drawerItem("aiguru") && (
-                <DrawerItem icon="school-outline" label={t("aiGuru")}
-                  onPress={() => router.push("/ai-guru")} colors={colors} />
-              )}
-              {drawerItem("learnfun") && (
-                <DrawerItem icon="book-outline" label={t("learnFunLabel") ?? "LearnFun"}
-                  onPress={() => router.push("/(drawer)/(tabs)/learnFun")} colors={colors} />
-              )}
-              {drawerItem("skillboost") && (
-                <DrawerItem icon="flash-outline" label={t("skillBoost")}
-                  onPress={() => router.push("/(drawer)/(tabs)/skillboost")} colors={colors} />
+              {drawerItem("myPrizes") && (
+                <DrawerItem icon="gift-outline" label={t("myPrizes")}
+                 onPress={() => router.push("/my-prizes" as any)} colors={colors} />
               )}
 
-              {/* Language selector */}
+              {/* ACCOUNT — "Subscription" has no dedicated screen of its
+                  own; the closest existing equivalent is Billing History,
+                  so that's what it opens. */}
+              <SectionHeader label={t("account") ?? "Account"} colors={colors} />
+              {drawerItem("myProfile") && (
+                <DrawerItem icon="person-circle-outline" label={t("myProfile") ?? "My Profile"}
+                  onPress={() => router.push("/profile-settings")} colors={colors} />
+              )}
+              {drawerItem("subscription") && (
+                <DrawerItem icon="receipt-outline" label={t("subscription") ?? "Subscription"}
+                  onPress={() => router.push("/billing-history" as any)} colors={colors} />
+              )}
+              {drawerItem("settings") && (
+                <DrawerItem icon="settings-outline" label={t("settings")}
+                  onPress={() => router.push("/settings")} colors={colors} />
+              )}
+
+              {/* SUPPORT — "Help & Support" and "Terms" have no existing
+                  screen anywhere in the app (verified again for this task —
+                  see the report), so they're intentionally left out rather
+                  than invented. */}
+              <SectionHeader label={t("support") ?? "Support"} colors={colors} />
+              {drawerItem("feedback") && (
+                <DrawerItem icon="star-outline" label={t("feedbackRatings") ?? "Feedback"}
+                  onPress={() => router.push("/feedback" as any)} colors={colors} />
+              )}
+              {drawerItem("about") && (
+                <DrawerItem icon="information-circle-outline" label={t("aboutGloows365") ?? "About Gloows365"}
+                  onPress={() => router.push("/about" as any)} colors={colors} />
+              )}
+              {drawerItem("privacy") && (
+                <DrawerItem icon="lock-closed-outline" label={t("privacy")}
+                  onPress={() => router.push("/privacy" as any)} colors={colors} />
+              )}
+
+              {/* OTHER — Language selector and GloStore, moved here from
+                  the old flat list. Neither duplicates a bottom-nav tab. */}
+              <SectionHeader label={t("other") ?? "Other"} colors={colors} />
               {drawerItem("language") && (
                 <TouchableOpacity
                   style={[styles.langItem, { backgroundColor: colors.background }]}
@@ -412,48 +431,8 @@ export default function DrawerLayout() {
                   <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
               )}
-
-              {drawerItem("skillboard") && (
-                <SkillBoardItem onPress={() => router.push("/skillboard")} t={t} />
-              )}
               {drawerItem("glostore") && (
                 <GloStoreItem onPress={() => router.push("/glostore" as any)} />
-              )}
-
-              {/* ACCOUNT — reorganized grouping of existing routes, per the
-                  nav-fix spec. "Subscription" has no dedicated screen on
-                  its own; the closest existing equivalent is Billing
-                  History, so that's what it opens. */}
-              <SectionHeader label={t("account") ?? "Account"} colors={colors} />
-              {drawerItem("myProfile") && (
-                <DrawerItem icon="person-circle-outline" label={t("myProfile") ?? "My Profile"}
-                  onPress={() => router.push("/profile-settings")} colors={colors} />
-              )}
-              {drawerItem("subscription") && (
-                <DrawerItem icon="receipt-outline" label={t("subscription") ?? "Subscription"}
-                  onPress={() => router.push("/billing-history" as any)} colors={colors} />
-              )}
-              {drawerItem("settings") && (
-                <DrawerItem icon="settings-outline" label={t("settings")}
-                  onPress={() => router.push("/settings")} colors={colors} />
-              )}
-
-              {/* SUPPORT — reorganized grouping of existing routes. "Help &
-                  Support" and "Terms" have no existing screen anywhere in
-                  the app, so they're intentionally left out rather than
-                  invented — see this task's report for that gap. */}
-              <SectionHeader label={t("support") ?? "Support"} colors={colors} />
-              {drawerItem("feedback") && (
-                <DrawerItem icon="star-outline" label={t("feedbackRatings") ?? "Feedback"}
-                  onPress={() => router.push("/feedback" as any)} colors={colors} />
-              )}
-              {drawerItem("about") && (
-                <DrawerItem icon="information-circle-outline" label={t("aboutGloows365") ?? "About Gloows365"}
-                  onPress={() => router.push("/about" as any)} colors={colors} />
-              )}
-              {drawerItem("privacy") && (
-                <DrawerItem icon="lock-closed-outline" label={t("privacy")}
-                  onPress={() => router.push("/privacy" as any)} colors={colors} />
               )}
             </View>
           </ScrollView>
@@ -475,51 +454,9 @@ export default function DrawerLayout() {
   );
 }
 
-function SkillBoardItem({ onPress, t }: { onPress: () => void; t: (key: string) => string }) {
-  return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={styles.skillBoardWrapper}>
-      <LinearGradient
-        colors={["#92400e", "#d97706", "#fbbf24"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={styles.skillBoardGradient}
-      >
-        <View style={styles.skillBoardLeft}>
-          <Ionicons name="trophy" size={22} color="#fff" />
-          <Text style={styles.skillBoardLabel}>{t("skillBoard")}</Text>
-        </View>
-        <View style={styles.skillBoardBadge}>
-          <Text style={styles.skillBoardBadgeText}>⭐ TOP</Text>
-        </View>
-      </LinearGradient>
-    </TouchableOpacity>
-  );
-}
-
-// 🔥 Daily Streak Quiz — flame + quiz icon combo, sits just below Wallet
-// (the app's "Coins/Rewards" engagement section) per spec §1.
-function DailyStreakQuizDrawerItem({ onPress, colors, t }: { onPress: () => void; colors: any; t: (key: string) => string }) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.85}
-      style={[styles.streakQuizItem, { backgroundColor: colors.background, borderColor: "rgba(249,115,22,0.3)" }]}
-    >
-      <View style={styles.streakQuizIconStack}>
-        <Ionicons name="help-circle" size={20} color="#f97316" />
-        <Text style={styles.streakQuizFlame}>🔥</Text>
-      </View>
-      <Text style={[styles.label, { color: colors.text }]}>{t("dailyStreakQuiz")}</Text>
-      <View style={styles.streakQuizBadge}>
-        <Text style={styles.streakQuizBadgeText}>NEW</Text>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
 // 🛍️ GloStore — admin-curated affiliate products (books, stationery, kits).
-// Same treatment as Skill Board: its own gold gradient pill so it stands
-// out from the plain list items, since it's a monetization surface.
+// Its own gold gradient pill so it stands out from the plain list items,
+// since it's a monetization surface.
 function GloStoreItem({ onPress }: { onPress: () => void }) {
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={styles.skillBoardWrapper}>
@@ -633,17 +570,6 @@ const styles = StyleSheet.create({
   },
   item:     { flexDirection: "row", alignItems: "center", paddingVertical: 14 },
   label:    { marginLeft: 15, fontSize: 15 },
-  streakQuizItem: {
-    flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 10,
-    borderRadius: 12, borderWidth: 1, marginVertical: 4,
-  },
-  streakQuizIconStack: { width: 24, alignItems: "center" },
-  streakQuizFlame: { fontSize: 11, marginTop: -4 },
-  streakQuizBadge: {
-    marginLeft: "auto", backgroundColor: "#f97316", borderRadius: 6,
-    paddingHorizontal: 6, paddingVertical: 2,
-  },
-  streakQuizBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800" },
   langItem: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10 },
   langIconBox: { width: 34, height: 34, borderRadius: 10, justifyContent: "center", alignItems: "center" },
   langTextBlock: { flex: 1 },
