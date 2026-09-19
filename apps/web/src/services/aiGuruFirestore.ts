@@ -131,3 +131,36 @@ export async function getRemainingLessons(uid: string): Promise<number> {
   const usage = await checkUsage(uid);
   return Math.max(0, FREE_DAILY_LESSONS - (usage.generationsUsed ?? 0));
 }
+
+// Web Subscription hub page needs more than isSubscribed()'s boolean —
+// plan name, cycle, and renewal date, so the page can show real state
+// instead of just "Active"/"Not Active". Reads the exact same
+// subscriptions/{uid} doc isSubscribed() already reads (see that
+// function's comment: one global doc per user, not module-scoped) — this
+// is an additive read, not a second subscription-state system.
+export interface SubscriptionStatus {
+  planId: string;
+  cycle: "monthly" | "annual" | string;
+  status: string;
+  endDateMs: number | null;
+  isTesterOrAdmin: boolean;
+}
+
+export async function getSubscriptionStatus(uid: string): Promise<SubscriptionStatus | null> {
+  const userSnap = await getDoc(doc(db, "users", uid));
+  const role = userSnap.exists() ? userSnap.data().role : undefined;
+  const isTesterOrAdmin = role === "tester" || role === "admin";
+
+  const snap = await getDoc(doc(db, "subscriptions", uid));
+  if (!snap.exists()) {
+    return isTesterOrAdmin ? { planId: "", cycle: "", status: "active", endDateMs: null, isTesterOrAdmin } : null;
+  }
+  const data = snap.data();
+  return {
+    planId: data.planId ?? "",
+    cycle: data.cycle ?? "",
+    status: data.status ?? "unknown",
+    endDateMs: data.endDate?.toMillis?.() ?? null,
+    isTesterOrAdmin,
+  };
+}

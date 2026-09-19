@@ -84,6 +84,12 @@ function Icon({ name, size = 22, color }: { name: string; size?: number; color: 
         <path d="M328 400L184 256l144-144" stroke={color} strokeWidth={48} strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
     ),
+    "receipt-outline": (
+      <svg width={size} height={size} viewBox="0 0 512 512" fill="none">
+        <path d="M400 480l-32-32-32 32-32-32-32 32-32-32-32 32-32-32-32 32-32-32-32 32V32l32 32 32-32 32 32 32-32 32 32 32-32 32 32 32-32 32 32z" stroke={color} strokeWidth={28} strokeLinejoin="round"/>
+        <path d="M144 192h224M144 272h224M144 352h128" stroke={color} strokeWidth={28} strokeLinecap="round"/>
+      </svg>
+    ),
   };
   return icons[name] ?? <svg width={size} height={size}/>;
 }
@@ -191,6 +197,7 @@ export default function SettingsPage() {
 
   const items = [
     { id: "profile",       title: "Profile Settings",  description: "Edit your name, photo, school & more",           icon: "person-circle-outline",      accentColor: "#6366f1", route: "/settings/profile" },
+    { id: "subscription",  title: "Subscription",      description: "Plan, billing & payment history",                  icon: "receipt-outline",             accentColor: "#22c55e", route: "/subscription" },
     { id: "language",      title: "Language",           description: `Change language — currently ${language}`,         icon: "globe-outline",               accentColor: "#0ea5e9", route: "/settings/language" },
     { id: "theme",         title: "Dark Theme",         description: isDarkMode ? "🌙 Dark — tap to change"  : "☀️ Light — tap to change", icon: isDarkMode ? "moon" : "sunny-outline", accentColor: "#f59e0b", route: "/settings/theme" },
     { id: "notifications", title: "Notifications",      description: "Receive push notifications",                       icon: "notifications-outline",       accentColor: "#10b981", isToggle: true, toggleValue: notificationsEnabled, onToggle: toggleNotifications },
