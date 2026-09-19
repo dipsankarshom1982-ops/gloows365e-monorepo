@@ -4,6 +4,18 @@
 //  • Replaced with VCoins balance + VCoins annual rank
 //  • Added surprise gift claim banner (if gift is available and unclaimed)
 //  • Added Skill Boost drawer item
+//
+// Drawer rebuild/polish (2026): fixed several menu labels that were
+// silently rendering as raw i18next keys (t("reels"), t("myProfile"),
+// t("quickAccess"), etc. were never actually declared in translations.ts,
+// so every `?? "Nice Label"` fallback in this file was dead code — a
+// returned key string is truthy) by adding those keys to the English
+// resource (see lib/i18n/translations.ts). Also: dropped the "Subscription"
+// shortcut to match the drawer's specified Account section (My Profile +
+// Settings only) — Billing History is still fully reachable from Settings,
+// nothing was deleted; made the drawer width responsive (~78% viewport on
+// phones, clamped 300-340px on tablets) instead of a fixed 300px; bumped
+// item/icon/section-header sizing toward the spec's touch-friendly ranges.
 
 import { Drawer } from "expo-router/drawer";
 import {
@@ -13,6 +25,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -61,6 +74,16 @@ export default function DrawerLayout() {
   const { drawerItem } = useFeatureFlags();
   const { t } = useAppTranslation();
   const insets = useSafeAreaInsets();
+
+  // Responsive drawer width — phones get ~78% of the viewport (spec:
+  // 75-82%), tablets/large screens are clamped to a fixed 300-340px band
+  // instead of also scaling to 78% (which would be far too wide, e.g.
+  // ~630px on a 10" tablet). Reacts to rotation via useWindowDimensions
+  // instead of a one-time Dimensions.get() snapshot.
+  const { width: screenWidth } = useWindowDimensions();
+  const drawerWidth = screenWidth <= 480
+    ? Math.round(screenWidth * 0.78)
+    : Math.min(340, Math.max(300, Math.round(screenWidth * 0.32)));
 
   const { studentProfile, profileLoading: loading } = useStudentProfile();
 
@@ -204,8 +227,14 @@ export default function DrawerLayout() {
         headerShown: false,
         drawerStyle: {
           backgroundColor: colors.background,
-          width: 300,
+          width: drawerWidth,
         },
+        // "front" (the default) keeps the underlying page in place behind a
+        // dark scrim while the drawer slides in over it — matches the spec's
+        // "underlying page should remain visible behind a subtle overlay"
+        // rather than "slide", which would shove the page content sideways.
+        drawerType: "front",
+        overlayColor: "rgba(0,0,0,0.5)",
       }}
       drawerContent={() => (
         <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -371,17 +400,16 @@ export default function DrawerLayout() {
                  onPress={() => router.push("/my-prizes" as any)} colors={colors} />
               )}
 
-              {/* ACCOUNT — "Subscription" has no dedicated screen of its
-                  own; the closest existing equivalent is Billing History,
-                  so that's what it opens. */}
+              {/* ACCOUNT — per the drawer rebuild spec's exact structure,
+                  this section is My Profile + Settings only. The old
+                  "Subscription" shortcut (→ /billing-history) isn't part of
+                  that structure; it's dropped as a Drawer entry only — the
+                  billing-history screen itself is untouched and still
+                  reachable from Settings, so nothing was deleted. */}
               <SectionHeader label={t("account") ?? "Account"} colors={colors} />
               {drawerItem("myProfile") && (
                 <DrawerItem icon="person-circle-outline" label={t("myProfile") ?? "My Profile"}
                   onPress={() => router.push("/profile-settings")} colors={colors} />
-              )}
-              {drawerItem("subscription") && (
-                <DrawerItem icon="receipt-outline" label={t("subscription") ?? "Subscription"}
-                  onPress={() => router.push("/billing-history" as any)} colors={colors} />
               )}
               {drawerItem("settings") && (
                 <DrawerItem icon="settings-outline" label={t("settings")}
@@ -394,7 +422,7 @@ export default function DrawerLayout() {
                   than invented. */}
               <SectionHeader label={t("support") ?? "Support"} colors={colors} />
               {drawerItem("feedback") && (
-                <DrawerItem icon="star-outline" label={t("feedbackRatings") ?? "Feedback"}
+                <DrawerItem icon="star-outline" label={t("drawerFeedbackRating") ?? "Feedback & Rating"}
                   onPress={() => router.push("/feedback" as any)} colors={colors} />
               )}
               {drawerItem("about") && (
@@ -402,7 +430,7 @@ export default function DrawerLayout() {
                   onPress={() => router.push("/about" as any)} colors={colors} />
               )}
               {drawerItem("privacy") && (
-                <DrawerItem icon="lock-closed-outline" label={t("privacy")}
+                <DrawerItem icon="lock-closed-outline" label={t("privacyPolicy") ?? "Privacy Policy"}
                   onPress={() => router.push("/privacy" as any)} colors={colors} />
               )}
 
@@ -413,9 +441,10 @@ export default function DrawerLayout() {
                 <TouchableOpacity
                   style={[styles.langItem, { backgroundColor: colors.background }]}
                   onPress={() => router.push("/language-settings" as any)}
+                  activeOpacity={0.7}
                 >
                   <View style={[styles.langIconBox, { backgroundColor: `${colors.accent}20` }]}>
-                    <Ionicons name="globe-outline" size={18} color={colors.accent} />
+                    <Ionicons name="globe-outline" size={20} color={colors.accent} />
                   </View>
                   <View style={styles.langTextBlock}>
                     <Text style={[styles.langItemLabel, { color: colors.text }]}>{t("language")}</Text>
@@ -437,12 +466,15 @@ export default function DrawerLayout() {
             </View>
           </ScrollView>
 
-          {/* LOGOUT — pinned at bottom */}
+          {/* LOGOUT — pinned at bottom, kept clear of the Android nav bar /
+              iOS home indicator via insets.bottom (SafeArea, not a
+              hard-coded height). */}
           <TouchableOpacity
             style={[styles.logout, { backgroundColor: "rgba(248,113,113,0.08)", borderColor: colors.border, marginBottom: insets.bottom }]}
             onPress={handleLogout}
+            activeOpacity={0.7}
           >
-            <Ionicons name="log-out-outline" size={20} color="#F87171" />
+            <Ionicons name="log-out-outline" size={22} color="#F87171" />
             <Text style={styles.logoutText}>{t("logout")}</Text>
           </TouchableOpacity>
 
@@ -467,7 +499,7 @@ function GloStoreItem({ onPress }: { onPress: () => void }) {
         style={styles.skillBoardGradient}
       >
         <View style={styles.skillBoardLeft}>
-          <Ionicons name="storefront" size={22} color="#fff" />
+          <Ionicons name="storefront" size={24} color="#fff" />
           <Text style={styles.skillBoardLabel}>GloStore</Text>
         </View>
         <View style={styles.skillBoardBadge}>
@@ -491,8 +523,9 @@ function DrawerItem({ icon, label, onPress, active, colors }: any) {
     <TouchableOpacity
       style={[styles.item, { backgroundColor: active ? `${colors.accent}20` : colors.background }]}
       onPress={onPress}
+      activeOpacity={0.7}
     >
-      <Ionicons name={icon} size={20} color={active ? colors.accent : colors.textSecondary} />
+      <Ionicons name={icon} size={24} color={active ? colors.accent : colors.textSecondary} />
       <Text style={[styles.label, { color: active ? colors.accent : colors.text }]}>
         {label}
       </Text>
@@ -502,7 +535,7 @@ function DrawerItem({ icon, label, onPress, active, colors }: any) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  scrollContent: { padding: 20, paddingBottom: 12 },
+  scrollContent: { paddingHorizontal: 28, paddingTop: 20, paddingBottom: 12 },
   profileCard: {
     borderRadius: 20, padding: 20, alignItems: "center", gap: 8,
   },
@@ -564,23 +597,23 @@ const styles = StyleSheet.create({
   giftSub:   { color: "rgba(255,255,255,0.8)", fontSize: 11, fontWeight: "500" },
   menu:     { marginTop: 20 },
   sectionHeader: {
-    fontSize: 11, fontWeight: "800", letterSpacing: 0.8,
+    fontSize: 13, fontWeight: "800", letterSpacing: 0.9,
     marginTop: 18, marginBottom: 6, paddingTop: 14,
     borderTopWidth: 1,
   },
-  item:     { flexDirection: "row", alignItems: "center", paddingVertical: 14 },
-  label:    { marginLeft: 15, fontSize: 15 },
-  langItem: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10 },
-  langIconBox: { width: 34, height: 34, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+  item:     { flexDirection: "row", alignItems: "center", paddingVertical: 17, minHeight: 56 },
+  label:    { marginLeft: 18, fontSize: 17, fontWeight: "500" },
+  langItem: { flexDirection: "row", alignItems: "center", paddingVertical: 13, gap: 12, minHeight: 56 },
+  langIconBox: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
   langTextBlock: { flex: 1 },
-  langItemLabel: { fontSize: 15, fontWeight: "600" },
-  langItemSub:   { fontSize: 12, fontWeight: "600", marginTop: 1 },
+  langItemLabel: { fontSize: 17, fontWeight: "600" },
+  langItemSub:   { fontSize: 13, fontWeight: "600", marginTop: 1 },
   logout: {
     flexDirection: "row", alignItems: "center",
-    paddingVertical: 15, paddingHorizontal: 20,
+    paddingVertical: 17, paddingHorizontal: 28,
     borderTopWidth: 1, borderColor: "#222",
   },
-  logoutText: { color: "#F87171", marginLeft: 10, fontSize: 16, fontWeight: "600" },
+  logoutText: { color: "#F87171", marginLeft: 12, fontSize: 17, fontWeight: "700" },
   skillBoardWrapper: {
     marginVertical: 6, borderRadius: 14, overflow: "hidden",
     shadowColor: "#d97706", shadowOffset: { width: 0, height: 4 },

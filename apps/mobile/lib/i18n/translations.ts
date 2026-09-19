@@ -13,6 +13,26 @@ export type TranslationSet = {
   myPrizes: string;
   skillBoost: string;
   logout: string;
+  // Drawer rebuild (2026) — these were referenced via t() in
+  // app/(drawer)/_layout.tsx but never actually declared/translated
+  // anywhere, so i18next's missing-key behavior (return the raw key
+  // string) was silently defeating every `?? "Nice Label"` fallback in
+  // that file, since a returned key is truthy. Declared optional like
+  // the rest of this file's untranslated-elsewhere additions — only `en`
+  // needs a value; every other language falls back to it via i18next's
+  // fallbackLng. drawerFeedbackRating/privacyPolicy are deliberately
+  // separate from the pre-existing feedbackRatings/privacy keys (still
+  // used as-is by settings.tsx) so this fix can't change that screen's
+  // wording as a side effect.
+  reels?: string;
+  myProfile?: string;
+  quickAccess?: string;
+  account?: string;
+  support?: string;
+  other?: string;
+  aboutGloows365?: string;
+  drawerFeedbackRating?: string;
+  privacyPolicy?: string;
   // ── Settings ─────────────────────────────────────────────
   profileSettings: string;
   language: string;
@@ -562,6 +582,10 @@ const translations: Translations = {
     home: "Home", leaderboard: "Leaderboard", wallet: "Wallet",
     settings: "Settings", dashboard: "Dashboard", aiGuru: "AI Guru",
     skillBoard: "Skill Board", myPrizes: "My Prizes", skillBoost: "Skill Boost", logout: "Logout",
+    reels: "Reels", myProfile: "My Profile", quickAccess: "Quick Access",
+    account: "Account", support: "Support", other: "Other",
+    aboutGloows365: "About Gloows365", drawerFeedbackRating: "Feedback & Rating",
+    privacyPolicy: "Privacy Policy",
     profileSettings: "Profile Settings", language: "Language",
     changeLanguage: "Change app & content language",
     darkTheme: "Dark Theme", notifications: "Notifications",

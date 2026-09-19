@@ -138,6 +138,9 @@ html, body {
 .drawer-panel {
   position: fixed;
   top: 0; left: 0; bottom: 0;
+  /* Desktop/tablet: fixed 300px, inside the spec's 280-340px (desktop) /
+     280-320px (tablet) bands. Phone (<=480px): ~78% of the viewport
+     instead — 300px flat would eat ~94% of a 320px-wide phone. */
   width: 300px;
   background: var(--bg);
   border-right: 1px solid var(--border);
@@ -147,8 +150,13 @@ html, body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: 4px 0 24px rgba(0,0,0,0.25);
 }
 .drawer-panel.open { transform: translateX(0); }
+
+@media (max-width: 480px) {
+  .drawer-panel { width: 78vw; }
+}
 
 .profile-card {
   background: linear-gradient(135deg, var(--grad-start), var(--grad-end));
@@ -200,11 +208,12 @@ html, body {
 .drawer-item {
   display: flex;
   align-items: center;
-  gap: 15px;
-  padding: 14px 20px;
+  gap: 17px;
+  padding: 15px 26px;
+  min-height: 52px;
   color: var(--text);
   text-decoration: none;
-  font-size: 15px;
+  font-size: 16px;
   cursor: pointer;
   transition: background 0.15s;
   border: none;
@@ -217,9 +226,22 @@ html, body {
   color: var(--accent);
   background: rgba(56,189,248,0.08);
 }
+.drawer-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: rgba(255,255,255,0.04);
+}
 
 [data-theme="light"] .drawer-item:hover { background: rgba(0,0,0,0.04); }
 [data-theme="light"] .drawer-item.active { background: rgba(59,130,246,0.08); }
+
+/* GloStore pill button — inline-styled (its gradient is per-instance), so
+   its focus ring lives here rather than as an inline :focus-visible, which
+   isn't expressible in a plain style object. */
+.drawer-pill-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
 
 /* ── Header ─────────────────────────────────────────────────── */
 .app-header {

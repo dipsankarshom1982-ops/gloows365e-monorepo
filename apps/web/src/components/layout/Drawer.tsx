@@ -18,6 +18,17 @@
 //         banner's "View" button)
 // ✅ Active item: accent bg + accent icon/text
 // ✅ Logout pinned at bottom
+//
+// Drawer rebuild/polish (2026): several menu labels were silently
+// rendering as raw i18next keys (t("reels"), t("myProfile"),
+// t("quickAccess"), t("account"), t("support"), t("other") were never
+// declared in any locale file, so `t("x") || "Nice Label"` never fell
+// through — a returned key string is truthy) — fixed by adding those keys
+// to apps/web/locales/en.json. "gloStore" is now a hardcoded literal
+// instead of a translation key, matching the mobile drawer (brand name,
+// not localized). Also: responsive width (300px desktop/tablet, ~78vw on
+// phones — see globals.css), ESC-to-close + background scroll lock, and
+// larger touch targets/typography/focus-visible states across items.
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -192,9 +203,9 @@ function Icon({ name, size = 20, color }: { name: string; size?: number; color: 
 function SectionHeader({ label }: { label: string }) {
   return (
     <div style={{
-      fontSize: 11, fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase",
+      fontSize: 12, fontWeight: 800, letterSpacing: 0.9, textTransform: "uppercase",
       color: "#64748b", marginTop: 18, marginBottom: 6, paddingTop: 14,
-      paddingLeft: 20, borderTop: "1px solid #1e293b",
+      paddingLeft: 26, borderTop: "1px solid #1e293b",
     }}>
       {label}
     </div>
@@ -211,7 +222,7 @@ function DrawerItem({ iconName, label, active, onClick }: {
       className={`drawer-item${active ? " active" : ""}`}
       style={{ fontWeight: active ? 700 : 500 }}
     >
-      <Icon name={iconName} size={20} color={active ? "#38bdf8" : "#94a3b8"} />
+      <Icon name={iconName} size={22} color={active ? "#38bdf8" : "#94a3b8"} />
       {label}
     </button>
   );
@@ -221,17 +232,17 @@ function DrawerItem({ iconName, label, active, onClick }: {
 function LanguageItem({ language, onClick, label }: { language: string; onClick: () => void; label: string }) {
   const nativeName = INDIAN_LANGUAGES[language] ?? language;
   return (
-    <button onClick={onClick} className="drawer-item" style={{ gap: 10 }}>
+    <button onClick={onClick} className="drawer-item" style={{ gap: 12 }}>
       <div style={{
-        width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+        width: 36, height: 36, borderRadius: 10, flexShrink: 0,
         background: "rgba(56,189,248,0.12)",
         display: "flex", alignItems: "center", justifyContent: "center",
       }}>
-        <Icon name="globe-outline" size={18} color="#38bdf8"/>
+        <Icon name="globe-outline" size={20} color="#38bdf8"/>
       </div>
       <div style={{ flex: 1, textAlign: "left" }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{label}</div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "#38bdf8", marginTop: 1 }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: "var(--text)" }}>{label}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#38bdf8", marginTop: 1 }}>
           {nativeName} · {language}
         </div>
       </div>
@@ -246,9 +257,10 @@ function LanguageItem({ language, onClick, label }: { language: string; onClick:
 // as a distinct, monetized surface — but in an orange/"shop" theme.
 function GloStoreItem({ onClick, label }: { onClick: () => void; label: string }) {
   return (
-    <div style={{ padding: "6px 16px" }}>
+    <div style={{ padding: "6px 26px" }}>
       <button
         onClick={onClick}
+        className="drawer-pill-btn"
         style={{
           width: "100%", border: "none", cursor: "pointer", borderRadius: 14,
           background: "linear-gradient(90deg, #7c2d12, #ea580c, #fb923c)",
@@ -279,6 +291,21 @@ export default function Drawer({ open, onClose }: Props) {
   const { studentProfile, user, profileLoading } = useStudentProfile();
   const { drawerItem } = useFeatureFlags();
   const { t }          = useAppTranslation();
+
+  // ESC closes the drawer, and background scroll is locked while it's open
+  // — the overlay click-to-close already existed; this just adds the
+  // keyboard-equivalent + stops the page scrolling underneath a modal panel.
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handleKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open, onClose]);
 
   const [vCoinRank,     setVCoinRank]     = useState<number | null>(null);
   const [giftAvailable, setGiftAvailable] = useState(false);
@@ -572,7 +599,7 @@ export default function Drawer({ open, onClose }: Props) {
                 — see this task's report for that gap. */}
             <SectionHeader label={t("support") || "Support"}/>
             {drawerItem("feedback") && (
-              <DrawerItem iconName="star-outline" label={t("feedbackRatings") || "Feedback"}
+              <DrawerItem iconName="star-outline" label={t("drawerFeedbackRating") || "Feedback & Rating"}
                 active={isActive("/settings/feedback")} onClick={() => navTo("/settings/feedback")}/>
             )}
             {drawerItem("about") && (
@@ -580,7 +607,7 @@ export default function Drawer({ open, onClose }: Props) {
                 active={isActive("/settings/about")} onClick={() => navTo("/settings/about")}/>
             )}
             {drawerItem("privacy") && (
-              <DrawerItem iconName="lock-closed-outline" label={t("privacy")}
+              <DrawerItem iconName="lock-closed-outline" label={t("privacyPolicy") || "Privacy Policy"}
                 active={isActive("/settings/privacy")} onClick={() => navTo("/settings/privacy")}/>
             )}
 
@@ -591,7 +618,11 @@ export default function Drawer({ open, onClose }: Props) {
               <LanguageItem language={language} onClick={() => navTo("/settings")} label={t("language")}/>
             )}
             {drawerItem("glostore") && (
-              <GloStoreItem onClick={() => navTo("/glostore")} label={t("gloStore") || "GloStore"}/>
+              // Brand name, not localized — same pattern the mobile drawer
+              // already uses for this item (hardcoded "GloStore" literal,
+              // no t() call), instead of routing it through the "gloStore"
+              // translation key like the rest of this section.
+              <GloStoreItem onClick={() => navTo("/glostore")} label="GloStore"/>
             )}
           </div>
         </div>
@@ -599,16 +630,17 @@ export default function Drawer({ open, onClose }: Props) {
         {/* ═══ LOGOUT ══════════════════════════════════════ */}
         <button
           onClick={handleLogout}
+          className="drawer-pill-btn"
           style={{
-            display: "flex", alignItems: "center", gap: 10,
-            padding: "15px 20px", width: "100%",
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "17px 26px", width: "100%",
             background: "rgba(248,113,113,0.08)",
             border: "none", borderTopWidth: 1, borderTopStyle: "solid", borderTopColor: "#1e293b",
             cursor: "pointer",
           }}
         >
-          <Icon name="log-out-outline" size={20} color="#F87171"/>
-          <span style={{ color: "#F87171", fontSize: 16, fontWeight: 600 }}>{t("logout")}</span>
+          <Icon name="log-out-outline" size={22} color="#F87171"/>
+          <span style={{ color: "#F87171", fontSize: 16, fontWeight: 700 }}>{t("logout")}</span>
         </button>
       </div>
 
