@@ -149,6 +149,39 @@ export function slotOptionsForDate(
   return slots;
 }
 
+/** Web ShikshaHub polish pass — ported verbatim from
+ *  apps/mobile/lib/shikshahub's nextAvailableLabel (same weekday-scan
+ *  logic, same "today's window already passed" check). Used by the tutor
+ *  card / profile Availability Preview when a tutor isn't currently
+ *  online for Instant Help, so the card still shows something real
+ *  ("Next available: Tomorrow, 5:00 PM") instead of nothing. */
+export function nextAvailableLabel(availability: TutorWeeklyAvailability | null): string | null {
+  if (!availability) return null;
+  const now = new Date();
+  for (let offset = 0; offset < 7; offset++) {
+    const d = new Date(now);
+    d.setDate(now.getDate() + offset);
+    const key = WEEKDAY_KEYS[d.getDay()];
+    const day = availability[key];
+    if (!day?.enabled || !day.start || !day.end) continue;
+
+    if (offset === 0) {
+      const [endH, endM] = day.end.split(":").map(Number);
+      const dayEnd = new Date(d);
+      dayEnd.setHours(endH, endM || 0, 0, 0);
+      if (now > dayEnd) continue; // today's window already passed
+    }
+
+    const [startH, startM] = day.start.split(":").map(Number);
+    const period = startH >= 12 ? "PM" : "AM";
+    const hour12 = ((startH + 11) % 12) + 1;
+    const timeLabel = `${hour12}:${String(startM || 0).padStart(2, "0")} ${period}`;
+    const dayLabel = offset === 0 ? "Today" : offset === 1 ? "Tomorrow" : d.toLocaleDateString(undefined, { weekday: "long" });
+    return `${dayLabel}, ${timeLabel}`;
+  }
+  return null;
+}
+
 // ─── ShikshaHub Phase 3 — tutor services ────────────────────────────────────
 // Reads from tutorServicesMarketplace, the public-safe mirror written by
 // functions/src/tutorServices.ts's syncTutorServiceMarketplace trigger —
@@ -167,6 +200,79 @@ export async function fetchTutorServices(tutorUid: string): Promise<TutorService
     query(collection(db, SERVICES_COLLECTION), where("tutorUid", "==", tutorUid), orderBy("createdAt", "desc"))
   );
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as TutorService));
+}
+
+// ─── Web ShikshaHub polish pass — Instant Tutor discovery ──────────────────
+// Ported verbatim (same query, same ranking) from apps/mobile/lib/shikshahub
+// — that's where these were originally built for the mobile "Instant
+// Tutor" hero flow (see apps/mobile/app/(drawer)/(tabs)/shikshahub.tsx and
+// components/shikshahub/InstantTutorSheet.tsx). Web never had an
+// equivalent hero flow; this brings the same real data-layer capability
+// here so the web page can offer the identical feature, not a fake one.
+
+/** Every published instant_help service across every tutor (not scoped to
+ *  one tutorUid, unlike fetchTutorServices above) so the Instant Tutor
+ *  flow can find a match by subject without the caller already knowing
+ *  which tutor to ask. Single equality filter, no orderBy — no composite
+ *  index needed, and firestore.rules' `allow read: if request.auth !=
+ *  null` on tutorServicesMarketplace already permits this shape of query. */
+export async function fetchAllInstantHelpServices(): Promise<TutorService[]> {
+  const db = getFirestore();
+  const snap = await getDocs(
+    query(collection(db, SERVICES_COLLECTION), where("serviceType", "==", "instant_help"))
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as TutorService));
+}
+
+/** Subjects with at least one currently-online tutor offering Instant Help
+ *  — drives the Instant Tutor flow's subject picker. Purely derived from
+ *  real data (no fixed subject list), same reasoning as deriveSubjectChips
+ *  above. */
+export function deriveInstantHelpSubjects(tutors: MarketplaceTutor[], services: TutorService[]): string[] {
+  const onlineUids = new Set(tutors.filter((tu) => tu.isOnlineForInstantHelp).map((tu) => tu.uid));
+  const set = new Set<string>();
+  for (const s of services) {
+    if (s.serviceType === "instant_help" && onlineUids.has(s.tutorUid) && s.subject?.trim()) {
+      set.add(s.subject.trim());
+    }
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+export interface InstantHelpCandidate {
+  tutor: MarketplaceTutor;
+  service: TutorService;
+}
+
+/** Ranks currently-online, subject-matching Instant Help tutors — by
+ *  rating, then experience, then name — for the Instant Tutor flow's
+ *  "best match" step. No fan-out/broadcast matching engine exists
+ *  server-side (see functions/src/instantHelp.ts's header comment:
+ *  direct-request model only, one student -> one tutor) — this just picks
+ *  the best real candidate client-side and sends the request to them. */
+export function rankInstantHelpMatches(
+  tutors: MarketplaceTutor[],
+  services: TutorService[],
+  subject: string
+): InstantHelpCandidate[] {
+  const onlineByUid = new Map(tutors.filter((tu) => tu.isOnlineForInstantHelp).map((tu) => [tu.uid, tu]));
+  const needle = subject.trim().toLowerCase();
+  const candidates: InstantHelpCandidate[] = [];
+  for (const s of services) {
+    if (s.serviceType !== "instant_help") continue;
+    if ((s.subject ?? "").trim().toLowerCase() !== needle) continue;
+    const tutor = onlineByUid.get(s.tutorUid);
+    if (!tutor) continue;
+    candidates.push({ tutor, service: s });
+  }
+  candidates.sort((a, b) => {
+    const ar = a.tutor.ratingAverage ?? -1, br = b.tutor.ratingAverage ?? -1;
+    if (ar !== br) return br - ar;
+    const ae = a.tutor.teachingExperienceYears ?? -1, be = b.tutor.teachingExperienceYears ?? -1;
+    if (ae !== be) return be - ae;
+    return a.tutor.name.localeCompare(b.tutor.name);
+  });
+  return candidates;
 }
 
 export interface RequestBookingInput {

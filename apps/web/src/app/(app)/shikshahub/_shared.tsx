@@ -71,20 +71,60 @@ export function ProfileSectionCard({ title, children }: { title: string; childre
   );
 }
 
+// Deterministic initials + color, ported from apps/mobile/components/
+// shikshahub/InitialsAvatar.tsx — a real profile photo when the tutor has
+// one, otherwise a legible identity mark instead of a floating emoji in an
+// empty circle.
+const AVATAR_PALETTE = ["#0f766e", "#4f46e5", "#b45309", "#be123c", "#0369a1", "#7c3aed"];
+
+function avatarColorFor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+}
+
+function initialsFor(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "T";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
 export function TutorAvatar({
-  tutor, size, ring,
-}: { tutor: Pick<MarketplaceTutor, "profilePic" | "name">; size: number; ring?: boolean }) {
+  tutor, size, ring, online,
+}: {
+  tutor: Pick<MarketplaceTutor, "profilePic" | "name">;
+  size: number;
+  ring?: boolean;
+  // Web ShikshaHub polish pass — small green dot overlay for
+  // isOnlineForInstantHelp, matching the mobile card's avatar treatment.
+  // Optional/undefined-safe so every existing call site (profile page
+  // hero, Related Tutors cards) renders exactly as before.
+  online?: boolean;
+}) {
+  const label = tutor.name?.trim() || "Tutor";
   return (
-    <div
-      style={{
-        width: size, height: size, borderRadius: "50%", flexShrink: 0,
-        border: ring ? "3px solid var(--bg-card)" : "1px solid var(--border)",
-        boxShadow: ring ? "0 0 0 2px #14b8a6" : undefined,
-        background: tutor.profilePic ? `url(${tutor.profilePic}) center/cover` : "rgba(20,184,166,0.14)",
-        display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
-      }}
-    >
-      {!tutor.profilePic && <span style={{ fontSize: size * 0.4 }}>🧑‍🏫</span>}
+    <div style={{ position: "relative", flexShrink: 0, width: size, height: size }}>
+      <div
+        style={{
+          width: size, height: size, borderRadius: "50%",
+          border: ring ? "3px solid var(--bg-card)" : "1px solid var(--border)",
+          boxShadow: ring ? "0 0 0 2px #14b8a6" : undefined,
+          background: tutor.profilePic ? `url(${tutor.profilePic}) center/cover` : avatarColorFor(label),
+          display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+        }}
+      >
+        {!tutor.profilePic && (
+          <span style={{ color: "#fff", fontWeight: 800, fontSize: size * 0.36 }}>{initialsFor(label)}</span>
+        )}
+      </div>
+      {online && (
+        <div style={{
+          position: "absolute", right: -1, bottom: -1, width: size * 0.24, height: size * 0.24,
+          minWidth: 10, minHeight: 10, borderRadius: "50%",
+          background: "#10b981", border: "2px solid var(--bg-card)",
+        }} />
+      )}
     </div>
   );
 }
@@ -156,6 +196,10 @@ export function ShikshaHubStyles() {
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
+      }
+
+      .shikshahub-search-input::placeholder {
+        color: rgba(255,255,255,0.7);
       }
 
       .shikshahub-detail-grid {
