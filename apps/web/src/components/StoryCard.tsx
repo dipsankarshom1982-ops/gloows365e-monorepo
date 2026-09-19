@@ -124,26 +124,3 @@ export function StoryCard({ category, count, hasUnread, isNew, onClick, size = 1
     </button>
   );
 }
-
-export function AddStoryCard({ onClick, size = 100 }: { onClick: () => void; size?: number }) {
-  const cardHeight = Math.round(size * 1.18);
-  return (
-    <button
-      onClick={onClick}
-      className="story-card-wrapper"
-      style={{ width: size, marginInline: 5, background: "none", border: "none", cursor: "pointer", padding: 0 }}
-    >
-      <div style={{
-        width: size, height: cardHeight, borderRadius: 14,
-        border: "1.5px dashed rgba(99,102,241,0.4)",
-        background: "rgba(99,102,241,0.04)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}>
-        <span style={{ fontSize: 26, color: "#6366f1", fontWeight: 300, lineHeight: "32px" }}>+</span>
-      </div>
-      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text)", marginTop: 6, textAlign: "center" }}>
-        Your Story
-      </div>
-    </button>
-  );
-}

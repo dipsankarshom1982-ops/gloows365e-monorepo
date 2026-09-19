@@ -5,14 +5,17 @@
 //   - Horizontal category strip (square gradient cards)
 //   - Full-screen story viewer: tap-to-advance, per-story progress bars,
 //     like + view tracking, pending/rejected/featured badges, partner CTA
-//   - Upload flow: image or short video (<=10s), with progress overlay
+//
+// Students can no longer create stories from here — only an admin can,
+// from the admin panel's Stories page (auto-approved, no review queue).
+// The "own story" listener/badges below still work for any story a
+// student created before that change.
 //
 // Web-specific adaptations from the mobile version:
 //   - AsyncStorage -> localStorage (viewed-story tracking)
 //   - Modal -> fixed-position overlay div
 //   - expo-video -> native <video> + hls.js, loaded only when a video
 //     story is actually opened so it never weighs down the rest of the app
-//   - ImagePicker -> <input type="file">
 //   - Animated.Value progress bar -> timer-driven CSS width transition
 //
 // Video story playback uses the `hls.js` package (already in package.json).
@@ -26,7 +29,7 @@ import React, {
 } from "react";
 import { useRouter } from "next/navigation";
 
-import { StoryCard, AddStoryCard } from "@/components/StoryCard";
+import { StoryCard } from "@/components/StoryCard";
 import { StoryDoc } from "@/lib/story";
 import { handleStoryAction } from "@/lib/storyActions";
 import {
@@ -34,7 +37,7 @@ import {
   resolveCategory,
   useStoryCategories,
 } from "@/lib/storyCategories";
-import { resolveStreamUrl, uploadToStream } from "@/lib/cloudflareStream";
+import { resolveStreamUrl } from "@/lib/cloudflareStream";
 import { db, auth } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -44,22 +47,13 @@ import {
   increment,
   onSnapshot,
   query,
-  serverTimestamp,
-  setDoc,
   Timestamp,
   updateDoc,
   where,
 } from "firebase/firestore";
-import {
-  getDownloadURL,
-  getStorage,
-  ref,
-  uploadBytesResumable,
-} from "firebase/storage";
 
 // ─── Constants ────────────────────────────────────────────────────────────
 const IMAGE_DURATION = 5000; // ms each image story stays on screen
-const MAX_VIDEO_SEC   = 10;
 const VIEWED_KEY      = "gloows_viewed_stories";
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -201,7 +195,6 @@ export default function Story() {
   const ownDocsRef      = useRef<StoryDoc[]>([]);
   const approvedDocsRef = useRef<StoryDoc[]>([]);
   const profileCache    = useRef<Record<string, UserProfile>>({});
-  const fileInputRef    = useRef<HTMLInputElement>(null);
 
   const [allStories,    setAllStories]    = useState<StoryDoc[]>([]);
   const [viewedIds,     setViewedIds]     = useState<Set<string>>(new Set());
@@ -217,12 +210,6 @@ export default function Story() {
   const [currentStoryIdx, setCurrentStoryIdx] = useState(0);
   const [liked,           setLiked]           = useState(false);
   const [videoPlaying,    setVideoPlaying]    = useState(true);
-
-  // Upload state
-  const [uploading,   setUploading]   = useState(false);
-  const [uploadPct,    setUploadPct]   = useState(0);
-  const [uploadPhase,  setUploadPhase] = useState<"uploading" | "saving" | "done">("uploading");
-  const [uploadError,  setUploadError] = useState("");
 
   useEffect(() => { setViewedIds(loadViewedSet()); }, []);
 
@@ -404,92 +391,11 @@ export default function Story() {
     updateDoc(doc(db, "stories", activeStory.id), { likes: increment(1) }).catch(() => {});
   }, [activeStory, liked]);
 
-  // ── Upload ────────────────────────────────────────────────────────────
-  const handlePickFile = () => fileInputRef.current?.click();
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow picking the same file again later
-    if (!file) return;
-
-    const isVideo = file.type.startsWith("video/");
-
-    if (isVideo) {
-      // Quick client-side duration check, mirrors mobile's videoMaxDuration cap
-      const objectUrl = URL.createObjectURL(file);
-      const ok = await new Promise<boolean>((resolve) => {
-        const v = document.createElement("video");
-        v.preload = "metadata";
-        v.onloadedmetadata = () => resolve(v.duration <= MAX_VIDEO_SEC + 0.5);
-        v.onerror = () => resolve(true); // can't check — let server-side decide
-        v.src = objectUrl;
-      });
-      URL.revokeObjectURL(objectUrl);
-      if (!ok) {
-        setUploadError(`Videos must be ${MAX_VIDEO_SEC} seconds or shorter.`);
-        setTimeout(() => setUploadError(""), 3000);
-        return;
-      }
-    }
-
-    setUploadPct(0); setUploadPhase("uploading"); setUploadError(""); setUploading(true);
-
-    try {
-      const storyId = Date.now().toString();
-      let mediaUrl = "", thumbnailUrl = "";
-
-      if (isVideo) {
-        const { playbackUrl, thumbnailUrl: cfThumb } = await uploadToStream(file, setUploadPct);
-        mediaUrl = playbackUrl; thumbnailUrl = cfThumb;
-      } else {
-        const storageRef = ref(getStorage(), `stories/${currentUserId}/${storyId}`);
-        mediaUrl = await new Promise<string>((resolve, reject) => {
-          const task = uploadBytesResumable(storageRef, file);
-          task.on("state_changed",
-            (snap) => setUploadPct(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
-            reject,
-            async () => resolve(await getDownloadURL(task.snapshot.ref))
-          );
-        });
-        thumbnailUrl = mediaUrl;
-      }
-
-      setUploadPhase("saving");
-      const { name: realName, userClass: realClass } = await fetchUserProfile(currentUserId ?? "");
-      await setDoc(doc(db, "stories", storyId), {
-        userId: currentUserId, userName: realName, userClass: realClass ?? null,
-        mediaUrl, thumbnailUrl: thumbnailUrl || mediaUrl,
-        type: isVideo ? "video" : "image",
-        category: "achievement", educationalCategory: "success",
-        title: "", description: "", relatedFeature: "SkillBattle",
-        likes: 0, views: 0, status: "pending", isFeatured: false,
-        createdAt: serverTimestamp(),
-        expiresAt: Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000)),
-      });
-
-      setUploadPhase("done");
-      setTimeout(() => setUploading(false), 1200);
-    } catch (err: any) {
-      setUploadError(err?.message || "Upload failed. Please try again.");
-      setUploading(false);
-    }
-  };
-
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <div style={{ padding: "10px 0" }}>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*,video/*"
-        style={{ display: "none" }}
-        onChange={handleFileChange}
-      />
-
       {/* ── Category strip ── */}
       <div style={{ display: "flex", gap: 0, overflowX: "auto", padding: "0 8px" }}>
-        <AddStoryCard onClick={handlePickFile} size={100} />
-
         {!storiesLoaded
           ? [1, 2, 3, 4].map((i) => (
               <div key={i} style={{ marginInline: 5 }}>
@@ -726,62 +632,6 @@ export default function Story() {
               <span style={{ fontSize: 22 }}>👁</span>
               <span style={{ color: "#fff", fontSize: 12, fontWeight: 600, marginTop: 2 }}>{activeStory.views ?? 0}</span>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Upload overlay ── */}
-      {uploading && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1100,
-          display: "flex", alignItems: "center", justifyContent: "center", padding: 32,
-        }}>
-          <div style={{
-            background: "#fff", borderRadius: 20, padding: "32px 28px", width: "100%", maxWidth: 340,
-            display: "flex", flexDirection: "column", alignItems: "center",
-            boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
-          }}>
-            <div style={{
-              width: 72, height: 72, borderRadius: 36, background: "#F3F0FF",
-              display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16,
-            }}>
-              <span style={{ fontSize: 30 }}>
-                {uploadError ? "⚠️" : uploadPhase === "done" ? "✅" : uploadPhase === "saving" ? "💾" : "☁️"}
-              </span>
-            </div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: "#111827", marginBottom: 6, textAlign: "center" }}>
-              {uploadError ? "Upload failed"
-                : uploadPhase === "uploading" ? "Uploading story…"
-                : uploadPhase === "saving" ? "Saving…"
-                : "Submitted! 🎉"}
-            </div>
-            <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 24, textAlign: "center" }}>
-              {uploadError ? uploadError
-                : uploadPhase === "uploading" ? "Please keep this tab open"
-                : uploadPhase === "saving" ? "Almost done…"
-                : "Waiting for admin approval"}
-            </div>
-            {!uploadError && (
-              <>
-                <div style={{ width: "100%", height: 8, borderRadius: 4, background: "#E9E7FF", overflow: "hidden", marginBottom: 10 }}>
-                  <div style={{
-                    height: "100%", borderRadius: 4,
-                    background: uploadPhase === "done" ? "#22C55E" : "#6C63FF",
-                    width: uploadPhase === "done" ? "100%" : `${uploadPct}%`,
-                    transition: "width 0.25s",
-                  }}/>
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#6C63FF" }}>
-                  {uploadPhase === "done" ? "100%" : uploadPhase === "saving" ? "Saving…" : `${uploadPct}%`}
-                </div>
-              </>
-            )}
-            {uploadError && (
-              <button
-                onClick={() => setUploading(false)}
-                style={{ marginTop: 4, background: "#6C63FF", border: "none", borderRadius: 10, padding: "10px 20px", color: "#fff", fontWeight: 600, cursor: "pointer" }}
-              >Close</button>
-            )}
           </div>
         </div>
       )}

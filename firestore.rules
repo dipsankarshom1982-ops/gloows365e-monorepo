@@ -506,14 +506,14 @@ service cloud.firestore {
     }
 
     // 📖 STORIES
+    // Creation is admin-only — students create stories from the admin panel
+    // only now (no more student-submitted-story review queue). read/update/
+    // delete stay as they were so a student can still see/manage any story
+    // doc they created before this change.
     match /stories/{storyId} {
       allow read: if request.auth != null
         && (resource.data.status == "approved" || request.auth.uid == resource.data.userId || request.auth.token.admin == true);
-      allow create: if request.auth != null
-        && (
-          request.resource.data.userId == request.auth.uid
-          || request.auth.token.admin == true
-        );
+      allow create: if request.auth != null && request.auth.token.admin == true;
       allow update: if request.auth != null
         && (request.auth.uid == resource.data.userId || request.auth.token.admin == true);
       allow delete: if request.auth != null
