@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import MediaUpload from "../components/MediaUpload";
 import { db } from "../lib/firebase";
+import { SUPPORTED_CLASS_LEVEL_STRINGS } from "../lib/educationConfig";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 type Platform = "amazon" | "flipkart" | "other";
@@ -55,7 +56,7 @@ const CATEGORIES: { value: Category; label: string; emoji: string }[] = [
   { value: "other",       label: "Other",                   emoji: "📦" },
 ];
 
-const CLASSES = ["6", "7", "8", "9", "10", "11", "12", "all"];
+const CLASSES = [...SUPPORTED_CLASS_LEVEL_STRINGS, "all"];
 const BADGES  = ["", "Bestseller", "New Arrival", "Recommended", "Most Popular", "Editor's Pick", "Budget Pick", "Premium"];
 
 // Home page only ever shows this many flash cards (mobile GloStorePreviewSection /

@@ -12,7 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useStudentProfile } from "@gloows/shared-logic";
+import { isPrimaryClassLevel, useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { FREE_DAILY_LESSONS, FREE_DAILY_FOLLOWUPS } from "@/lib/aiGuru/constants";
 import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
@@ -361,7 +361,7 @@ export default function AIDashboardScreen() {
         {/* ── Section 7: Quick Actions ── */}
         <Text style={[S.sectionTitle, { color: textMain }]}>⚡ Quick Actions</Text>
         <View style={S.actionsGrid}>
-          {QUICK_ACTIONS.map((action) => (
+          {QUICK_ACTIONS.filter((action) => !(isPrimaryClassLevel(studentProfile?.class) && action.route === "/discover")).map((action) => (
             <TouchableOpacity
               key={action.label}
               style={S.actionTile}

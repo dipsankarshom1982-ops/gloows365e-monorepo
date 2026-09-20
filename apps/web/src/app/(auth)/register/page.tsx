@@ -55,6 +55,7 @@ function getPhoneVerifyAuth() {
 }
 import { INDIAN_LANGUAGES, DEFAULT_LANGUAGE, getStoredLanguage, clearStoredLanguage } from "@/lib/languages";
 import { TITLES } from "@/lib/avatars";
+import { CLASS_RANGE_LABEL, SUPPORTED_CLASS_LEVEL_STRINGS } from "@gloows/shared-logic";
 
 // Matches mobile services/referralService.ts — deterministic 8-char code from UID.
 // Written to users/{uid} at registration so the referral page can display it
@@ -68,7 +69,7 @@ function generateReferralCode(uid: string): string {
 }
 
 const BOARDS         = ["CBSE", "ICSE", "State Board", "Other"];
-const CLASS_OPTIONS  = ["6", "7", "8", "9", "10", "11", "12"];
+const CLASS_OPTIONS  = SUPPORTED_CLASS_LEVEL_STRINGS;
 const INTERESTS      = ["Maths","Science","Coding","AI","Robotics","Cricket","Football","Art","Music","GK","Other"];
 
 function calculateAge(dob: string): number {
@@ -116,7 +117,7 @@ function RestartEducationBlock({ age, onRestart }: { age: number; onRestart: () 
       }}>
         <p style={{ color: "#a3e635", fontSize: 13, fontWeight: 700, marginBottom: 8 }}>About this platform</p>
         <p style={{ color: "#d1fae5", fontSize: 14, lineHeight: "22px" }}>
-          Gloows365 is designed for current school students in Class 6–12 (under 18 years of age).{" "}
+          Gloows365 is designed for current school students in {CLASS_RANGE_LABEL} (under 18 years of age).{" "}
           Based on your age ({age} years), you are eligible for our{" "}
           <strong style={{ color: "#4ade80" }}>Restart My Education</strong> programme — a dedicated
           space for learners who want to continue their education journey after a break.

@@ -2,12 +2,14 @@
 // Mirror of apps/mobile/lib/aiGuru/constants.ts — same values, same shapes,
 // so setup/content/dashboard pages on web match mobile behaviour exactly.
 
+import { SUPPORTED_CLASS_LEVEL_STRINGS, withPrimarySubjects } from "@gloows/shared-logic";
+
 export const BOARDS = [
   "CBSE", "ICSE", "State Board",
   "Tripura Board", "West Bengal Board", "Assam Board", "Other",
 ];
 
-export const CLASSES = Array.from({ length: 7 }, (_, i) => String(i + 6)); // "6" to "12"
+export const CLASSES = [...SUPPORTED_CLASS_LEVEL_STRINGS];
 
 export const SUBJECTS = [
   "Computer", "Science", "Math", "English",
@@ -16,8 +18,13 @@ export const SUBJECTS = [
 
 export const SUBJECT_ICONS: Record<string, string> = {
   Computer: "💻", Science: "🔬", Math: "🔢", English: "📖",
-  "Social Science": "🌍", Hindi: "🇮🇳", Bengali: "🅱️", Other: "📚",
+  "Social Science": "🌍", Hindi: "🇮🇳", Bengali: "🅱️", Other: "📚", EVS: "🌱",
 };
+
+/** Class 3–5 also get EVS (Environmental Studies), listed first; every other class keeps the standard list. */
+export function getSubjectsForClass(classLevel: unknown): string[] {
+  return withPrimarySubjects(SUBJECTS, classLevel);
+}
 
 // Lesson-generation language options — matches the app's full 12-language
 // UI support (see SUPPORTED_LANGUAGES in lib/i18n.ts), not the narrower

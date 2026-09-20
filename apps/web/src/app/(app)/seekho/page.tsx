@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
-import { useStudentProfile } from "@gloows/shared-logic";
+import { isPrimaryClassLevel, parseClassLevel, useStudentProfile } from "@gloows/shared-logic";
 import { SEEKHO_SUBJECTS, type SeekhoSubject } from "@/lib/seekhoSubjects";
 
 // ─── Constants (mirrors mobile lib/seekho/constants.ts) ───────
@@ -29,7 +29,8 @@ export default function SeekhoPage() {
   const { studentProfile, authLoading, user } = useStudentProfile();
   const [loading, setLoading] = useState(false);
 
-  const selectedClass = studentProfile?.class ?? 10;
+  // null when no supported class is on record — the badge is hidden rather than defaulting to Class 10.
+  const selectedClass = parseClassLevel(studentProfile?.class);
   const selectedBoard = studentProfile?.board ?? "CBSE";
   const isFreeUser    = true; // simplified — integrate useSeekhoAccess later
 
@@ -39,6 +40,36 @@ export default function SeekhoPage() {
         <p style={{ color: "var(--text)", fontSize: 16, fontWeight: 700 }}>
           Please sign in to access Seekho.
         </p>
+      </div>
+    );
+  }
+
+  // Class 3–5: no Seekho chapters exist yet. Show a clear "coming soon" state
+  // instead of the subject grid, and don't advertise a plan for content that isn't there.
+  if (isPrimaryClassLevel(studentProfile?.class)) {
+    return (
+      <div style={{ paddingBottom: 32 }}>
+        <div style={{ padding: "12px 16px 4px" }}>
+          <h2 style={{ fontSize: 24, fontWeight: 900, color: "var(--text)", margin: 0 }}>📖 Seekho</h2>
+          <p style={{ color: "var(--text-muted)", fontSize: 12, fontWeight: 500, marginTop: 2 }}>
+            Curriculum-aligned video lessons
+          </p>
+        </div>
+        <div
+          role="status"
+          style={{
+            margin: "24px 16px 0", padding: 28, textAlign: "center", borderRadius: 20,
+            border: "1px solid var(--border)", background: "var(--bg-card)",
+          }}
+        >
+          <div style={{ fontSize: 44 }} aria-hidden="true">🌱</div>
+          <h3 style={{ fontSize: 18, fontWeight: 900, color: "var(--text)", margin: "10px 0 6px" }}>
+            Seekho for Class {selectedClass} is coming soon
+          </h3>
+          <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--text-muted)", margin: 0 }}>
+            We&apos;re preparing video lessons for your class. Courses are being added, so check back soon!
+          </p>
+        </div>
       </div>
     );
   }
@@ -62,7 +93,7 @@ export default function SeekhoPage() {
         </div>
         {loading ? (
           <div style={{ width: 20, height: 20, border: "2px solid #6366f1", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-        ) : (
+        ) : selectedClass === null ? null : (
           <div style={{
             background: "#4f46e5", borderRadius: 12,
             padding: "8px 12px", textAlign: "center",

@@ -5,6 +5,7 @@ import { callGeminiText, callGeminiWithAudio } from "./gemini";
 import { checkVidyaGuruLimit, incrementVidyaGuruUsage } from "./usageCheck";
 import { refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { resolveStudentLanguage, getDetectOrFallbackInstruction } from "./aiLanguage";
+import { getClassLevelInstruction, resolveStudentClassLevel } from "./aiStudentContext";
 
 const db = admin.firestore();
 
@@ -90,14 +91,15 @@ async function synthesizeSpeech(text: string, language: string): Promise<string>
 // other Ask AI Guru feature.
 function buildSystemPrompt(
   studentName: string,
-  classLevel: string | number,
+  classLevel: number | null,
   preferredLanguage: string
 ): string {
+  const levelInstruction = getClassLevelInstruction(classLevel);
   return `You are VidyaGuru AI — a warm, caring AI teacher and personal mentor for students.
 
-Student: ${studentName}, Class ${classLevel}
+Student: ${studentName}${classLevel === null ? "" : `, Class ${classLevel}`}
 
-${getDetectOrFallbackInstruction(preferredLanguage)}
+${getDetectOrFallbackInstruction(preferredLanguage)}${levelInstruction ? `\n${levelInstruction}` : ""}
 
 Your personality:
 - Warm, encouraging, patient, and genuinely caring
@@ -116,6 +118,8 @@ Rules:
 - Support all Indian curriculum boards (CBSE, ICSE, State)
 - For exam-related questions, give exam-ready answers with key points`;
 }
+
+export { buildSystemPrompt as buildVidyaGuruSystemPrompt };
 
 function buildTextPrompt(
   systemPrompt: string,
@@ -218,10 +222,11 @@ export const vidyaguruChat = onRequest(
         audioMimeType,
         conversationHistory = [],
         studentName = "Student",
-        classLevel  = "8",
       } = req.body;
 
       const preferredLanguage = await resolveStudentLanguage(uid, db);
+      // Class comes from the student's own profile, never the body — see aiStudentContext.ts.
+      const classLevel = await resolveStudentClassLevel(uid, db);
       const systemPrompt = buildSystemPrompt(studentName, classLevel, preferredLanguage);
       let answer         = "";
       let transcribedText: string | undefined;

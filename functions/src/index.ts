@@ -28,6 +28,7 @@ import {
 } from "./usageCheck";
 import { refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { validateLessonJson } from "./validateLesson";
+import { getClassLevelInstruction, resolveClassLevelForRequest } from "./aiStudentContext";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -545,7 +546,8 @@ function buildLessonCacheKey(params: {
 
 function buildLessonPromptInline(body: Record<string, string>): string {
   const { board, classLevel, subject, chapter, topic, language, difficulty, lessonStyle, inputText } = body;
-  return `You are AI Guru, a friendly Indian AI teacher for school students.\nConvert the content into an interactive self-learning lesson.\nRules: Teach at Class ${classLevel} level, ${board} board. Use ${language}. Style: ${lessonStyle}. Difficulty: ${difficulty}.\nKeep each narration under 120 words. Use Indian examples. Return ONLY valid JSON, no markdown.\n\nBoard: ${board}, Class: ${classLevel}, Subject: ${subject}, Chapter: ${chapter}, Topic: ${topic ?? "Full Chapter"}\n\nStudent Content:\n${inputText || `Create a comprehensive lesson on "${chapter}" for Class ${classLevel} ${subject} (${board}).`}\n\nReturn exactly this JSON (populate ALL fields, minimum 5 scenes, 8 quiz, 8 flashcards, 5 keyConcepts):\n{"lessonTitle":"","shortIntro":"","estimatedDurationMinutes":0,"learningObjectives":[""],"prerequisites":[""],"storyHook":{"title":"","narration":"","studentMission":""},"scenes":[{"sceneNumber":1,"sceneTitle":"","visualType":"animation","visualDescription":"","narration":"","keyConcept":"","example":"","studentAction":"","checkQuestion":{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":""}}],"keyConcepts":[{"term":"","simpleMeaning":"","realLifeExample":""}],"practicalActivity":{"title":"","instructions":[""],"expectedOutput":"","aiEvaluationCriteria":[""]},"flashcards":[{"front":"","back":""}],"quickRevisionNotes":[""],"quiz":[{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":"","difficulty":"easy","concept":""}],"finalMission":{"title":"","task":"","successCriteria":[""],"rewardText":""},"commonMistakes":[{"mistake":"","correction":""}],"examTips":[""],"followUpPrompts":["Explain this chapter again in simpler way","Give me real-life examples","Take my test","Create revision notes"]}`;
+  const levelInstruction = getClassLevelInstruction(Number(classLevel));
+  return `You are AI Guru, a friendly Indian AI teacher for school students.\nConvert the content into an interactive self-learning lesson.\nRules: Teach at Class ${classLevel} level, ${board} board. Use ${language}. Style: ${lessonStyle}. Difficulty: ${difficulty}.${levelInstruction ? `\n${levelInstruction}` : ""}\nKeep each narration under 120 words. Use Indian examples. Return ONLY valid JSON, no markdown.\n\nBoard: ${board}, Class: ${classLevel}, Subject: ${subject}, Chapter: ${chapter}, Topic: ${topic ?? "Full Chapter"}\n\nStudent Content:\n${inputText || `Create a comprehensive lesson on "${chapter}" for Class ${classLevel} ${subject} (${board}).`}\n\nReturn exactly this JSON (populate ALL fields, minimum 5 scenes, 8 quiz, 8 flashcards, 5 keyConcepts):\n{"lessonTitle":"","shortIntro":"","estimatedDurationMinutes":0,"learningObjectives":[""],"prerequisites":[""],"storyHook":{"title":"","narration":"","studentMission":""},"scenes":[{"sceneNumber":1,"sceneTitle":"","visualType":"animation","visualDescription":"","narration":"","keyConcept":"","example":"","studentAction":"","checkQuestion":{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":""}}],"keyConcepts":[{"term":"","simpleMeaning":"","realLifeExample":""}],"practicalActivity":{"title":"","instructions":[""],"expectedOutput":"","aiEvaluationCriteria":[""]},"flashcards":[{"front":"","back":""}],"quickRevisionNotes":[""],"quiz":[{"question":"","options":["","","",""],"correctAnswerIndex":0,"explanation":"","difficulty":"easy","concept":""}],"finalMission":{"title":"","task":"","successCriteria":[""],"rewardText":""},"commonMistakes":[{"mistake":"","correction":""}],"examTips":[""],"followUpPrompts":["Explain this chapter again in simpler way","Give me real-life examples","Take my test","Create revision notes"]}`;
 }
 
 export const generateLesson = functionsV1
@@ -563,10 +565,21 @@ export const generateLesson = functionsV1
     catch { res.status(401).json({ error: "Unauthorized" }); return; }
 
     try {
+      // Class 3–5 students are pinned to their own class; older students may
+      // pick another supported class. Rejected before any quota/credit is
+      // used, and no default class is ever assumed.
+      const resolvedClass = await resolveClassLevelForRequest(uid, db, req.body?.classLevel);
+      if (resolvedClass === null) {
+        res.status(400).json({ error: "Choose a class to generate a lesson.", code: "CLASS_REQUIRED" });
+        return;
+      }
+      const classLevel = String(resolvedClass);
+      req.body = { ...req.body, classLevel };
+
       const quota = await checkGenerationLimit(uid, db);
       creditTxId = quota.creditTxId;
 
-      const { board, classLevel, subject, chapter, topic = "", language,
+      const { board, subject, chapter, topic = "", language,
               difficulty, lessonStyle, inputText = "", imageBase64, imageMimeType } = req.body;
       const inputType = imageBase64 ? "image" : inputText.trim() ? "text" : "topic";
 

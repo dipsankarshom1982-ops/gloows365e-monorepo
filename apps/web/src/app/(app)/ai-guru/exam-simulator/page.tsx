@@ -24,7 +24,7 @@ import {
   generateExam, evaluateExam,
   type GeneratedExam, type ExamEvaluation,
 } from "@/services/examSimulatorApi";
-import { SUBJECTS, SUBJECT_ICONS, DIFFICULTIES } from "@/lib/aiGuru/constants";
+import { getSubjectsForClass, SUBJECT_ICONS, DIFFICULTIES } from "@/lib/aiGuru/constants";
 
 type Phase = "setup" | "generating" | "exam" | "submitting" | "results" | "limit" | "error";
 
@@ -39,7 +39,8 @@ export default function ExamSimulatorPage() {
   const muted   = colors.textSecondary;
   const dim     = colors.textSecondary;
 
-  const classLevel = String(studentProfile?.class ?? "10");
+  // No default class: a student with none on record gets a "set your class" message from the server, not a guessed Class 10 exam.
+  const classLevel = String(studentProfile?.class ?? "");
   const board       = (studentProfile?.board as string) ?? "CBSE";
   const language    = studentProfile?.preferredLanguage ?? "English";
 
@@ -163,7 +164,7 @@ export default function ExamSimulatorPage() {
 
             <div style={{ color: muted, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 }}>📚 Subject *</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8, marginBottom: 20 }}>
-              {SUBJECTS.map((s) => (
+              {getSubjectsForClass(studentProfile?.class).map((s) => (
                 <button key={s} className="ex-btn" onClick={() => setSubject(s)} style={{ ...sel(subject === s), display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "12px 6px" }}>
                   <span style={{ fontSize: 22 }}>{SUBJECT_ICONS[s] ?? "📚"}</span>
                   <span style={{ fontSize: 11, fontWeight: 700, color: subject === s ? "#fca5a5" : dim }}>{s}</span>

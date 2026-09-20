@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ToggleSwitch from "../components/ToggleSwitch";
 import { db } from "../lib/firebase";
+import { SUPPORTED_CLASS_LEVEL_STRINGS } from "../lib/educationConfig";
 
-const ALL_CLASSES = ["6","7","8","9","10","11","12","all"];
+const ALL_CLASSES = [...SUPPORTED_CLASS_LEVEL_STRINGS, "all"];
 const TYPES = ["quiz","essay","project","skill_battle"];
 
 // Period key helpers

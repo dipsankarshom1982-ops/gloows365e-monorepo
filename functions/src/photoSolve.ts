@@ -14,6 +14,7 @@ import { getRedis, todayIST, TTL, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
 import { tryDebitAiGuruCredit, refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { resolveStudentLanguage, getLanguageInstruction } from "./aiLanguage";
+import { getClassLevelInstruction, resolveStudentClassLevel } from "./aiStudentContext";
 
 const db = admin.firestore();
 
@@ -57,15 +58,16 @@ export function buildPhotoSolveCacheKey(
 // selection. Now uses the shared, exhaustive instruction — see
 // functions/src/aiLanguage.ts's header comment for the full context.
 function buildPhotoSolvePrompt(
-  classLevel: string | number,
+  classLevel: number | null,
   board: string,
   language: string
 ): string {
-  return `You are an expert AI tutor for Indian school students, specialised in ${board} curriculum for Class ${classLevel}.
+  const levelInstruction = getClassLevelInstruction(classLevel);
+  return `You are an expert AI tutor for Indian school students, specialised in ${board} curriculum${classLevel === null ? "" : ` for Class ${classLevel}`}.
 
 A student has photographed a question or problem. Analyse it carefully and provide a complete solution.
 
-${getLanguageInstruction(language)}
+${getLanguageInstruction(language)}${levelInstruction ? `\n${levelInstruction}` : ""}
 This applies to every text field below — questionText, solution steps, finalAnswer, conceptExplained, examTip, and similarQuestions — not just the top-level summary.
 
 Return ONLY a valid JSON object with this exact structure:
@@ -88,7 +90,7 @@ Return ONLY a valid JSON object with this exact structure:
 
 Rules:
 - Solve completely step by step. Do NOT skip steps.
-- Use simple language appropriate for Class ${classLevel}.
+- Use simple language appropriate for ${classLevel === null ? "a school student" : `Class ${classLevel}`}.
 - If the image is blurry or unreadable, set questionText to "Could not read clearly" and explain in conceptExplained.
 - Do NOT use markdown in the step strings — plain sentences only.
 - All strings must be valid JSON (escape quotes, no newlines in strings).`;
@@ -113,7 +115,8 @@ export const photoSolve = onRequest(
       return;
     }
 
-    const { imageBase64, imageMimeType, classLevel, board, language: requestedLanguage } = req.body ?? {};
+    // classLevel is deliberately NOT read from the body — see aiStudentContext.ts.
+    const { imageBase64, imageMimeType, board, language: requestedLanguage } = req.body ?? {};
 
     if (!imageBase64 || !imageMimeType) {
       res.status(400).json({ error: "imageBase64 and imageMimeType are required", code: "MISSING_IMAGE" });
@@ -124,6 +127,7 @@ export const photoSolve = onRequest(
     // language field → the student's saved preference looked up
     // server-side → English. Never trusts an unrecognized client value.
     const language = await resolveStudentLanguage(uid, db, requestedLanguage);
+    const classLevel = await resolveStudentClassLevel(uid, db);
 
     // ── Rate limit check ────────────────────────────────────────────────────
     // creditTxId declared outside this try so the Gemini-call catch further
@@ -191,7 +195,7 @@ export const photoSolve = onRequest(
     // one per language — matching every other Ask AI Guru cache
     // (askAiGuru.ts's cacheKey already included language for the same
     // reason; examSimulator.ts's below does too).
-    const cacheKey = buildPhotoSolveCacheKey(imageBase64, classLevel, board, language);
+    const cacheKey = buildPhotoSolveCacheKey(imageBase64, classLevel ?? "unknown", board, language);
 
     try {
       const cached = await getRedis().get<object>(cacheKey);
@@ -203,7 +207,7 @@ export const photoSolve = onRequest(
 
     // ── Call Gemini Vision ───────────────────────────────────────────────────
     try {
-      const prompt = buildPhotoSolvePrompt(classLevel ?? "10", board ?? "CBSE", language);
+      const prompt = buildPhotoSolvePrompt(classLevel, board ?? "CBSE", language);
       const raw = await callGeminiWithImage(prompt, imageBase64, imageMimeType);
       const parsed = parseJsonFromResponse(raw) as any;
 

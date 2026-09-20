@@ -16,6 +16,7 @@ import { getRedis, todayIST, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
 import { tryDebitAiGuruCredit, refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { resolveStudentLanguage, getDetectOrFallbackInstruction } from "./aiLanguage";
+import { boardClassPhrase, getClassLevelInstruction, resolveStudentClassLevel } from "./aiStudentContext";
 
 const db = admin.firestore();
 const FREE_VOICE_DAILY    = 3;   // free: 3 voice queries/day
@@ -41,12 +42,13 @@ async function verifyAuthToken(req: any): Promise<string> {
 // preference (looked up server-side) instead of guessing, via the same
 // shared instruction every Ask AI Guru feature uses. See functions/src/
 // aiLanguage.ts's header comment.
-function buildVoiceTutorPrompt(classLevel: string, board: string, preferredLanguage: string): string {
-  return `You are an expert AI tutor for Indian school students (${board}, Class ${classLevel}).
+function buildVoiceTutorPrompt(classLevel: number | null, board: string, preferredLanguage: string): string {
+  const levelInstruction = getClassLevelInstruction(classLevel);
+  return `You are an expert AI tutor for Indian school students (${boardClassPhrase(board, classLevel)}).
 
 A student has sent you an audio question. First, transcribe what they said, then answer it.
 
-${getDetectOrFallbackInstruction(preferredLanguage)}
+${getDetectOrFallbackInstruction(preferredLanguage)}${levelInstruction ? `\n${levelInstruction}` : ""}
 
 Return ONLY a valid JSON object:
 {
@@ -72,14 +74,15 @@ Rules:
 function buildTextVoiceTutorPrompt(
   question: string,
   detectedLanguage: string,
-  classLevel: string,
+  classLevel: number | null,
   board: string
 ): string {
-  return `You are an expert AI tutor for Indian school students (${board}, Class ${classLevel}).
+  const levelInstruction = getClassLevelInstruction(classLevel);
+  return `You are an expert AI tutor for Indian school students (${boardClassPhrase(board, classLevel)}).
 
 Student's question (in ${detectedLanguage}): "${question}"
 
-${getDetectOrFallbackInstruction(detectedLanguage)}
+${getDetectOrFallbackInstruction(detectedLanguage)}${levelInstruction ? `\n${levelInstruction}` : ""}
 
 Return ONLY a valid JSON object:
 {
@@ -118,7 +121,6 @@ export const voiceTutorAnswer = onRequest(
       audioMimeType,
       textQuestion,      // fallback: if client sends text instead of audio
       detectedLanguage,
-      classLevel,
       board,
     } = req.body ?? {};
 
@@ -135,6 +137,8 @@ export const voiceTutorAnswer = onRequest(
     // looked up server-side → English. Used as the fallback language for
     // ambiguous/unclear input in both paths below.
     const preferredLanguage = await resolveStudentLanguage(uid, db, detectedLanguage);
+    // Class comes from the student's own profile, never the body — see aiStudentContext.ts.
+    const classLevel = await resolveStudentClassLevel(uid, db);
 
     // ── Rate limit check ────────────────────────────────────────────────────
     // creditTxId declared outside this try so the Gemini-call catch further
@@ -185,13 +189,13 @@ export const voiceTutorAnswer = onRequest(
 
       if (hasAudio) {
         // Full audio processing via Gemini audio understanding
-        const prompt = buildVoiceTutorPrompt(classLevel ?? "10", board ?? "CBSE", preferredLanguage);
+        const prompt = buildVoiceTutorPrompt(classLevel, board ?? "CBSE", preferredLanguage);
         const raw = await callGeminiWithAudio(prompt, audioBase64, audioMimeType);
         parsed = parseJsonFromResponse(raw);
       } else {
         // Text fallback (client already transcribed or typed)
         const lang = detectedLanguage ?? preferredLanguage;
-        const prompt = buildTextVoiceTutorPrompt(hasText, lang, classLevel ?? "10", board ?? "CBSE");
+        const prompt = buildTextVoiceTutorPrompt(hasText, lang, classLevel, board ?? "CBSE");
         const raw = await callGeminiText(prompt);
         parsed = parseJsonFromResponse(raw);
         parsed.transcribedQuestion = hasText;

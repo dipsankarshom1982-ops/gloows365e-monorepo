@@ -16,7 +16,7 @@ import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { generateExam, evaluateExam, GeneratedExam, ExamEvaluation } from "@/services/examSimulatorApi";
-import { SUBJECTS, SUBJECT_ICONS } from "@/lib/aiGuru/constants";
+import { getSubjectsForClass, SUBJECT_ICONS } from "@/lib/aiGuru/constants";
 import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 
 const DIFFICULTIES = ["Easy", "Standard", "Exam Level"] as const;
@@ -35,7 +35,8 @@ export default function ExamSimulatorScreen() {
   const muted   = isDarkMode ? "#94a3b8" : colors.textSecondary;
   const dim     = isDarkMode ? "#64748b" : colors.textSecondary;
 
-  const classLevel = String(studentProfile?.class ?? "10");
+  // No default class: a student with none on record gets a "set your class" message from the server, not a guessed Class 10 exam.
+  const classLevel = String(studentProfile?.class ?? "");
   const board      = studentProfile?.board ?? "CBSE";
   const language   = studentProfile?.preferredLanguage ?? "English";
 
@@ -165,7 +166,7 @@ export default function ExamSimulatorScreen() {
             {/* Subject picker */}
             <Text style={[S.sectionLabel, { color: muted }]}>📚 Subject *</Text>
             <View style={S.subjectGrid}>
-              {SUBJECTS.map((s) => (
+              {getSubjectsForClass(studentProfile?.class).map((s) => (
                 <TouchableOpacity key={s} onPress={() => setSubject(s)} activeOpacity={0.8}
                   style={[S.subjectCard, { backgroundColor: surface, borderColor: subject === s ? "#dc2626" : border },
                     subject === s && { backgroundColor: "rgba(220,38,38,0.1)" }]}>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { collection, getDocs, doc, getDoc, setDoc, query, orderBy, limit, startAfter, where, QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../lib/firebase";
+import { STREAM_CLASS_LEVELS, SUPPORTED_CLASS_LEVEL_STRINGS } from "../lib/educationConfig";
 import DrawerPanel from "../components/DrawerPanel";
 import StatusBadge from "../components/StatusBadge";
 
@@ -10,7 +11,7 @@ type StudentStream = "Science" | "Commerce" | "Arts/Humanities";
 // admin doesn't depend on that mobile/web-only package (see
 // DailyStreakQuiz.tsx for the same local-copy convention).
 const STREAMS: StudentStream[] = ["Science", "Commerce", "Arts/Humanities"];
-const STREAM_CLASSES = ["11", "12"];
+const STREAM_CLASSES = STREAM_CLASS_LEVELS.map(String);
 
 interface Student {
   id: string;
@@ -18,7 +19,7 @@ interface Student {
   email?: string;
   phone?: string;
   class?: string;
-  // Class 11/12 only — absent/null for classes 6–10 and for any account
+  // Class 11/12 only — absent/null for classes 3–10 and for any account
   // created before the 2026-09-14 stream architecture update.
   stream?: StudentStream | null;
   parentGuardianName?: string;
@@ -249,7 +250,7 @@ export default function Students() {
   // what's actually in the `students` state).
   const idLookupIsExtra = !!idLookupResult && !filtered.some((s) => s.id === idLookupResult.id);
 
-  const classes = ["all", "6", "7", "8", "9", "10", "11", "12"];
+  const classes = ["all", ...SUPPORTED_CLASS_LEVEL_STRINGS];
 
   return (
     <div className="space-y-6">
@@ -382,7 +383,7 @@ export default function Students() {
                     className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-sm"
                   >
                     <option value="">Select class</option>
-                    {["6", "7", "8", "9", "10", "11", "12"].map((c) => <option key={c} value={c}>Class {c}</option>)}
+                    {SUPPORTED_CLASS_LEVEL_STRINGS.map((c) => <option key={c} value={c}>Class {c}</option>)}
                   </select>
                 </div>
                 {editIsStreamClass && (

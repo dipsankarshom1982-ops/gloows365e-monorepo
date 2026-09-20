@@ -1,6 +1,6 @@
 import "@/lib/firebase";
 import { AppConfigProvider } from "@/context/AppConfigContext";
-import { FeatureFlagsProvider, StudentProfileProvider } from "@gloows/shared-logic";
+import { FeatureFlagsProvider, parseClassLevel, StudentProfileProvider } from "@gloows/shared-logic";
 import { LanguageProvider } from "@/context/LanguageContext";
 import { ThemeProvider, useTheme } from "@/context/ThemeContext";
 import { useSeekhoStore } from "@/store/seekhoStore";
@@ -69,8 +69,9 @@ export default function RootLayout() {
           <LanguageProvider>
             <StudentProfileProvider
               onProfileLoaded={(profile) => {
-                if (profile.class && profile.board) {
-                  useSeekhoStore.getState().setClassBoard(Number(profile.class), profile.board as any);
+                if (profile.board) {
+                  // 0 = no supported class on record; never falls back to another class.
+                  useSeekhoStore.getState().setClassBoard(parseClassLevel(profile.class) ?? 0, profile.board as any);
                 }
                 if (!pushRegisteredRef.current) {
                   pushRegisteredRef.current = true;

@@ -9,10 +9,11 @@
 // instead of translation.
 //
 // STREAM (added 2026-09-14): Class 11/12 are no longer stream-agnostic.
-// Each day generates 11 questions total — one per class 6–10 (`stream:
-// null`) plus one per Class 11/12 × {Science, Commerce, Arts/Humanities}
-// (6 more). A "slot" is the atomic unit everywhere in this file:
-// {class, stream}. Classes 6–10's code paths are deliberately untouched
+// Each day generates 14 questions total — one per class 3–10 (`stream:
+// null`; Class 3–5 added with the Class 3–12 expansion) plus one per Class
+// 11/12 × {Science, Commerce, Arts/Humanities} (6 more). A "slot" is the
+// atomic unit everywhere in this file:
+// {class, stream}. Classes 3–10's code paths are deliberately untouched
 // wherever `stream` would be null — every query below adds a `stream`
 // filter ONLY when a slot actually has one, so 6–10 behaves byte-for-byte
 // like before this field existed, and legacy questions (authored before
@@ -53,6 +54,13 @@ import * as functionsV1 from "firebase-functions/v1";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
 import { todayIST } from "./redish";
+import {
+  getClassBand,
+  getQuizSubjectPool,
+  isSupportedClassLevel,
+  NON_STREAM_CLASS_LEVELS,
+  STREAM_CLASS_LEVELS,
+} from "./educationConfig";
 
 const db = admin.firestore();
 
@@ -66,16 +74,15 @@ type DifficultyLevel = "easy" | "medium" | "hard";
 type StudentStream = "Science" | "Commerce" | "Arts/Humanities";
 const STREAMS: readonly StudentStream[] = ["Science", "Commerce", "Arts/Humanities"];
 
-const NON_STREAM_CLASSES = [6, 7, 8, 9, 10];
-const STREAM_CLASSES = [11, 12];
-const ALL_CLASSES = [...NON_STREAM_CLASSES, ...STREAM_CLASSES];
+const NON_STREAM_CLASSES = [...NON_STREAM_CLASS_LEVELS];
+const STREAM_CLASSES = [...STREAM_CLASS_LEVELS];
 
 interface Slot {
   class: number;
   stream: StudentStream | null;
 }
 
-// The 11 daily slots: 5 non-stream classes + (Class 11 × 3 streams) +
+// The 14 daily slots: 8 non-stream classes (3–10) + (Class 11 × 3 streams) +
 // (Class 12 × 3 streams).
 function buildDailySlots(): Slot[] {
   const slots: Slot[] = NON_STREAM_CLASSES.map((c) => ({ class: c, stream: null }));
@@ -102,6 +109,9 @@ const BUFFER_DAYS = [1, 2];
 const LOOKBACK_DAYS = 30;
 
 const MAX_ATTEMPTS = 3;
+
+// The scheduler's hard timeout is 540s; stop starting new slots after 360s so an in-flight slot can finish.
+const SCHEDULER_TIME_BUDGET_MS = 360_000;
 // Lowered 2026-09-15 from 0.75 after real-generation testing showed 0.75
 // failed to catch even the brief's own worked example ("What is the
 // largest planet in our solar system?" vs "Which is the biggest planet in
@@ -119,13 +129,9 @@ const MAX_ATTEMPTS = 3;
 // which is a bigger change than a threshold tweak — flagged, not built here.
 const DUPLICATE_SIMILARITY_THRESHOLD = 0.5;
 
-// General subject pool — classes 6–10 only (unchanged from before streams
-// existed). Mirrors apps/admin/src/pages/DailyStreakQuiz.tsx's SUBJECTS list.
-const SUBJECTS = [
-  "General Knowledge", "Mathematics", "Science", "English",
-  "Social Science", "Current Affairs", "Logical Reasoning",
-];
-
+// Class 3–10 subject pools come from educationConfig's getQuizSubjectPool
+// (Class 3–5 get their own primary pool; 6–10 keep the original one).
+//
 // Class 11/12 subject pools, by stream. Deliberately just a plain map — the
 // brief calls this out as something that should stay easy to retune later,
 // and "not every student in a stream studies every listed subject" (the
@@ -137,6 +143,9 @@ const STREAM_SUBJECTS: Record<StudentStream, string[]> = {
 };
 
 const CLASS_DIFFICULTY: Record<number, { level: DifficultyLevel; label: string }> = {
+  3:  { level: "easy",   label: "Very basic foundation concepts drawn from everyday life. One simple idea per question, in short, plain wording." },
+  4:  { level: "easy",   label: "Basic foundation concepts drawn from everyday life and the school syllabus. One clear idea per question, in simple wording." },
+  5:  { level: "easy",   label: "Basic school-level concepts with slightly more depth than the earlier primary classes. Simple, clear wording; at most one short reasoning step." },
   6:  { level: "easy",   label: "Basic school-level concepts and general knowledge. Keep the wording simple." },
   7:  { level: "easy",   label: "Basic-to-moderate school-level concepts and general knowledge." },
   8:  { level: "medium", label: "Moderate school-level concepts and reasoning." },
@@ -150,6 +159,23 @@ const CLASS_DIFFICULTY: Record<number, { level: DifficultyLevel; label: string }
   // advanced and thought-provoking, not unnecessarily complicated."
   12: { level: "hard",   label: "Advanced Class 12 academic concepts. Strongly prefer questions that require APPLICATION, ANALYSIS, COMPARISON, INTERPRETATION, or CAUSE-AND-EFFECT REASONING over simple direct fact/definition recall — for example, present a brief scenario, data point, or situation and ask which concept/principle best explains or applies to it, and why, rather than just naming or defining a term. Should be appropriately advanced and thought-provoking for a board-level student, NOT unnecessarily complicated, obscure, or convoluted — a clear scenario with a clear correct principle, not a trick question." },
 };
+
+// Deliberately throws instead of falling back to another class's difficulty —
+// a missing entry must surface as a controlled generation failure, never as
+// an advanced class's questions silently served to a younger student.
+function getClassDifficulty(cls: number): { level: DifficultyLevel; label: string } {
+  const entry = CLASS_DIFFICULTY[cls];
+  if (!entry) throw new Error(`No Daily Streak Quiz difficulty configured for Class ${cls}`);
+  return entry;
+}
+
+// Extra prompt guidance for early-primary classes (3–5) only; empty for
+// every other class so their prompts are unchanged.
+function primaryLearnerGuidance(cls: number): string {
+  return getClassBand(cls) === "PRIMARY_FOUNDATION"
+    ? "This is an early-primary learner: use short, simple sentences and familiar everyday examples, avoid technical or abstract vocabulary, keep every answer option short, and test ONE simple idea with no multi-step reasoning."
+    : "";
+}
 
 // Extra framing appended only for Class 12 Arts/Humanities — that stream's
 // "advanced" questions most easily default to bare definitional recall
@@ -381,7 +407,9 @@ function buildGenerationPrompt(
   avoidQuestions: string[],
   previousFailureReason?: string
 ): string {
-  const subjectPool = stream ? STREAM_SUBJECTS[stream] : SUBJECTS;
+  const subjectPool = stream ? STREAM_SUBJECTS[stream] : getQuizSubjectPool(cls);
+  if (!subjectPool) throw new Error(`No Daily Streak Quiz subject pool configured for Class ${cls}${stream ? ` (${stream})` : ""}`);
+  const primaryLine = primaryLearnerGuidance(cls);
   const streamLine = stream
     ? `This student is in the ${stream} stream — pick a subject genuinely relevant to a ${stream} student, but keep in mind not every student in the stream studies every subject listed, so favor commonly-studied ones.`
     : "";
@@ -389,7 +417,7 @@ function buildGenerationPrompt(
 
   return `You are writing ONE multiple-choice quiz question for the Gloows365 Daily Streak Quiz, for a school student in Class ${cls} in India${stream ? ` (${stream} stream)` : ""}.
 
-Difficulty guidance: ${difficultyLabel}
+Difficulty guidance: ${difficultyLabel}${primaryLine ? `\n${primaryLine}` : ""}
 ${streamLine}
 ${arts12Line}
 Pick ONE subject from this list: ${subjectPool.join(", ")}.
@@ -425,7 +453,7 @@ Check ALL of the following and report any failures:
 3. It is factually correct.
 4. The marked correct answer is actually correct.
 5. The explanation is accurate and matches the correct answer.
-6. There is no inappropriate, unsafe, political, or offensive content.
+6. There is no inappropriate, unsafe, political, or offensive content.${primaryLearnerGuidance(cls) ? " For an early-primary class, also fail it if it uses abstract or technical vocabulary or needs multi-step reasoning." : ""}
 7. No two options are simple logical negations/inversions of each other (the same underlying claim with true/false or a qualifier flipped) — each wrong option must be a genuinely distinct, plausible misconception, not a mechanical opposite of another option.
 8. Every wrong option is clearly and unambiguously incorrect under the exact wording of the question — none of them is vague, overlapping, or close enough to the correct answer that a careful reader could defend it as also correct.
 
@@ -441,7 +469,7 @@ async function generateValidatedQuestion(
   avoidTopics: string[],
   avoidQuestions: string[]
 ): Promise<{ data: GeneratedQuestion; difficulty: DifficultyLevel; generationAttempts: number }> {
-  const { label: difficultyLabel, level: difficulty } = CLASS_DIFFICULTY[cls] ?? CLASS_DIFFICULTY[8];
+  const { label: difficultyLabel, level: difficulty } = getClassDifficulty(cls);
   let lastFailureReason: string | undefined;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -673,8 +701,8 @@ async function ensureQuestionGenerated(
 
 // ─── generateDailyStreakQuizQuestions (scheduled) ───────────────────────────
 // Runs after the existing 18:00 IST dailyStreakQuizReminder (dailyStreakQuiz.ts)
-// so the two never race on the same Firestore paths. 11 slots/day × 2
-// buffer days = 22 ensureQuestionGenerated calls per run, most of which
+// so the two never race on the same Firestore paths. 14 slots/day × 2
+// buffer days = 28 ensureQuestionGenerated calls per run, most of which
 // no-op (already-active) on any given day.
 
 export const generateDailyStreakQuizQuestions = onSchedule(
@@ -686,12 +714,20 @@ export const generateDailyStreakQuizQuestions = onSchedule(
     secrets: ["GEMINI_API_KEY"],
   },
   async (_event) => {
+    const startedAt = Date.now();
     const today = todayIST();
     const dates = BUFFER_DAYS.map((offset) => dateOffsetIST(today, offset));
     const slots = buildDailySlots();
 
     for (const date of dates) {
       for (const slot of slots) {
+        // Stop starting new slots well before the 540s hard limit: a kill
+        // mid-generation would leave that slot's "generating" claim stuck.
+        // Skipped slots are picked up by the next run (buffer days).
+        if (Date.now() - startedAt > SCHEDULER_TIME_BUDGET_MS) {
+          console.warn(`dailyStreakQuizGeneration: time budget reached, deferring remaining slots (stopped before class=${slot.class} stream=${slot.stream ?? "-"} date=${date})`);
+          return;
+        }
         try {
           await ensureQuestionGenerated(slot.class, slot.stream, date);
         } catch (err) {
@@ -718,7 +754,7 @@ export const regenerateDailyStreakQuizQuestion = functionsV1
 
     const cls = Number(data?.class);
     const date = data?.date;
-    if (!cls || !ALL_CLASSES.includes(cls) || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    if (!isSupportedClassLevel(cls) || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new functionsV1.https.HttpsError("invalid-argument", "Missing or invalid class/date");
     }
 
@@ -730,7 +766,7 @@ export const regenerateDailyStreakQuizQuestion = functionsV1
       }
       stream = rawStream as StudentStream;
     } else if (rawStream) {
-      throw new functionsV1.https.HttpsError("invalid-argument", "Classes 6–10 do not have a stream");
+      throw new functionsV1.https.HttpsError("invalid-argument", "Classes 3–10 do not have a stream");
     }
 
     const result = await ensureQuestionGenerated(cls, stream, date, { force: true });
@@ -746,6 +782,11 @@ export const regenerateDailyStreakQuizQuestion = functionsV1
 // needing a live Firestore/Gemini round-trip. No behavior change; nothing
 // here is called differently by the exported Cloud Functions above.
 export {
+  buildDailySlots,
+  buildGenerationPrompt,
+  CLASS_DIFFICULTY,
+  generateValidatedQuestion,
+  getClassDifficulty,
   normalizeText,
   jaccardSimilarity,
   findDuplicateMatch,

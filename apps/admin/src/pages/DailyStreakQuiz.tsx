@@ -20,6 +20,7 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
+import { getQuizSubjectPool, STREAM_CLASS_LEVELS, SUPPORTED_CLASS_LEVELS } from "../lib/educationConfig";
 import { motion, AnimatePresence } from "framer-motion";
 import DrawerForm from "../components/DrawerForm";
 import ToggleSwitch from "../components/ToggleSwitch";
@@ -36,7 +37,7 @@ import {
 interface Question {
   id: string;
   class: number;
-  // Class 11/12 only — null for classes 6–10 and for legacy questions
+  // Class 11/12 only — null for classes 3–10 and for legacy questions
   // authored before the 2026-09-14 stream architecture update.
   stream?: StudentStream | null;
   language: string;
@@ -71,8 +72,8 @@ interface DayRecord {
   xpEarned: number;
 }
 
-const CLASSES = [6, 7, 8, 9, 10, 11, 12];
-const STREAM_CLASSES = [11, 12];
+const CLASSES = [...SUPPORTED_CLASS_LEVELS];
+const STREAM_CLASSES = [...STREAM_CLASS_LEVELS];
 type StudentStream = "Science" | "Commerce" | "Arts/Humanities";
 // Mirrors packages/shared-logic/src/types/student.ts's STUDENT_STREAMS —
 // admin doesn't depend on that mobile/web-only package, so this is
@@ -340,7 +341,13 @@ function QuestionsTab() {
               value={form.class}
               onChange={(e) => {
                 const nextClass = Number(e.target.value);
-                setForm((f) => ({ ...f, class: nextClass, stream: STREAM_CLASSES.includes(nextClass) ? f.stream : null }));
+                const nextPool = getQuizSubjectPool(nextClass) ?? SUBJECTS;
+                setForm((f) => ({
+                  ...f,
+                  class: nextClass,
+                  stream: STREAM_CLASSES.includes(nextClass) ? f.stream : null,
+                  subject: nextPool.includes(f.subject) ? f.subject : nextPool[0],
+                }));
               }}
               className={inputCls}
             >
@@ -350,7 +357,7 @@ function QuestionsTab() {
           <div>
             <label className={labelCls}>Subject</label>
             <select value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} className={inputCls}>
-              {SUBJECTS.map((s) => <option key={s} value={s}>{s}</option>)}
+              {[...new Set([...(getQuizSubjectPool(form.class) ?? SUBJECTS), form.subject])].map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
         </div>

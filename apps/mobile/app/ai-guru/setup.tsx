@@ -8,7 +8,7 @@ import { useStudentProfile } from "@gloows/shared-logic";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import {
-  SUBJECTS, SUBJECT_ICONS,
+  getSubjectsForClass, SUBJECT_ICONS,
   LANGUAGES, DIFFICULTIES, DIFFICULTY_DESC,
   LESSON_STYLES, LESSON_STYLE_DESC,
 } from "@/lib/aiGuru/constants";
@@ -65,7 +65,7 @@ export default function SetupScreen() {
           {/* Subject */}
           <Section label="📚 Subject" required textSec={textSec}>
             <View style={S.subjectGrid}>
-              {SUBJECTS.map((s) => (
+              {getSubjectsForClass(studentProfile?.class).map((s) => (
                 <TouchableOpacity
                   key={s}
                   style={[S.subjectCard, { backgroundColor: surfaceBg, borderColor: borderCol }, subject === s && S.subjectCardActive]}

@@ -66,3 +66,54 @@ describe("getUserSubscriptionHistory", () => {
     ).rejects.toMatchObject({ code: "invalid-argument" });
   });
 });
+
+describe("adminUpdateStudentProfile — class validation (Class 3–12)", () => {
+  test("rejects a non-admin caller", async () => {
+    const { adminUpdateStudentProfile } = require("../adminManagement");
+    await expect(
+      adminUpdateStudentProfile.run({ data: { uid: "s1", class: 5 }, auth: { uid: "s1", token: {} } })
+    ).rejects.toMatchObject({ code: "permission-denied" });
+  });
+
+  test.each([3, 4, 5, 6, 7, 8, 9, 10])("accepts Class %i and stores it as a string", async (cls) => {
+    fakeDb.seed("students/s1", { name: "Test", class: "8" });
+    const { adminUpdateStudentProfile } = require("../adminManagement");
+    await adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", class: cls }));
+    expect(fakeDb.peek("students/s1")).toMatchObject({ name: "Test", class: String(cls) });
+  });
+
+  test.each([0, 1, 2, 13, "abc", 6.5])("rejects unsupported class %p", async (cls) => {
+    fakeDb.seed("students/s1", { class: "8" });
+    const { adminUpdateStudentProfile } = require("../adminManagement");
+    await expect(
+      adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", class: cls }))
+    ).rejects.toMatchObject({ code: "invalid-argument", message: "class must be one of 3–12." });
+    expect(fakeDb.peek("students/s1")?.class).toBe("8");
+  });
+
+  test("stream rules follow the class: Class 11 accepts one, Class 3 rejects one", async () => {
+    fakeDb.seed("students/s1", { class: "8" });
+    const { adminUpdateStudentProfile } = require("../adminManagement");
+    await expect(
+      adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", class: 11 }))
+    ).resolves.toEqual({ success: true });
+    await expect(
+      adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", class: 11, stream: "Science" }))
+    ).resolves.toEqual({ success: true });
+    await expect(
+      adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", class: 3, stream: "Science" }))
+    ).rejects.toMatchObject({ code: "invalid-argument" });
+    await expect(
+      adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", class: 3, stream: null }))
+    ).resolves.toEqual({ success: true });
+    expect(fakeDb.peek("students/s1")).toMatchObject({ class: "3", stream: null });
+  });
+
+  test("a stored Class 4 student can be given a stream-less update without being rejected", async () => {
+    fakeDb.seed("students/s1", { class: "4", stream: null });
+    const { adminUpdateStudentProfile } = require("../adminManagement");
+    await expect(
+      adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", stream: null }))
+    ).resolves.toEqual({ success: true });
+  });
+});

@@ -25,7 +25,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Gloows365 — People • Learning • Opportunities",
-  description: "AI-powered learning platform for Indian students Class 6–12",
+  description: "AI-powered learning platform for Indian students Class 3–12",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

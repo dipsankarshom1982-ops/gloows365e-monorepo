@@ -292,7 +292,7 @@ export default function SignupPage() {
 
         <form onSubmit={handleSignup} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Email — this becomes the account's login credential, and since
-              most Class 6–12 students don't have their own email, it's
+              most Class 3–12 students don't have their own email, it's
               almost always a parent/guardian's address in practice.
               Labelling it as such sets the right expectation, and the
               verification link now sent on signup (above) makes it a real,

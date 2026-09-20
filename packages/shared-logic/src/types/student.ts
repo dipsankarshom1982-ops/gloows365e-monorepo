@@ -1,7 +1,7 @@
 // packages/shared-logic/src/types/student.ts
 // Shared StudentProfile type — used by mobile, web, and admin
 
-// Class 11/12 academic stream. Classes 6–10 are always `null` — there is no
+// Class 11/12 academic stream. Classes 3–10 are always `null` — there is no
 // stream concept below Class 11 (see 2026-09-14 architecture update: Daily
 // Streak Quiz personalization + future ShikshaBub/CourseHub filtering).
 // NOTE: this is intentionally distinct from tutor-side TutorStream
@@ -24,7 +24,7 @@ export type StudentProfile = {
   school?: string;
   class?: number | string;
   // Class 11/12 only — null (or absent, on any account created before this
-  // field existed) for Class 6–10 and for 11/12 students who haven't picked
+  // field existed) for Class 3–10 and for 11/12 students who haven't picked
   // one yet. Never guessed/auto-assigned — see dailyStreakQuizGeneration.ts
   // and profile-settings.tsx for how every read path treats "absent" and
   // "null" identically.

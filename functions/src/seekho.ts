@@ -5,6 +5,7 @@ import axios from "axios";
 import { getRedis, todayIST, TTL, RK } from "./redish";
 import { verifyRazorpayCheckoutSignature } from "./financial/checkoutSignature";
 import { writeSyntheticInvoice } from "./financial/invoice";
+import { parseClassLevel } from "./educationConfig";
 
 const db = admin.firestore();
 
@@ -355,18 +356,31 @@ export const seekhoGetDailyStudyPlan = functionsV1
     // ── Firestore queries ──────────────────────────────────
     const studentSnap = await db.doc(`students/${userId}`).get();
     const student     = studentSnap.data() ?? {};
-    const studentClass: number = Number(student.class) || 10;
+    // No supported class on record → no courses, never another class's
+    // (this used to default to Class 10).
+    const studentClass: number | null = parseClassLevel(student.class);
     const studentBoard: string = student.board ?? "CBSE";
 
-    // Check cached courses list
-    const coursesKey = RK.seekhoCourses(studentClass, studentBoard);
     let courseDocs: Array<{ id: string; data: admin.firestore.DocumentData }> = [];
 
-    try {
-      const cachedCourses = await getRedis().get<typeof courseDocs>(coursesKey);
-      if (cachedCourses) {
-        courseDocs = cachedCourses;
-      } else {
+    if (studentClass !== null) {
+      // Check cached courses list
+      const coursesKey = RK.seekhoCourses(studentClass, studentBoard);
+      try {
+        const cachedCourses = await getRedis().get<typeof courseDocs>(coursesKey);
+        if (cachedCourses) {
+          courseDocs = cachedCourses;
+        } else {
+          const snap = await db
+            .collection("seekho_courses")
+            .where("class", "==", studentClass)
+            .where("board", "==", studentBoard)
+            .orderBy("chapterNumber")
+            .get();
+          courseDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
+          getRedis().set(coursesKey, courseDocs, { ex: TTL.seekhoCourses }).catch(() => {});
+        }
+      } catch {
         const snap = await db
           .collection("seekho_courses")
           .where("class", "==", studentClass)
@@ -374,16 +388,9 @@ export const seekhoGetDailyStudyPlan = functionsV1
           .orderBy("chapterNumber")
           .get();
         courseDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
-        getRedis().set(coursesKey, courseDocs, { ex: TTL.seekhoCourses }).catch(() => {});
       }
-    } catch {
-      const snap = await db
-        .collection("seekho_courses")
-        .where("class", "==", studentClass)
-        .where("board", "==", studentBoard)
-        .orderBy("chapterNumber")
-        .get();
-      courseDocs = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
+      // Drafts stay hidden; docs seeded before isPublished existed count as published.
+      courseDocs = courseDocs.filter(({ data }) => data.isPublished !== false);
     }
 
     const progressSnap = await db

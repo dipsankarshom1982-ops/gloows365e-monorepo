@@ -45,6 +45,13 @@ export * from "./hooks/useAppNotifications";
 // ─── Services ────────────────────────────────────────────────────────────
 export * from "./services/aiGuruApi";
 
+// ─── Education structure ─────────────────────────────────────────────────
+export * from "./education/classes";
+export * from "./education/contentTargeting";
+export * from "./education/classFeatureGates";
+export * from "./education/learnFunSelection";
+export * from "./education/subjects";
+
 // ─── Types ───────────────────────────────────────────────────────────────
 export * from "./types/aiGuru";
 export * from "./types/booking";

@@ -17,7 +17,7 @@ import {
   getDownloadURL, deleteObject,
 } from "firebase/storage";
 import { useTheme } from "@/context/ThemeContext";
-import { useStudentProfile } from "@gloows/shared-logic";
+import { SUPPORTED_CLASS_LEVEL_STRINGS, useStudentProfile } from "@gloows/shared-logic";
 import { INDIAN_LANGUAGES } from "@/lib/languages";
 import { TITLES, defaultAvatarForTitle } from "@/lib/avatars";
 
@@ -28,7 +28,7 @@ import { TITLES, defaultAvatarForTitle } from "@/lib/avatars";
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 5MB
 
 // ─── Constants ────────────────────────────────────────────────
-const CLASS_OPTIONS    = ["4", "6", "7", "8", "9", "10", "11", "12"];
+const CLASS_OPTIONS    = [...SUPPORTED_CLASS_LEVEL_STRINGS];
 const BOARDS           = ["CBSE", "ICSE", "State Board", "IB", "IGCSE"];
 const INTEREST_OPTIONS = ["GK", "Science", "Math", "History", "Geography", "English", "Coding", "Arts"];
 

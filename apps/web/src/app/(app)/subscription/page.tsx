@@ -39,6 +39,7 @@ import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import { useTheme } from "@/context/ThemeContext";
 import { useAppConfig } from "@/context/AppConfigContext";
+import { isPrimaryClassLevel, useStudentProfile } from "@gloows/shared-logic";
 import { getSubscriptionStatus, type SubscriptionStatus } from "@/services/aiGuruFirestore";
 import {
   getMyInvoices,
@@ -72,6 +73,9 @@ export default function SubscriptionPage() {
   const router = useRouter();
   const { colors, isDarkMode } = useTheme();
   const { plans, configLoading } = useAppConfig();
+  const { studentProfile } = useStudentProfile();
+  // Discover isn't offered to Class 3–5, so its plans aren't advertised to them either.
+  const hideDiscover = isPrimaryClassLevel(studentProfile?.class);
 
   const [sub, setSub] = useState<SubscriptionStatus | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
@@ -142,7 +146,7 @@ export default function SubscriptionPage() {
   // Group active, purchasable plans by module — one summary card per
   // module that actually has a checkout page, never the whole plan-picker
   // UI duplicated here.
-  const moduleSummaries = Object.entries(MODULE_CHECKOUT_ROUTES).map(([moduleId, meta]) => {
+  const moduleSummaries = Object.entries(MODULE_CHECKOUT_ROUTES).filter(([moduleId]) => !(hideDiscover && moduleId === "discover")).map(([moduleId, meta]) => {
     const modulePlans = plans.filter((p) => p.module === moduleId && p.monthlyPrice > 0);
     if (modulePlans.length === 0) return null;
     const cheapest = Math.min(...modulePlans.map((p) => p.monthlyPrice));

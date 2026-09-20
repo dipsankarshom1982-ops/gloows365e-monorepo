@@ -1,5 +1,5 @@
 import { useTheme } from "@/context/ThemeContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { isPrimaryClassLevel, useStudentProfile } from "@gloows/shared-logic";
 import { PLAN_CONFIG, RAZORPAY_KEY_ID } from "@/lib/seekho/constants";
 import { useSeekhoAccess } from "@/hooks/useSeekhoAccess";
 import { Ionicons } from "@expo/vector-icons";
@@ -44,13 +44,38 @@ const FREE_FEATURES = [
 
 export default function SeekhoSubscriptionScreen() {
   const { colors } = useTheme();
-  const { user } = useStudentProfile();
+  const { user, studentProfile } = useStudentProfile();
   const { forClass } = useLocalSearchParams<{ forClass?: string }>();
   const { subscription, isPro, isPlus, reload } = useSeekhoAccess();
 
   const [selectedPlan, setSelectedPlan] = useState<Plan>("plus");
   const [cycle, setCycle] = useState<Cycle>("monthly");
   const [loading, setLoading] = useState(false);
+
+  // Class 3–5: no Seekho content exists yet, so no plan is offered — a direct
+  // link to this screen gets a clear message instead of a purchase page.
+  if (isPrimaryClassLevel(studentProfile?.class)) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, gap: 12 }}>
+          <Text style={{ fontSize: 48 }}>🌱</Text>
+          <Text style={{ fontSize: 20, fontWeight: "900", textAlign: "center", color: colors.text }}>
+            Seekho is coming soon for your class
+          </Text>
+          <Text style={{ fontSize: 14, lineHeight: 21, textAlign: "center", color: colors.textSecondary }}>
+            We're preparing video lessons for your class. There's nothing to buy yet.
+          </Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))}
+            style={{ marginTop: 12, backgroundColor: "#4f46e5", borderRadius: 14, paddingVertical: 12, paddingHorizontal: 28 }}
+          >
+            <Text style={{ color: "#fff", fontSize: 14, fontWeight: "800" }}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const defaultClass = forClass ? Number(forClass) : 10;
   const plan = PLAN_CONFIG[selectedPlan];

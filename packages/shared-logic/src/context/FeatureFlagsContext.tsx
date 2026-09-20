@@ -22,6 +22,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { doc, onSnapshot } from "firebase/firestore";
 import { getSharedDb } from "../lib/firebaseConfig";
 import { useStudentProfile } from "./StudentProfileContext";
+import { isFeatureHiddenForClass } from "../education/classFeatureGates";
 
 type FlagMap = Record<string, boolean>;
 
@@ -46,7 +47,7 @@ const FeatureFlagsContext = createContext<FeatureFlagsContextType>({
 export const useFeatureFlags = () => useContext(FeatureFlagsContext);
 
 export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
-  const { user } = useStudentProfile();
+  const { user, studentProfile } = useStudentProfile();
   const [homeFlags, setHomeFlags]     = useState<FlagMap>({});
   const [aiFlags, setAiFlags]         = useState<FlagMap>({});
   const [drawerFlags, setDrawerFlags] = useState<FlagMap>({});
@@ -83,8 +84,12 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
     return () => { u1(); u2(); u3(); };
   }, [isTester]);
 
-  const homeSection = (key: string) => isTester ? true : (homeFlags[key]   ?? true);
-  const aiGuru      = (key: string) => isTester ? true : (aiFlags[key]     ?? true);
+  // Class 3–5 never see Discover (a college/career advisor whose server route
+  // returns 403 for them). Applied before the tester bypass so a Class 3–5 test
+  // account sees the same experience a real Class 3–5 student does.
+  const studentClass = studentProfile?.class;
+  const homeSection = (key: string) => isFeatureHiddenForClass("homeSection", key, studentClass) ? false : isTester ? true : (homeFlags[key] ?? true);
+  const aiGuru      = (key: string) => isFeatureHiddenForClass("aiGuru", key, studentClass)      ? false : isTester ? true : (aiFlags[key]   ?? true);
   const drawerItem  = (key: string) => key === "home" ? true : isTester ? true : (drawerFlags[key] ?? true);
 
   return (

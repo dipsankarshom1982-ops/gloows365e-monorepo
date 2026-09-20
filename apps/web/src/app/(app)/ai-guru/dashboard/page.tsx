@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useStudentProfile } from "@gloows/shared-logic";
+import { isPrimaryClassLevel, useStudentProfile } from "@gloows/shared-logic";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import { FREE_DAILY_LESSONS, FREE_DAILY_FOLLOWUPS } from "@/lib/aiGuru/constants";
@@ -281,7 +281,7 @@ export default function AiDashboardPage() {
         {/* ── 7. Quick actions ── */}
         <div style={{ color: textPrimary, fontSize: 16, fontWeight: 800, margin: "20px 0 10px" }}>⚡ {t("quickActions", "Quick Actions")}</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 4 }}>
-          {QUICK_ACTIONS.map((action) => (
+          {QUICK_ACTIONS.filter((action) => !(isPrimaryClassLevel(studentProfile?.class) && action.route === "/discover")).map((action) => (
             <Link key={action.label} href={action.route} className="ag-link" style={{ width: "calc(50% - 6px)" }}>
               <div style={{ height: 88, borderRadius: 18, background: action.gradient, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
                 <span style={{ fontSize: 28 }}>{action.emoji}</span>

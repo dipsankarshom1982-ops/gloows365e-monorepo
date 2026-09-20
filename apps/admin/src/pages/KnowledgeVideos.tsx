@@ -5,7 +5,10 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import ToggleSwitch from "../components/ToggleSwitch";
 
-interface Video { id: string; title: string; thumbnailUrl?: string; subject?: string; board?: string; chapter?: string; isApproved: boolean; }
+interface Video { id: string; title: string; thumbnailUrl?: string; subject?: string; board?: string; chapter?: string; isActive?: boolean; isApproved?: boolean; }
+
+// isActive is what student clients query; older docs may only have isApproved.
+const isVisible = (v: Video) => v.isActive ?? v.isApproved ?? false;
 
 export default function KnowledgeVideos() {
   const [videos, setVideos]   = useState<Video[]>([]);
@@ -20,8 +23,8 @@ export default function KnowledgeVideos() {
   }, []);
 
   const toggle = async (id: string, current: boolean) => {
-    await updateDoc(doc(db, "knowledgeVideos", id), { isApproved: !current });
-    setVideos((prev) => prev.map((v) => v.id === id ? { ...v, isApproved: !current } : v));
+    await updateDoc(doc(db, "knowledgeVideos", id), { isActive: !current, isApproved: !current });
+    setVideos((prev) => prev.map((v) => v.id === id ? { ...v, isActive: !current, isApproved: !current } : v));
   };
 
   const filtered = videos.filter((v) => {
@@ -52,7 +55,7 @@ export default function KnowledgeVideos() {
                 <th className="text-left p-4">Video</th>
                 <th className="text-left p-4">Subject</th>
                 <th className="text-left p-4">Board / Chapter</th>
-                <th className="text-right p-4">Approved</th>
+                <th className="text-right p-4">Active</th>
                 <th className="text-right p-4">Edit</th>
               </tr>
             </thead>
@@ -71,7 +74,7 @@ export default function KnowledgeVideos() {
                   </td>
                   <td className="p-4 text-slate-400">{v.subject ?? "—"}</td>
                   <td className="p-4 text-slate-400 text-xs">{[v.board, v.chapter].filter(Boolean).join(" · ") || "—"}</td>
-                  <td className="p-4 text-right"><ToggleSwitch value={v.isApproved} onChange={() => toggle(v.id, v.isApproved)} /></td>
+                  <td className="p-4 text-right"><ToggleSwitch value={isVisible(v)} onChange={() => toggle(v.id, isVisible(v))} /></td>
                   <td className="p-4 text-right"><Link to={`/knowledge-videos/${v.id}`} className="text-indigo-400 hover:text-indigo-300 text-xs">Edit →</Link></td>
                 </motion.tr>
               ))}

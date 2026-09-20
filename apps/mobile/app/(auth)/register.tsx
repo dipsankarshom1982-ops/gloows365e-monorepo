@@ -26,7 +26,13 @@ if (Platform.OS !== "web") {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
-import { STUDENT_STREAMS, StudentStream } from "@gloows/shared-logic";
+import {
+  CLASS_RANGE_LABEL,
+  STREAM_CLASS_LEVELS,
+  STUDENT_STREAMS,
+  StudentStream,
+  SUPPORTED_CLASS_LEVEL_STRINGS,
+} from "@gloows/shared-logic";
 import { auth, db, firebaseConfig, functions } from "@/lib/firebase";
 import { ensureReferralCode } from "@/lib/initUser";
 import { ensureStudentId } from "@/services/studentIdService";
@@ -71,7 +77,7 @@ function RestartEducationBlock({
         <View style={block.card}>
           <Text style={block.cardTitle}>About this platform</Text>
           <Text style={block.cardBody}>
-            GLOOWS365E is designed for current school students in Class 6–12
+            GLOOWS365E is designed for current school students in {CLASS_RANGE_LABEL}
             (under 18 years of age).{"\n\n"}
             Based on your age ({age} years), you are eligible for our{" "}
             <Text style={block.highlight}>Restart My Education</Text> programme
@@ -219,8 +225,8 @@ export default function StudentRegister() {
   const recaptchaRef = useRef<RecaptchaVerifierHandle>(null);
 
   const boards       = ["CBSE", "ICSE", "State Board", "Other"];
-  const classOptions = ["6", "7", "8", "9", "10", "11", "12"];
-  const streamClasses = ["11", "12"];
+  const classOptions = SUPPORTED_CLASS_LEVEL_STRINGS;
+  const streamClasses = STREAM_CLASS_LEVELS.map(String);
   const isStreamClass = streamClasses.includes(studentClass);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────

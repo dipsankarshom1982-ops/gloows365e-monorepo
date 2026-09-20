@@ -12,7 +12,7 @@ import {
   where, limit, onSnapshot, doc,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { useFeatureFlags, useStudentProfile } from "@gloows/shared-logic";
+import { isPrimaryClassLevel, isTargetedAtClass, useFeatureFlags, useStudentProfile } from "@gloows/shared-logic";
 import { useContests } from "@/hooks/useContests";
 import { useUserContests } from "@/hooks/useUserContests";
 import { useAppTranslation } from "@/context/LanguageContext";
@@ -83,7 +83,7 @@ interface AdItem {
 
 interface KBVideo {
   id: string; title: string; thumbnailUrl?: string; videoUrl?: string;
-  category?: string; duration?: string; viewsCount?: number;
+  category?: string; duration?: string; viewsCount?: number; targetClass?: string[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -916,6 +916,7 @@ const KB_CATS = [
 function KnowledgeHubSection() {
   const { t } = useAppTranslation();
   const router = useRouter();
+  const { studentProfile } = useStudentProfile();
   const [videos, setVideos] = useState<KBVideo[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCat, setActiveCat] = useState("All");
@@ -924,14 +925,45 @@ function KnowledgeHubSection() {
     (async () => {
       try {
         const db = getFirestore();
-        const snap = await getDocs(query(collection(db, "knowledgeVideos"), where("isActive", "==", true), limit(10)));
+        // isActive is the one visibility field (the admin form now writes it).
+        // Fetch a wider page than is shown, since class targeting filters it down below.
+        const snap = await getDocs(query(collection(db, "knowledgeVideos"), where("isActive", "==", true), limit(30)));
         setVideos(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as KBVideo));
       } catch { setVideos([]); }
       finally { setLoading(false); }
     })();
   }, []);
 
-  const filtered = activeCat === "All" ? videos : videos.filter((v) => v.category === activeCat);
+  const classVideos = videos.filter((v) => isTargetedAtClass(v.targetClass, studentProfile?.class)).slice(0, 10);
+  const filtered = activeCat === "All" ? classVideos : classVideos.filter((v) => v.category === activeCat);
+
+  // Class 3–5 only see videos explicitly targeted at their class (or "all").
+  // Until some exist, show one clear card instead of category chips over an empty row.
+  const showPrimaryEmpty = isPrimaryClassLevel(studentProfile?.class) && !loading && classVideos.length === 0;
+
+  if (showPrimaryEmpty) {
+    return (
+      <div style={{ marginBlock: 16 }}>
+        <div style={{ padding: "0 16px" }}>
+          <SectionHeader
+            title={t("knowledgeHubTitle", "Knowledge Hub")}
+            sub={t("knowledgeHubSub", "Videos to grow your mind")}
+            viewLabel={t("watchMore", "Watch More")}
+            onView={() => router.push("/knowledge-hub")}
+          />
+          <div
+            role="status"
+            style={{ marginTop: 6, padding: "28px 16px", textAlign: "center", borderRadius: 16, border: "1px solid var(--border)", background: "var(--bg-card)" }}
+          >
+            <div style={{ fontSize: 32 }} aria-hidden="true">🌱</div>
+            <div style={{ marginTop: 8, fontSize: 13, color: "var(--text-muted)" }}>
+              Videos picked for your class are coming soon. We&apos;re adding them now!
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ marginBlock: 16 }}>

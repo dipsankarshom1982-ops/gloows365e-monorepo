@@ -2,6 +2,7 @@ import * as admin from "firebase-admin";
 import { onRequest } from "firebase-functions/v2/https";
 import { callGeminiText } from "./gemini";
 import { getRedis, RK, TTL, todayIST } from "./redish";
+import { getClassLevelInstruction, resolveStudentClassLevel } from "./aiStudentContext";
 
 const db = admin.firestore();
 
@@ -25,7 +26,7 @@ async function verifyAuthToken(req: any): Promise<string> {
 
 function buildInsightPrompt(
   studentName: string,
-  classLevel: string | number,
+  classLevel: number | null,
   board: string,
   interests: string[],
   learnScore: number,
@@ -36,14 +37,15 @@ function buildInsightPrompt(
   const langNote = language !== "English"
     ? `Write the tip in ${language}.`
     : "Write the tip in friendly English.";
+  const levelInstruction = getClassLevelInstruction(classLevel);
 
   return `You are a caring AI study coach for Indian school students.
 
-Student: ${studentName}, Class ${classLevel}, Board: ${board}
+Student: ${studentName}${classLevel === null ? "" : `, Class ${classLevel}`}, Board: ${board}
 Interests: ${interestStr}
 LearnScore: ${learnScore}/100
 Revision concepts due today: ${revisionDueCount}
-${langNote}
+${langNote}${levelInstruction ? `\n${levelInstruction}` : ""}
 
 Write a SHORT, warm, personalised daily study tip for ${studentName}:
 - Exactly 2-3 sentences. No more.
@@ -100,12 +102,14 @@ export const getPersonalizedDashboard = onRequest(
       // ── Parse request body ────────────────────────────────────────────────────
       const {
         studentName = "Student",
-        classLevel  = "10",
         board       = "CBSE",
         interests   = [] as string[],
         language    = "English",
         learnScore  = 0,
       } = req.body;
+
+      // Class comes from the student's own profile, never the body — see aiStudentContext.ts.
+      const classLevel = await resolveStudentClassLevel(uid, db);
 
       const today = todayIST();
       const now   = Date.now();
@@ -136,11 +140,13 @@ export const getPersonalizedDashboard = onRequest(
             .get(),
           // 5. Seekho courses (via Redis cache)
           (async () => {
-            const cacheK = RK.seekhoCourses(Number(classLevel), board);
+            // No class on record → no courses, rather than another class's.
+            if (classLevel === null) return [];
+            const cacheK = RK.seekhoCourses(classLevel, board);
             const hit = await redis.get<any[]>(cacheK);
             if (hit) return typeof hit === "string" ? JSON.parse(hit) : hit;
             const snap = await db.collection("seekho_courses")
-              .where("class", "==", Number(classLevel))
+              .where("class", "==", classLevel)
               .where("board", "==", board)
               .limit(20)
               .get();

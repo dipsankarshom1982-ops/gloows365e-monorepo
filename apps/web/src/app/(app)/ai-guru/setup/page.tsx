@@ -10,7 +10,7 @@ import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import type { Colors } from "@/context/ThemeContext";
 import {
-  SUBJECTS, SUBJECT_ICONS,
+  getSubjectsForClass, SUBJECT_ICONS,
   LANGUAGES, DIFFICULTIES, DIFFICULTY_DESC,
   LESSON_STYLES, LESSON_STYLE_DESC,
 } from "@/lib/aiGuru/constants";
@@ -78,7 +78,7 @@ export default function LessonSetupPage() {
         {/* Subject */}
         <Section label={`📚 ${t("subjectLabel", "Subject")}`} required colors={colors}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-            {SUBJECTS.map((s) => {
+            {getSubjectsForClass(studentProfile?.class).map((s) => {
               const active = subject === s;
               return (
                 <button key={s} className="su-btn" onClick={() => setSubject(s)} style={{

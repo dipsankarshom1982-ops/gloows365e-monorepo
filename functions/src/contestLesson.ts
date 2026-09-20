@@ -3,13 +3,17 @@ import * as functionsV1 from "firebase-functions/v1";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
 import { validateLessonJson } from "./validateLesson";
 import { deriveAnswerKey, sanitizeQuizForClient, quizLooksUnsplit } from "./contestQuizAnswerKey";
+import { isPrimaryOnlyTarget } from "./vidyastarEligibility";
 
-function buildContestLessonPrompt(title: string, description: string, language: string): string {
+function buildContestLessonPrompt(title: string, description: string, language: string, primaryOnly = false): string {
+  const teachingLevel = primaryOnly
+    ? "Teach at an early-primary level (Class 3–5): short, simple sentences, familiar everyday examples, no technical vocabulary."
+    : "Teach at a general school level.";
   return `You are AI Guru, a friendly Indian AI teacher for school students.
 Convert the following contest topic into an interactive self-learning lesson.
-Rules: Teach at a general school level. Write ALL user-facing text (titles, narration,
+Rules: ${teachingLevel} Write ALL user-facing text (titles, narration,
 questions, options, explanations, everything except the JSON field names themselves)
-in ${language}. Style: Simple Explanation. Difficulty: Standard.
+in ${language}. Style: Simple Explanation. Difficulty: ${primaryOnly ? "Easy" : "Standard"}.
 Keep each narration under 120 words. Use Indian examples. Return ONLY valid JSON, no markdown.
 
 Contest Title: ${title}
@@ -32,6 +36,8 @@ Rules:
 - gradientStart: a dark hex color (e.g. "#0f0c29")
 - gradientEnd: a vibrant/colorful hex color (e.g. "#7c3aed")`;
 }
+
+export { buildContestLessonPrompt };
 
 const FALLBACK_BANNER = { emoji: "🌟", tagline: "Learn, Compete & Shine!", gradientStart: "#0f0c29", gradientEnd: "#7c3aed" };
 
@@ -168,11 +174,11 @@ export const getContestLesson = functionsV1
     if (!contestSnap.exists) {
       throw new functionsV1.https.HttpsError("not-found", "Contest not found");
     }
-    const { title = "", description = "" } = contestSnap.data()!;
+    const { title = "", description = "", targetClass } = contestSnap.data()!;
 
     try {
       const [lessonRaw, bannerRaw] = await Promise.all([
-        callGeminiText(buildContestLessonPrompt(title, description, language)),
+        callGeminiText(buildContestLessonPrompt(title, description, language, isPrimaryOnlyTarget(targetClass))),
         callGeminiText(buildBannerPrompt(title, description, language)),
       ]);
 

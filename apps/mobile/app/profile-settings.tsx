@@ -1,5 +1,10 @@
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
-import { STUDENT_STREAMS, StudentStream } from "@gloows/shared-logic";
+import {
+  STREAM_CLASS_LEVELS,
+  STUDENT_STREAMS,
+  StudentStream,
+  SUPPORTED_CLASS_LEVEL_STRINGS,
+} from "@gloows/shared-logic";
 import Header from "@/components/header";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -28,8 +33,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 // ─── Constants ─────────────────────────────────────────────
-const CLASS_OPTIONS: string[] = ["4", "6", "7", "8", "9", "10", "11", "12"];
-const STREAM_CLASSES: string[] = ["11", "12"];
+const CLASS_OPTIONS: string[] = [...SUPPORTED_CLASS_LEVEL_STRINGS];
+const STREAM_CLASSES: string[] = STREAM_CLASS_LEVELS.map(String);
 const BOARDS: string[] = ["CBSE", "ICSE", "State Board", "IB", "IGCSE"];
 const INTEREST_OPTIONS: string[] = ["GK", "Science", "Math", "History", "Geography", "English", "Coding", "Arts"];
 

@@ -6,6 +6,7 @@ import { checkAskGuruLimit, incrementAskGuruUsage } from "./usageCheck";
 import { refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { callGeminiText } from "./gemini";
 import { resolveStudentLanguage, getDetectOrFallbackInstruction } from "./aiLanguage";
+import { boardClassPhrase, getClassLevelInstruction, resolveStudentClassLevel } from "./aiStudentContext";
 
 const db = admin.firestore();
 const FREE_ASK_GURU_DAILY = 5;
@@ -44,14 +45,15 @@ async function verifyAuthToken(req: any): Promise<string> {
 // now shared across every Ask AI Guru feature.
 function buildPrompt(
   question: string,
-  classLevel: string | number,
+  classLevel: number | null,
   board: string,
   mode: string,
   preferredLanguage: string
 ): string {
-  const base = `You are an expert AI tutor for Indian school students (${board}, Class ${classLevel}).
+  const levelInstruction = getClassLevelInstruction(classLevel);
+  const base = `You are an expert AI tutor for Indian school students (${boardClassPhrase(board, classLevel)}).
 
-${getDetectOrFallbackInstruction(preferredLanguage)}
+${getDetectOrFallbackInstruction(preferredLanguage)}${levelInstruction ? `\n${levelInstruction}` : ""}
 Do NOT start with "Sure," "Great question!" or "Of course!" — go directly to the content.
 Do NOT use markdown symbols like **, ##, or bullet points — plain text only.`;
 
@@ -75,7 +77,7 @@ Keep it sharp and exam-focused.`,
 
     summarize: `Summarise this chapter or topic in exactly 5 key points. Number them 1 to 5. Each point must be one clear sentence. End with: "Most important: [the single most critical concept]"`,
 
-    tip: `Give one personalised daily study tip for a Class ${classLevel} ${board} student asking about: "${question}". Make it specific, actionable, and encouraging. 2–3 sentences maximum.`,
+    tip: `Give one personalised daily study tip for a ${classLevel === null ? "" : `Class ${classLevel} `}${board} student asking about: "${question}". Make it specific, actionable, and encouraging. 2–3 sentences maximum.`,
 
     language: `The student wants to understand this in their own language. Detect their language from the question — if the question is in English or the language isn't clear, use ${preferredLanguage}, the student's chosen app language, instead. Give a warm, teacher-like explanation in that language. Use simple everyday words — avoid technical jargon. 4–6 sentences.`,
   };
@@ -90,6 +92,8 @@ Student's question: "${question}"
 
 Answer:`;
 }
+
+export { buildPrompt as buildAskAiGuruPrompt };
 
 export const askAiGuruQuestion = onRequest(
   {
@@ -110,9 +114,10 @@ export const askAiGuruQuestion = onRequest(
       return;
     }
 
+    // classLevel is deliberately NOT read from the body: the class always
+    // comes from the student's own profile (see aiStudentContext.ts).
     const {
       question   = "",
-      classLevel = "10",
       board      = "CBSE",
       mode       = "doubt",   // new param — default to doubt
     } = req.body;
@@ -129,6 +134,7 @@ export const askAiGuruQuestion = onRequest(
     // priority order (request → saved preference → English default) used
     // by every Ask AI Guru feature.
     const preferredLanguage = await resolveStudentLanguage(uid, db);
+    const classLevel = await resolveStudentClassLevel(uid, db);
 
     // Usage check — pays with an AI Guru credit once the free daily limit
     // is exceeded (unless already premium, which bypasses this entirely).

@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import axios from "axios";
+import { isStreamClassLevel, MAX_CLASS_LEVEL, MIN_CLASS_LEVEL, parseClassLevel } from "./educationConfig";
 
 const FIREBASE_API_KEY = "AIzaSyCpS6KjmnGAD5vCuB_swM2SWRd6-nhoiys";
 
@@ -269,8 +270,6 @@ export const getUserSubscriptionHistory = onCall(async (request) => {
 // correction UI. Deliberately narrow: only ever touches these three fields,
 // never anything a student earns/accrues (XP, streak, V-Coins all live
 // elsewhere and this function doesn't import/touch them at all).
-const STUDENT_CLASSES = [6, 7, 8, 9, 10, 11, 12];
-const STUDENT_STREAM_CLASSES = [11, 12];
 const STUDENT_STREAMS = ["Science", "Commerce", "Arts/Humanities"];
 
 export const adminUpdateStudentProfile = onCall(async (request) => {
@@ -292,9 +291,9 @@ export const adminUpdateStudentProfile = onCall(async (request) => {
   const updates: Record<string, unknown> = {};
 
   if (rawClass !== undefined) {
-    const cls = Number(rawClass);
-    if (!STUDENT_CLASSES.includes(cls)) {
-      throw new HttpsError("invalid-argument", "class must be one of 6–12.");
+    const cls = parseClassLevel(rawClass);
+    if (cls === null) {
+      throw new HttpsError("invalid-argument", `class must be one of ${MIN_CLASS_LEVEL}–${MAX_CLASS_LEVEL}.`);
     }
     updates.class = String(cls);
   }
@@ -305,10 +304,10 @@ export const adminUpdateStudentProfile = onCall(async (request) => {
     // might change together (e.g. correcting "Class 10, no stream" to
     // "Class 11, Science" in one save).
     const effectiveClass = rawClass !== undefined
-      ? Number(rawClass)
-      : Number((await studentRef.get()).data()?.class ?? 0);
+      ? rawClass
+      : (await studentRef.get()).data()?.class;
 
-    if (STUDENT_STREAM_CLASSES.includes(effectiveClass)) {
+    if (isStreamClassLevel(effectiveClass)) {
       if (!stream || !STUDENT_STREAMS.includes(stream)) {
         throw new HttpsError("invalid-argument", "Class 11/12 requires a valid stream (Science, Commerce, or Arts/Humanities).");
       }

@@ -11,6 +11,7 @@ import { getRedis, todayIST, TTL, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
 import { tryDebitAiGuruCredit, refundAiGuruCredit } from "./aiGuruCreditDebit";
 import { resolveStudentLanguage, getLanguageInstruction } from "./aiLanguage";
+import { getClassLevelInstruction, resolveClassLevelForRequest } from "./aiStudentContext";
 
 const db = admin.firestore();
 const FREE_EXAMS_DAILY    = 1;  // free: 1 exam/day
@@ -31,7 +32,7 @@ async function verifyAuthToken(req: any): Promise<string> {
 }
 
 function buildExamPrompt(
-  classLevel: string,
+  classLevel: number,
   board: string,
   subject: string,
   chapter: string,
@@ -39,11 +40,12 @@ function buildExamPrompt(
   language: string,
   questionCount: number
 ): string {
+  const levelInstruction = getClassLevelInstruction(classLevel);
   return `You are an expert ${board} exam question setter for Class ${classLevel} ${subject}.
 
 Generate a ${difficulty} difficulty mock test for the chapter/topic: "${chapter}".
 
-${getLanguageInstruction(language)}
+${getLanguageInstruction(language)}${levelInstruction ? `\n${levelInstruction}` : ""}
 This applies to every text field below — examTitle, question, options, explanation, and concept — not just the questions themselves.
 
 Return ONLY a valid JSON object:
@@ -153,10 +155,18 @@ export const generateExam = onRequest(
       return;
     }
 
-    const { classLevel, board, subject, chapter, difficulty = "Standard", language: requestedLanguage, questionCount = 15 } = req.body ?? {};
+    const { classLevel: requestedClass, board, subject, chapter, difficulty = "Standard", language: requestedLanguage, questionCount = 15 } = req.body ?? {};
 
     if (!subject || !chapter) {
       res.status(400).json({ error: "subject and chapter are required", code: "MISSING_PARAMS" });
+      return;
+    }
+
+    // Class 3–5 students are pinned to their own class; older students may
+    // pick another supported class. No default class is ever assumed.
+    const classLevel = await resolveClassLevelForRequest(uid, db, requestedClass);
+    if (classLevel === null) {
+      res.status(400).json({ error: "Set your class in your profile to generate an exam.", code: "CLASS_REQUIRED" });
       return;
     }
 
@@ -223,7 +233,7 @@ export const generateExam = onRequest(
     // ── Generate exam ────────────────────────────────────────────────────────
     try {
       const prompt = buildExamPrompt(
-        classLevel ?? "10", board ?? "CBSE", subject, chapter,
+        classLevel, board ?? "CBSE", subject, chapter,
         difficulty, language, Math.min(Math.max(Number(questionCount), 10), 20)
       );
       const raw = await callGeminiText(prompt);

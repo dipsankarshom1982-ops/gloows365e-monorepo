@@ -19,6 +19,7 @@
 
 import * as admin from "firebase-admin";
 import * as functionsV1 from "firebase-functions/v1";
+import { checkContestClassEligibility } from "./vidyastarEligibility";
 
 const db = admin.firestore();
 
@@ -59,6 +60,21 @@ export const joinVidyastarContest = functionsV1
 
       if (participantSnap.exists) {
         return { status: "already_joined" as const };
+      }
+
+      // Class eligibility comes from the student's own profile, never from
+      // client input, so a client can't join a contest meant for another class.
+      const eligibility = checkContestClassEligibility(
+        contest.targetClass,
+        studentSnap.exists ? studentSnap.data()?.class : undefined
+      );
+      if (!eligibility.eligible) {
+        throw new functionsV1.https.HttpsError(
+          "permission-denied",
+          eligibility.reason === "no-class"
+            ? "Set your class in your profile to join this contest."
+            : "This contest isn't open for your class."
+        );
       }
 
       const totalSpots  = Number(contest.totalSpots) || 0;

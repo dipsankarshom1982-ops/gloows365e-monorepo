@@ -27,6 +27,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import axios from "axios";
 import { getRedis, todayIST, RK } from "./redish";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
+import { parseClassLevel } from "./educationConfig";
 
 const db = admin.firestore();
 
@@ -214,7 +215,11 @@ export const getTodaysStreakQuizQuestion = functionsV1
       throw new functionsV1.https.HttpsError("not-found", "Student profile not found");
     }
     const student = studentSnap.data()!;
-    const studentClass = Number(student.class ?? 0);
+    // Only the student's own class is ever queried — no cross-class fallback.
+    // A missing/unsupported class gets the same "no question" answer as a
+    // class with nothing published, never another class's question.
+    const studentClass = parseClassLevel(student.class);
+    if (studentClass === null) return null;
     const studentStream: string | null = student.stream ?? null;
     const preferredLanguage: string = student.preferredLanguage ?? "English";
     const today = todayIST();
