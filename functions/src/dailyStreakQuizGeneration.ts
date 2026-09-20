@@ -110,8 +110,8 @@ const LOOKBACK_DAYS = 30;
 
 const MAX_ATTEMPTS = 3;
 
-// The scheduler's hard timeout is 540s; stop starting new slots after 360s so an in-flight slot can finish.
-const SCHEDULER_TIME_BUDGET_MS = 360_000;
+// The scheduler's hard timeout is 540s; stop starting new slots after 420s so an in-flight slot has the remaining 120s to finish.
+const SCHEDULER_TIME_BUDGET_MS = 420_000;
 // Lowered 2026-09-15 from 0.75 after real-generation testing showed 0.75
 // failed to catch even the brief's own worked example ("What is the
 // largest planet in our solar system?" vs "Which is the biggest planet in
@@ -700,14 +700,14 @@ async function ensureQuestionGenerated(
 }
 
 // ─── generateDailyStreakQuizQuestions (scheduled) ───────────────────────────
-// Runs after the existing 18:00 IST dailyStreakQuizReminder (dailyStreakQuiz.ts)
+// Runs after the existing 12:30 IST dailyStreakQuizReminder (dailyStreakQuiz.ts)
 // so the two never race on the same Firestore paths. 14 slots/day × 2
 // buffer days = 28 ensureQuestionGenerated calls per run, most of which
 // no-op (already-active) on any given day.
 
 export const generateDailyStreakQuizQuestions = onSchedule(
   {
-    schedule: "0 15 * * *", // 15:00 UTC = 20:30 IST
+    schedule: "0 15 * * *", // 15:00 IST (timeZone below is Asia/Kolkata)
     timeZone: "Asia/Kolkata",
     memory: "512MiB",
     timeoutSeconds: 540,

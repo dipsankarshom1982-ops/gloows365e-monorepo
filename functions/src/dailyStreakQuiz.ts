@@ -622,7 +622,7 @@ export const applyForAmbassadorProgram = functionsV1
 
 export const dailyStreakQuizReminder = onSchedule(
   {
-    schedule: "30 12 * * *", // 12:30 UTC = 18:00 IST
+    schedule: "30 12 * * *", // 12:30 IST (timeZone below is Asia/Kolkata)
     timeZone: "Asia/Kolkata",
     memory: "256MiB",
   },
