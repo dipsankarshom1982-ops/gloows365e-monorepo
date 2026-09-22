@@ -59,11 +59,26 @@ describe("resolveClassLevelForRequest — exam/lesson class", () => {
     }
   });
 
-  test("a student with no class uses a supported request, else gets null — never a default", async () => {
-    await expect(resolveClassLevelForRequest("u1", seed(undefined), "10")).resolves.toBe(10);
-    await expect(resolveClassLevelForRequest("u1", seed(undefined), undefined)).resolves.toBeNull();
-    await expect(resolveClassLevelForRequest("u1", seed(undefined), "2")).resolves.toBeNull();
-  });
+  // FIX (Stage 2.2, F4 — staging QA finding): a student with no valid class
+  // on their own profile used to still have a client-supplied class
+  // honored (`parseClassLevel(requested) ?? own` falls through to
+  // `requested` when `own` is null) — so anyone without a profile class
+  // could pick an arbitrary class purely from the request body. It must
+  // now always resolve to null (CLASS_REQUIRED) regardless of what the
+  // client sends, same as an unsupported stored class.
+  test.each(["10", 8, "12", undefined, "junk", "2"])(
+    "a student with NO class on their profile always gets null, even when the request supplies %p",
+    async (requested) => {
+      await expect(resolveClassLevelForRequest("u1", seed(undefined), requested)).resolves.toBeNull();
+    }
+  );
+
+  test.each(["10", 8, undefined])(
+    "a student with an UNSUPPORTED stored class ('2') always gets null, even when the request supplies %p",
+    async (requested) => {
+      await expect(resolveClassLevelForRequest("u1", seed("2"), requested)).resolves.toBeNull();
+    }
+  );
 });
 
 describe("class-level prompt guidance", () => {

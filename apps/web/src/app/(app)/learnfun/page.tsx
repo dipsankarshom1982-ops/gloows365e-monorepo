@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { getAuth } from "firebase/auth";
 import { getFirestore, doc, onSnapshot } from "firebase/firestore";
+import { isPrimaryClassLevel, useStudentProfile } from "@gloows/shared-logic";
 
 // ─── Types (mirrors mobile lib/learnfun/types.ts) ─────────────
 interface SkillWorld {
@@ -87,8 +88,23 @@ function useLearnFun() {
 // ─── Main ─────────────────────────────────────────────────────
 export default function LearnFunPage() {
   const { xp, coins, level } = useLearnFun();
+  const { studentProfile } = useStudentProfile();
   const daysUntilFriday = getDaysUntilFriday();
   const xpProgress = xp % 100;
+
+  // F2 (Stage 2.2): mirrors the existing Class 3–5 behaviour already shipped
+  // on mobile (app/(drawer)/(tabs)/learnFun.tsx) — Boss Battle isn't offered
+  // to Class 3–5 at all, and neither are the Class 6–12 games (none of them
+  // have been reviewed for that age group). Uses the same isPrimaryClassLevel
+  // gate every other Stage 2.1 web page already uses (Discover, Seekho,
+  // Knowledge Hub, AI Guru dashboard) rather than a new Web-only rule.
+  const isPrimary = isPrimaryClassLevel(studentProfile?.class);
+  // "Career Quest" (hard) and "Boss Battle" (hard) are the two Skill-World
+  // cards that promote Class 6+ content — the only ones filtered here;
+  // Financial Wisdom/Digital Safety/Life Choices/Time Mastery stay visible
+  // as general, non-class-specific skill categories.
+  const visibleWorlds = isPrimary ? SKILL_WORLDS.filter((w) => w.difficulty !== "hard") : SKILL_WORLDS;
+  const visibleGames = isPrimary ? [] : GAMES;
 
   return (
     <div style={{ paddingBottom: 40 }}>
@@ -143,36 +159,38 @@ export default function LearnFunPage() {
         </div>
       </div>
 
-      {/* ── Boss Battle banner ── */}
-      <div style={{ margin: "0 14px 16px" }}>
-        <div style={{
-          background: "linear-gradient(135deg, #450A0A, #991B1B)",
-          borderRadius: 18, padding: 16,
-          border: "1.5px solid rgba(239,68,68,0.4)",
-          display: "flex", alignItems: "center", gap: 12,
-        }}>
-          <div style={{ fontSize: 36 }}>⚡</div>
-          <div style={{ flex: 1 }}>
-            <div style={{ color: "#fff", fontSize: 15, fontWeight: 900 }}>Boss Battle</div>
-            <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, marginTop: 2 }}>
-              Weekly challenge · Resets in {daysUntilFriday} day{daysUntilFriday !== 1 ? "s" : ""}
-            </div>
-          </div>
-          <button style={{
-            background: "#EF4444", border: "none", borderRadius: 10,
-            padding: "9px 14px", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer",
+      {/* ── Boss Battle banner (not offered to Class 3–5) ── */}
+      {!isPrimary && (
+        <div style={{ margin: "0 14px 16px" }}>
+          <div style={{
+            background: "linear-gradient(135deg, #450A0A, #991B1B)",
+            borderRadius: 18, padding: 16,
+            border: "1.5px solid rgba(239,68,68,0.4)",
+            display: "flex", alignItems: "center", gap: 12,
           }}>
-            Fight!
-          </button>
+            <div style={{ fontSize: 36 }}>⚡</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: "#fff", fontSize: 15, fontWeight: 900 }}>Boss Battle</div>
+              <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, marginTop: 2 }}>
+                Weekly challenge · Resets in {daysUntilFriday} day{daysUntilFriday !== 1 ? "s" : ""}
+              </div>
+            </div>
+            <button style={{
+              background: "#EF4444", border: "none", borderRadius: 10,
+              padding: "9px 14px", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer",
+            }}>
+              Fight!
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ── Skill Worlds ── */}
       <div style={{ padding: "0 14px 6px", color: "var(--text-muted)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8 }}>
         Skill Worlds
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "0 14px", marginBottom: 20 }}>
-        {SKILL_WORLDS.map((world) => (
+        {visibleWorlds.map((world) => (
           <div key={world.id} style={{
             background: `linear-gradient(135deg, ${world.gradientColors[0]}, ${world.gradientColors[1]})`,
             borderRadius: 18, padding: 14,
@@ -193,12 +211,23 @@ export default function LearnFunPage() {
         ))}
       </div>
 
-      {/* ── All Games ── */}
+      {/* ── All Games (none reviewed for Class 3–5 yet — matches mobile) ── */}
       <div style={{ padding: "0 14px 6px", color: "var(--text-muted)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.8 }}>
         All Games
       </div>
+      {isPrimary && (
+        <div style={{
+          margin: "0 14px", padding: 24, textAlign: "center", borderRadius: 16,
+          border: "1px solid rgba(255,255,255,0.08)", background: "#1a1a2e",
+        }}>
+          <div style={{ fontSize: 28, marginBottom: 6 }}>🎮</div>
+          <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: 600 }}>
+            Games for your class are coming soon!
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "0 14px" }}>
-        {GAMES.map((game) => (
+        {visibleGames.map((game) => (
           <div key={game.id} style={{
             display: "flex", gap: 0, borderRadius: 16, overflow: "hidden",
             border: "1px solid rgba(255,255,255,0.08)",

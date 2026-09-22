@@ -116,4 +116,44 @@ describe("adminUpdateStudentProfile — class validation (Class 3–12)", () => 
       adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", stream: null }))
     ).resolves.toEqual({ success: true });
   });
+
+  // FIX (Stage 2.2, F1 — staging QA finding): "Class 11 Commerce -> Class 9"
+  // (a class-only edit, no `stream` key in the request at all) used to
+  // leave the old stream sitting on the profile, because stream was only
+  // ever touched when the request explicitly included it. A class change
+  // into a non-stream class must always clear the stream, whether or not
+  // the caller also happened to mention it.
+  test("moving a stream class to a non-stream class clears the stream, even without an explicit stream key", async () => {
+    fakeDb.seed("students/s1", { class: "11", stream: "Commerce" });
+    const { adminUpdateStudentProfile } = require("../adminManagement");
+    await expect(
+      adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", class: 9 }))
+    ).resolves.toEqual({ success: true });
+    expect(fakeDb.peek("students/s1")).toMatchObject({ class: "9", stream: null });
+  });
+
+  test("moving Class 12 Science to Class 5 clears the stream", async () => {
+    fakeDb.seed("students/s1", { class: "12", stream: "Science" });
+    const { adminUpdateStudentProfile } = require("../adminManagement");
+    await adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", class: 5 }));
+    expect(fakeDb.peek("students/s1")).toMatchObject({ class: "5", stream: null });
+  });
+
+  test("a class-only edit that STAYS within Class 11/12 (e.g. 11 -> 12) leaves an existing stream untouched", async () => {
+    fakeDb.seed("students/s1", { class: "11", stream: "Arts/Humanities" });
+    const { adminUpdateStudentProfile } = require("../adminManagement");
+    await adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", class: 12 }));
+    // Not required to have a stream (that's the pre-existing, deliberately
+    // permissive "no stream argument at all" allowance — see the
+    // 'ACCEPTED (leaves the student stream-less)' behaviour), but an
+    // EXISTING valid stream must not be silently wiped by an unrelated edit.
+    expect(fakeDb.peek("students/s1")).toMatchObject({ class: "12", stream: "Arts/Humanities" });
+  });
+
+  test("an edit that only touches parentGuardianName never clears an existing stream", async () => {
+    fakeDb.seed("students/s1", { class: "11", stream: "Science" });
+    const { adminUpdateStudentProfile } = require("../adminManagement");
+    await adminUpdateStudentProfile.run(ADMIN_REQUEST({ uid: "s1", parentGuardianName: "Asha's Parent" }));
+    expect(fakeDb.peek("students/s1")).toMatchObject({ class: "11", stream: "Science", parentGuardianName: "Asha's Parent" });
+  });
 });

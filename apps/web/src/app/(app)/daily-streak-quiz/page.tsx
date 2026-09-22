@@ -30,7 +30,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useStudentProfile } from "@gloows/shared-logic";
+import { isStreamClassLevel, useStudentProfile } from "@gloows/shared-logic";
 import { getFirestore, doc, onSnapshot } from "firebase/firestore";
 import {
   applyForAmbassadorProgram,
@@ -74,7 +74,12 @@ function quoteOfTheDay(): string {
 
 export default function DailyStreakQuizPage() {
   const router = useRouter();
-  const { user } = useStudentProfile();
+  const { user, studentProfile } = useStudentProfile();
+  // F1: a Class 11/12 student with no stream on record is exactly the case
+  // the server now returns "no question" for (see functions/src/
+  // dailyStreakQuiz.ts) — show them why, with a way to fix it, instead of
+  // the generic "no quiz today" message meant for genuinely unpublished days.
+  const needsStream = isStreamClassLevel(studentProfile?.class) && !studentProfile?.stream;
 
   const [screenState, setScreenState] = useState<ScreenState>("loading");
   const [question, setQuestion] = useState<PublicDailyStreakQuizQuestion | null>(null);
@@ -234,7 +239,7 @@ export default function DailyStreakQuizPage() {
         <div style={{ marginTop: 18 }}>
           {screenState === "loading" && <QuizSkeleton />}
           {screenState === "error" && <ErrorState onRetry={loadQuestion} />}
-          {screenState === "no-question" && <NoQuestionState />}
+          {screenState === "no-question" && (needsStream ? <NeedsStreamState onGoToProfile={() => router.push("/settings/profile")} /> : <NoQuestionState />)}
 
           {screenState === "ready" && question && (
             <div>
@@ -639,6 +644,35 @@ function NoQuestionState() {
       <p style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", lineHeight: 1.5, margin: "8px 0 0" }}>
         There's no Daily Streak Quiz published for your class yet. Check back soon!
       </p>
+    </div>
+  );
+}
+
+// F1: shown instead of NoQuestionState when the student is in Class 11/12
+// but has no stream set — their quiz is stream-specific and the server
+// won't guess one for them (see dailyStreakQuiz.ts).
+function NeedsStreamState({ onGoToProfile }: { onGoToProfile: () => void }) {
+  return (
+    <div
+      style={{
+        textAlign: "center", border: "1px solid var(--border)", borderRadius: 18,
+        padding: 28, background: "var(--bg-card)",
+      }}
+    >
+      <div style={{ fontSize: 36, marginBottom: 8 }}>🎓</div>
+      <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)" }}>Select your stream to continue</div>
+      <p style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)", lineHeight: 1.5, margin: "8px 0 16px" }}>
+        Class 11 and 12 questions are stream-specific. Set your stream (Science, Commerce, or Arts/Humanities) in your profile to get today's quiz.
+      </p>
+      <button
+        onClick={onGoToProfile}
+        style={{
+          border: "none", borderRadius: 12, padding: "10px 20px",
+          background: "var(--accent)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
+        }}
+      >
+        Go to Profile
+      </button>
     </div>
   );
 }

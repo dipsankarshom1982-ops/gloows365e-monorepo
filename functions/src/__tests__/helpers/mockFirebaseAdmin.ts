@@ -58,6 +58,15 @@ function auth() {
       if (!u) throw Object.assign(new Error("no user"), { code: "auth/user-not-found" });
       return u;
     },
+    // Test convenience for onRequest handlers that call
+    // admin.auth().verifyIdToken(bearerToken) themselves (askAiGuru.ts,
+    // personalDashboard.ts, ...) instead of using onCall's built-in auth.
+    // Not a real ID token verifier — the "token" IS the uid, by test
+    // convention (`Authorization: Bearer <uid>`).
+    async verifyIdToken(token: string) {
+      if (!token) throw Object.assign(new Error("invalid token"), { code: "auth/argument-error" });
+      return { uid: token };
+    },
   };
 }
 

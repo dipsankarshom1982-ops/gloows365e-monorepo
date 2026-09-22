@@ -17,7 +17,7 @@ import {
   getDownloadURL, deleteObject,
 } from "firebase/storage";
 import { useTheme } from "@/context/ThemeContext";
-import { SUPPORTED_CLASS_LEVEL_STRINGS, useStudentProfile } from "@gloows/shared-logic";
+import { STREAM_CLASS_LEVELS, STUDENT_STREAMS, SUPPORTED_CLASS_LEVEL_STRINGS, useStudentProfile, type StudentStream } from "@gloows/shared-logic";
 import { INDIAN_LANGUAGES } from "@/lib/languages";
 import { TITLES, defaultAvatarForTitle } from "@/lib/avatars";
 
@@ -29,6 +29,7 @@ const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 5MB
 
 // ─── Constants ────────────────────────────────────────────────
 const CLASS_OPTIONS    = [...SUPPORTED_CLASS_LEVEL_STRINGS];
+const STREAM_CLASSES   = STREAM_CLASS_LEVELS.map(String);
 const BOARDS           = ["CBSE", "ICSE", "State Board", "IB", "IGCSE"];
 const INTEREST_OPTIONS = ["GK", "Science", "Math", "History", "Geography", "English", "Coding", "Arts"];
 
@@ -237,6 +238,7 @@ export default function ProfileSettingsPage() {
   const [phone,             setPhone]             = useState("");
   const [school,            setSchool]            = useState("");
   const [studentClass,      setStudentClass]      = useState("");
+  const [stream,            setStream]            = useState<StudentStream | "">("");
   const [board,             setBoard]             = useState("");
   const [age,               setAge]               = useState("");
   const [dob,               setDob]               = useState("");
@@ -254,6 +256,8 @@ export default function ProfileSettingsPage() {
   const [success,           setSuccess]           = useState("");
   const [emailVerified,     setEmailVerified]     = useState(true);
   const [resendingVerify,   setResendingVerify]   = useState(false);
+
+  const isStreamClass = STREAM_CLASSES.includes(studentClass);
 
   const accent    = isDarkMode ? "#38bdf8" : "#3b82f6";
   const textMain  = isDarkMode ? "#f1f5f9" : "#1e293b";
@@ -358,7 +362,9 @@ export default function ProfileSettingsPage() {
     setTitle((d.title as string) ?? "");
     setPhone((d.phone as string) ?? "");
     setSchool((d.school as string) ?? "");
-    setStudentClass(d.class !== undefined ? String(d.class) : "");
+    const loadedClass = d.class !== undefined ? String(d.class) : "";
+    setStudentClass(loadedClass);
+    setStream(STREAM_CLASSES.includes(loadedClass) ? ((d.stream as StudentStream) ?? "") : "");
     setBoard((d.board as string) ?? "");
     setAge(d.age !== undefined ? String(d.age) : "");
     setDob((d.dob as string) ?? "");
@@ -507,6 +513,7 @@ export default function ProfileSettingsPage() {
 
   const handleSave = async () => {
     if (!name.trim()) { setError("Name is required."); return; }
+    if (isStreamClass && !stream) { setError("Please select your stream."); return; }
     if (!user) return;
     setSaving(true); setError(""); setSuccess("");
     try {
@@ -521,7 +528,8 @@ export default function ProfileSettingsPage() {
       }
       const payload = {
         name: name.trim(), title, phone: phone.trim(), school: school.trim(),
-        class: studentClass.trim(), board: board.trim(),
+        class: studentClass.trim(), stream: isStreamClass ? (stream || null) : null,
+        board: board.trim(),
         age: age ? parseInt(age, 10) : null, dob: dob.trim(),
         preferredLanguage, profilePic: finalPic, interests,
         location: { area: area.trim(), district: district.trim(), pincode: pincode.trim(), state: stateVal.trim() },
@@ -721,6 +729,13 @@ export default function ProfileSettingsPage() {
               <span style={{ fontSize: 12, fontWeight: 700, color: accent }}>Class {studentClass}</span>
             </div>
           )}
+          {isStreamClass && (
+            <div style={{ padding: "4px 10px", borderRadius: 20, background: stream ? accent + "20" : "#FF4D4D20" }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: stream ? accent : "#FF4D4D" }}>
+                {stream || "Stream not set"}
+              </span>
+            </div>
+          )}
           {board && (
             <div style={{ padding: "4px 10px", borderRadius: 20, background: accent + "20" }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: accent }}>{board}</span>
@@ -773,9 +788,23 @@ export default function ProfileSettingsPage() {
           accent={accent} surfaceBg={surfaceBg} borderCol={borderCol} textMain={textMain} textSec={textSec}/>
         <ChipRow label="Class / Grade" options={CLASS_OPTIONS}
           selected={studentClass ? [studentClass] : []}
-          onToggle={(opt) => { if (isEditing) setStudentClass(opt === studentClass ? "" : opt); }}
+          onToggle={(opt) => {
+            if (!isEditing) return;
+            const next = opt === studentClass ? "" : opt;
+            setStudentClass(next);
+            // Stream only ever applies to Class 11/12 — moving away from
+            // those must never leave a stale stream attached.
+            if (!STREAM_CLASSES.includes(next)) setStream("");
+          }}
           isEditing={isEditing}
           accent={accent} surfaceBg={surfaceBg} borderCol={borderCol} textMain={textMain} textSec={textSec}/>
+        {isStreamClass && (
+          <ChipRow label="Stream" options={STUDENT_STREAMS as unknown as string[]}
+            selected={stream ? [stream] : []}
+            onToggle={(opt) => { if (isEditing) setStream(opt === stream ? "" : opt as StudentStream); }}
+            isEditing={isEditing}
+            accent={accent} surfaceBg={surfaceBg} borderCol={borderCol} textMain={textMain} textSec={textSec}/>
+        )}
         <ChipRow label="Board" options={BOARDS}
           selected={board ? [board] : []}
           onToggle={(opt) => { if (isEditing) setBoard(opt === board ? "" : opt); }}

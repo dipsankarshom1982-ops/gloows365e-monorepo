@@ -3,7 +3,7 @@ import * as functionsV1 from "firebase-functions/v1";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
 import { validateLessonJson } from "./validateLesson";
 import { deriveAnswerKey, sanitizeQuizForClient, quizLooksUnsplit } from "./contestQuizAnswerKey";
-import { isPrimaryOnlyTarget } from "./vidyastarEligibility";
+import { checkContestClassEligibility, isPrimaryOnlyTarget } from "./vidyastarEligibility";
 
 function buildContestLessonPrompt(title: string, description: string, language: string, primaryOnly = false): string {
   const teachingLevel = primaryOnly
@@ -117,6 +117,35 @@ export const getContestLesson = functionsV1
     const lessonRef        = contestRef.collection("lessons").doc(language);
     // Private, Admin-SDK-only — firestore.rules denies all client access.
     const lessonAnswersRef = contestRef.collection("lessonAnswers").doc(language);
+
+    // Class eligibility (Stage 2.2, F5) — joinVidyastarContest already
+    // enforces a contest's targetClass, but this callable was reachable
+    // independently of having joined, so a student who knew/guessed another
+    // class's contestId could still read (or trigger generation of) its
+    // lesson. Checked BEFORE the transaction claim below and BEFORE any
+    // cached lesson is returned, so a denied student never triggers a
+    // Gemini call, never gets a lesson doc written, and never sees content
+    // — even from cache. Class comes from the student's own profile, never
+    // from client input.
+    const [eligibilityContestSnap, studentSnapForCheck] = await Promise.all([
+      contestRef.get(),
+      db.doc(`students/${context.auth.uid}`).get(),
+    ]);
+    if (!eligibilityContestSnap.exists) {
+      throw new functionsV1.https.HttpsError("not-found", "Contest not found");
+    }
+    const eligibility = checkContestClassEligibility(
+      eligibilityContestSnap.data()?.targetClass,
+      studentSnapForCheck.exists ? studentSnapForCheck.data()?.class : undefined
+    );
+    if (!eligibility.eligible) {
+      throw new functionsV1.https.HttpsError(
+        "permission-denied",
+        eligibility.reason === "no-class"
+          ? "Set your class in your profile to view this lesson."
+          : "This lesson isn't available for your class."
+      );
+    }
 
     const claim = await db.runTransaction(async (tx) => {
       const lessonSnap = await tx.get(lessonRef);

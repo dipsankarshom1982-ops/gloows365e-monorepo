@@ -64,6 +64,12 @@ import {
 
 const db = admin.firestore();
 
+// F7 (Stage 2.2) — the 3 primary classes, derived from the same shared
+// config every other class list in this file already reads from. Used only
+// for the same-day cross-class topic-diversity check in
+// getRecentQuestionContext below.
+const PRIMARY_CLASS_LEVELS = NON_STREAM_CLASS_LEVELS.filter((c) => getClassBand(c) === "PRIMARY_FOUNDATION");
+
 type Option = "A" | "B" | "C" | "D";
 type DifficultyLevel = "easy" | "medium" | "hard";
 
@@ -220,6 +226,24 @@ function dateOffsetIST(base: string, offsetDays: number): string {
 
 function normalizeText(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// F7 (Stage 2.2) — the AI occasionally returns a subject as a short form
+// ("EVS") instead of the exact pool string ("Environmental Studies (EVS)"),
+// even though the prompt asks it to pick ONE subject from the list
+// verbatim (observed live in staging QA). Snaps a subject to its canonical
+// pool string ONLY when the match is exact (case/whitespace-insensitive)
+// or the subject is unambiguously the short form in exactly one pool
+// entry's parenthetical — never rewrites anything else, so a genuinely
+// different subject is left as the AI returned it (and still passes/fails
+// validation on its own terms).
+function normalizeSubjectLabel(subject: string, pool: readonly string[] | null): string {
+  if (!pool) return subject;
+  const norm = subject.trim().toLowerCase();
+  const exact = pool.find((p) => p.toLowerCase() === norm);
+  if (exact) return exact;
+  const byAbbreviation = pool.filter((p) => p.toLowerCase().includes(`(${norm})`));
+  return byAbbreviation.length === 1 ? byAbbreviation[0] : subject;
 }
 
 // Stripped only for duplicate-similarity comparison (findDuplicateMatch) —
@@ -513,6 +537,9 @@ async function generateValidatedQuestion(
         continue;
       }
 
+      const subjectPool = stream ? STREAM_SUBJECTS[stream] : getQuizSubjectPool(cls);
+      structural.data.subject = normalizeSubjectLabel(structural.data.subject, subjectPool);
+
       return { data: structural.data, difficulty, generationAttempts: attempt };
     } catch (err) {
       lastFailureReason = err instanceof Error ? err.message : String(err);
@@ -556,6 +583,40 @@ async function getRecentQuestionContext(
     const topic = q.topic ?? q.subject;
     if (topic) topics.push(topic);
   });
+
+  // F7 (Stage 2.2) — Class 3–5 topic diversity: the lookback above is
+  // scoped to THIS class's own 30-day history only (by design, unchanged),
+  // so two primary classes generating on the same day had no way to avoid
+  // landing on the same topic — observed live in staging QA (Class 3, 4
+  // and 5 all drew plant-parts topics on the same day). For a primary slot
+  // only, additionally avoid whatever topic(s) a sibling primary class has
+  // already published for this exact publishDate — the scheduler generates
+  // slots in a fixed order (buildDailySlots), so an earlier primary
+  // class's question for `date` already exists in Firestore by the time a
+  // later one runs. Never touches Class 6+, never touches streams, never
+  // changes the retry/validation/storage architecture. Best-effort: any
+  // failure here (e.g. an index not yet propagated) is logged and ignored
+  // rather than failing the generation — this is a diversity nicety, not a
+  // safety requirement the way the class/stream targeting checks are.
+  if (PRIMARY_CLASS_LEVELS.includes(cls)) {
+    const siblingClasses = PRIMARY_CLASS_LEVELS.filter((c) => c !== cls);
+    if (siblingClasses.length > 0) {
+      try {
+        const siblingSnap = await db.collection("dailyStreakQuizQuestions")
+          .where("class", "in", siblingClasses)
+          .where("publishDate", "==", date)
+          .get();
+        siblingSnap.docs.forEach((d) => {
+          const q = d.data() as { topic?: string; subject?: string };
+          const topic = q.topic ?? q.subject;
+          if (topic) topics.push(topic);
+        });
+      } catch (err) {
+        console.warn(`dailyStreakQuizGeneration: sibling-primary topic lookup failed for class=${cls} date=${date} (non-fatal, proceeding without it):`, err);
+      }
+    }
+  }
+
   return { topics, questions };
 }
 

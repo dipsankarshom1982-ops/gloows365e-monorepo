@@ -55,7 +55,7 @@ function getPhoneVerifyAuth() {
 }
 import { INDIAN_LANGUAGES, DEFAULT_LANGUAGE, getStoredLanguage, clearStoredLanguage } from "@/lib/languages";
 import { TITLES } from "@/lib/avatars";
-import { CLASS_RANGE_LABEL, SUPPORTED_CLASS_LEVEL_STRINGS } from "@gloows/shared-logic";
+import { CLASS_RANGE_LABEL, STREAM_CLASS_LEVELS, STUDENT_STREAMS, SUPPORTED_CLASS_LEVEL_STRINGS, type StudentStream } from "@gloows/shared-logic";
 
 // Matches mobile services/referralService.ts — deterministic 8-char code from UID.
 // Written to users/{uid} at registration so the referral page can display it
@@ -70,6 +70,7 @@ function generateReferralCode(uid: string): string {
 
 const BOARDS         = ["CBSE", "ICSE", "State Board", "Other"];
 const CLASS_OPTIONS  = SUPPORTED_CLASS_LEVEL_STRINGS;
+const STREAM_CLASSES = STREAM_CLASS_LEVELS.map(String);
 const INTERESTS      = ["Maths","Science","Coding","AI","Robotics","Cricket","Football","Art","Music","GK","Other"];
 
 function calculateAge(dob: string): number {
@@ -184,6 +185,8 @@ export default function RegisterPage() {
   const [school,            setSchool]            = useState("");
   const [board,             setBoard]             = useState("");
   const [studentClass,      setStudentClass]      = useState("");
+  const [stream,            setStream]            = useState<StudentStream | "">("");
+  const isStreamClass = STREAM_CLASSES.includes(studentClass);
   // FEATURE: pre-fill from the language chosen on the welcome screen
   // (see lib/languages.ts) instead of defaulting to blank — the student
   // already told us their language once, no need to ask again here.
@@ -378,6 +381,10 @@ export default function RegisterPage() {
       setError("Please fill all required fields");
       return;
     }
+    if (isStreamClass && !stream) {
+      setError("Please select your stream");
+      return;
+    }
     if (!/^[6-9]\d{9}$/.test(phone)) {
       setError("Invalid parent phone number (10 digits, starting 6-9)");
       return;
@@ -423,7 +430,8 @@ export default function RegisterPage() {
 
       await setDoc(doc(db, "students", user.uid), {
         name, title, phone, school, board,
-        class: studentClass, preferredLanguage,
+        class: studentClass, stream: isStreamClass ? (stream || null) : null,
+        preferredLanguage,
         parentPhone: phone,
         parentPhoneVerified: true,
         parentalConsent: {
@@ -746,12 +754,34 @@ export default function RegisterPage() {
             <label style={labelStyle}>Class *</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {CLASS_OPTIONS.map((c) => (
-                <button key={c} type="button" style={chip(studentClass === c)} onClick={() => setStudentClass(c)}>
+                <button
+                  key={c} type="button" style={chip(studentClass === c)}
+                  onClick={() => {
+                    setStudentClass(c);
+                    // Stream only ever applies to Class 11/12 — moving away
+                    // from those must never leave a stale stream attached.
+                    if (!STREAM_CLASSES.includes(c)) setStream("");
+                  }}
+                >
                   {c}
                 </button>
               ))}
             </div>
           </div>
+
+          {/* Stream — Class 11/12 only */}
+          {isStreamClass && (
+            <div>
+              <label style={labelStyle}>Select Stream *</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {STUDENT_STREAMS.map((s) => (
+                  <button key={s} type="button" style={chip(stream === s)} onClick={() => setStream(s)}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Language */}
           <div>

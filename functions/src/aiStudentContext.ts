@@ -29,6 +29,18 @@ export async function resolveStudentClassLevel(
  * lesson "for Class N"). Class 3–5 students are pinned to their own class;
  * older students may pick another supported class (e.g. revising an earlier
  * class), falling back to their profile class.
+ *
+ * FIX (Stage 2.2, F4 — staging QA finding): a student with NO valid class on
+ * their own profile used to still have a client-supplied `requested` class
+ * honoured (`parseClassLevel(requested) ?? own` falls through to `requested`
+ * when `own` is null), so anyone without a profile class could pick an
+ * arbitrary class purely from the request body. The "older student may pick
+ * another class" allowance is meant for a student who already has a class on
+ * record choosing to revise a different one — never for a student the server
+ * can't place at all. A missing/unsupported profile class now always
+ * resolves to null here (the caller reports CLASS_REQUIRED /
+ * profile-incomplete), regardless of what the client sends; the escape
+ * hatch is set your class in your profile, not append a query param.
  */
 export async function resolveClassLevelForRequest(
   uid: string,
@@ -36,7 +48,8 @@ export async function resolveClassLevelForRequest(
   requested: unknown
 ): Promise<number | null> {
   const own = await resolveStudentClassLevel(uid, db);
-  if (own !== null && getClassBand(own) === "PRIMARY_FOUNDATION") return own;
+  if (own === null) return null;
+  if (getClassBand(own) === "PRIMARY_FOUNDATION") return own;
   return parseClassLevel(requested) ?? own;
 }
 

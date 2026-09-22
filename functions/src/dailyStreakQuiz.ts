@@ -27,7 +27,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import axios from "axios";
 import { getRedis, todayIST, RK } from "./redish";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
-import { parseClassLevel } from "./educationConfig";
+import { isStreamClassLevel, parseClassLevel } from "./educationConfig";
 
 const db = admin.firestore();
 
@@ -223,19 +223,24 @@ export const getTodaysStreakQuizQuestion = functionsV1
     const studentStream: string | null = student.stream ?? null;
     const preferredLanguage: string = student.preferredLanguage ?? "English";
     const today = todayIST();
+    const isStreamClass = isStreamClassLevel(studentClass);
 
     // Canonical question is always authored in English by admin — see the
     // translation section above for how non-English students get it.
     //
     // Stream (Class 11/12 only, added 2026-09-14): filtered ONLY when the
     // student actually has one set — classes 6–10's query here is
-    // byte-for-byte what it was before streams existed. A Class 11/12
-    // student who hasn't picked a stream yet gets NO stream filter at all
-    // (falls through to whatever active question exists for their class —
-    // a legacy stream-less admin question if one exists, otherwise
-    // arbitrarily one of the 3 stream-specific ones) rather than "no quiz
-    // today" — see dailyStreakQuizGeneration.ts's header for why this is
-    // the deliberate, safe fallback instead of guessing a stream.
+    // byte-for-byte what it was before streams existed.
+    //
+    // FIX (Stage 2.2, F1 — a stream-less Class 11/12 student was silently
+    // served an arbitrary one of the 3 stream-specific AI questions, since
+    // an unfiltered query with .limit(1) just returns whichever sorts
+    // first, deterministically Arts/Humanities on every real dataset seen
+    // so far). A stream-less student now gets a question ONLY if a
+    // genuinely stream-less (legacy/admin-authored) doc exists for their
+    // class+date — never one of the 3 stream-specific ones. Fetching more
+    // than 1 candidate only when there's no stream to filter by keeps the
+    // normal (has-a-stream, and every 6–10) path byte-for-byte unchanged.
     let query = db
       .collection("dailyStreakQuizQuestions")
       .where("status", "==", "active")
@@ -244,11 +249,17 @@ export const getTodaysStreakQuizQuestion = functionsV1
       .where("publishDate", "==", today);
     if (studentStream) query = query.where("stream", "==", studentStream);
 
-    const snap = await query.limit(1).get();
+    const needsLegacyFilter = isStreamClass && !studentStream;
+    const snap = await query.limit(needsLegacyFilter ? 5 : 1).get();
     if (snap.empty) return null;
 
-    const questionId = snap.docs[0].id;
-    const question    = snap.docs[0].data() as QuestionDoc;
+    const chosen = needsLegacyFilter
+      ? snap.docs.find((d) => !d.data().stream)
+      : snap.docs[0];
+    if (!chosen) return null;
+
+    const questionId = chosen.id;
+    const question    = chosen.data() as QuestionDoc;
 
     const display: TranslatedText =
       preferredLanguage === "English"
@@ -407,15 +418,18 @@ export const submitDailyStreakQuizAnswer = functionsV1
         // Re-validate this is genuinely today's question for this student —
         // never trust the client just because it knows a questionId.
         //
-        // Stream check: reject ONLY when BOTH the question and the student
-        // have a stream set and they disagree. Never rejects when either
-        // side is null — that's the exact fallback case
-        // getTodaysStreakQuizQuestion intentionally serves to a Class 11/12
-        // student who hasn't picked a stream yet, and it must never be
-        // submit-blocked.
+        // Stream check (Stage 2.2, F1): reject whenever the QUESTION has a
+        // stream and it doesn't exactly match the student's own stream —
+        // including a stream-less student (studentStream === null)
+        // attempting a stream-specific question, which
+        // getTodaysStreakQuizQuestion no longer serves them but a direct
+        // call still could. A question with NO stream (a non-stream class,
+        // or a legacy admin-authored doc) is never blocked here, regardless
+        // of the student's own stream — that content was never
+        // stream-restricted in the first place.
         const questionStream: string | null = question.stream ?? null;
         const studentStream: string | null = student.stream ?? null;
-        const streamMismatch = questionStream !== null && studentStream !== null && questionStream !== studentStream;
+        const streamMismatch = questionStream !== null && questionStream !== studentStream;
   
         if (
           question.status !== "active" ||

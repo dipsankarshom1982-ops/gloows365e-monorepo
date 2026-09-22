@@ -907,6 +907,25 @@
       "density": "SPARSE_ALL"
     },
     {
+      "collectionGroup": "seekho_progress",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "percentComplete",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
       "collectionGroup": "short_reels",
       "queryScope": "COLLECTION",
       "fields": [

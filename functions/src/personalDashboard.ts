@@ -133,8 +133,19 @@ export const getPersonalizedDashboard = onRequest(
             .limit(10)
             .get(),
           // 4. Recent AI Guru lessons
+          //
+          // FIX (Stage 2.2, F3 — staging QA finding): this queried "userId",
+          // but generateLesson (index.ts) writes the owner as "uid" — the
+          // same field apps/{web,mobile}/.../ai-guru/my-lessons already
+          // queries and functions/src/dataRights.ts's DPDP export already
+          // relies on. "uid" is the established canonical field for this
+          // collection; this query was simply reading the wrong one, so
+          // recentLessons was silently empty for every student (the missing
+          // composite index for the wrong field masked it further — see
+          // firestore.indexes.json, which already had the correct
+          // (uid, createdAt) index this now uses).
           db.collection("aiGuruLessons")
-            .where("userId", "==", uid)
+            .where("uid", "==", uid)
             .orderBy("createdAt", "desc")
             .limit(3)
             .get(),

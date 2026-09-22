@@ -26,6 +26,17 @@ export function isPrimaryOnlyTarget(targetClass: unknown): boolean {
 
 export function checkContestClassEligibility(targetClass: unknown, studentClass: unknown): ContestClassEligibility {
   // Missing targetClass = open to every class (matches the client-side filter).
+  //
+  // CLARIFICATION (Stage 2.2, F7 — staging QA flagged this as worth
+  // documenting explicitly): this deliberately includes Class 3–5. Unlike
+  // Knowledge Hub content (isTargetedAtClass in
+  // packages/shared-logic/src/education/contentTargeting.ts), which treats
+  // untargeted content as NOT visible to Class 3–5 because it predates any
+  // review for that age group, an untargeted contest is NOT given the same
+  // treatment here — it stays open to every class, including 3–5, exactly
+  // as it always has. If a future stage wants untargeted contests closed to
+  // Class 3–5 by default, that is a deliberate policy change to make here,
+  // not an oversight to silently "fix".
   if (targetClass === undefined || targetClass === null) return { eligible: true };
 
   const entries = normalizeTargetEntries(targetClass);

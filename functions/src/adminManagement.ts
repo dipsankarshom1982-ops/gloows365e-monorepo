@@ -298,7 +298,13 @@ export const adminUpdateStudentProfile = onCall(async (request) => {
     updates.class = String(cls);
   }
 
-  if (stream !== undefined) {
+  // Stream is re-validated whenever EITHER the stream itself OR the class is
+  // being changed — a class change alone (e.g. correcting "Class 11,
+  // Commerce" to "Class 9") must never leave a stale stream behind (Stage
+  // 2.2, F1: previously only an explicit `stream` in the request touched
+  // this field at all, so a class-only edit into a non-stream class left
+  // the old stream sitting on the profile — confirmed live in staging QA).
+  if (stream !== undefined || rawClass !== undefined) {
     // Whichever class this write ends up with — the one being set in this
     // same call takes priority over whatever's already stored, since both
     // might change together (e.g. correcting "Class 10, no stream" to
@@ -308,10 +314,17 @@ export const adminUpdateStudentProfile = onCall(async (request) => {
       : (await studentRef.get()).data()?.class;
 
     if (isStreamClassLevel(effectiveClass)) {
-      if (!stream || !STUDENT_STREAMS.includes(stream)) {
-        throw new HttpsError("invalid-argument", "Class 11/12 requires a valid stream (Science, Commerce, or Arts/Humanities).");
+      if (stream !== undefined) {
+        if (!stream || !STUDENT_STREAMS.includes(stream)) {
+          throw new HttpsError("invalid-argument", "Class 11/12 requires a valid stream (Science, Commerce, or Arts/Humanities).");
+        }
+        updates.stream = stream;
       }
-      updates.stream = stream;
+      // else: the class is (or remains) 11/12 and this call didn't touch
+      // stream — leave it as stored. A stream-less 11/12 student simply
+      // gets no stream-specific content; that's enforced by the learning
+      // features themselves (dailyStreakQuiz.ts), not by forcing every
+      // unrelated admin edit to also supply a stream.
     } else {
       if (stream) {
         throw new HttpsError("invalid-argument", "Only Class 11/12 students have a stream.");
