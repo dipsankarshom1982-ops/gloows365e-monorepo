@@ -1,22 +1,29 @@
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
 import {
+  getPhoneVerifyAuth,
   STREAM_CLASS_LEVELS,
   STUDENT_STREAMS,
+  usePhoneOtpFlow,
   StudentStream,
   SUPPORTED_CLASS_LEVEL_STRINGS,
 } from "@gloows/shared-logic";
 import Header from "@/components/header";
+import RecaptchaModal, { type RecaptchaVerifierHandle } from "@/components/auth/RecaptchaModal";
+import TitleAvatar from "@/components/TitleAvatar";
+import { TITLES } from "@/lib/avatars";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import { auth, db, firebaseConfig, storage } from "@/lib/firebase";
+import { eraseMyAccount, exportMyData } from "@/services/dataRightsService";
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { getApps, initializeApp } from "firebase/app";
-import { ConfirmationResult, deleteUser, getAuth, initializeAuth, inMemoryPersistence, signInWithPhoneNumber, User } from "firebase/auth";
-import { deleteDoc, doc, DocumentData, getDoc, updateDoc } from "firebase/firestore";
+import * as Sharing from "expo-sharing";
+import { sendEmailVerification } from "firebase/auth";
+import { doc, DocumentData, getDoc, updateDoc } from "firebase/firestore";
 import { deleteObject, getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -46,7 +53,7 @@ type AutoCapitalize = "none" | "sentences" | "words" | "characters";
 interface StudentLocation { area?: string; city?: string; district: string; pincode: string; state: string; }
 
 interface StudentData extends DocumentData {
-  name?: string; phone?: string; school?: string; class?: string | number;
+  name?: string; title?: string; phone?: string; school?: string; class?: string | number;
   // Class 11/12 only — absent/null for classes 6–10 and for any account
   // created before the 2026-09-14 stream architecture update.
   stream?: StudentStream | null;
@@ -127,14 +134,6 @@ const ChipRow = ({ label, options, selected, onToggle, isEditing, colors }: Chip
   </View>
 );
 
-// ─── Secondary Firebase app for phone OTP (doesn't touch main auth session) ──
-function getPhoneVerifyAuth() {
-  const existing = getApps().find((a) => a.name === "phone-verify");
-  const app = existing ?? initializeApp(firebaseConfig, "phone-verify");
-  try { return initializeAuth(app, { persistence: inMemoryPersistence }); }
-  catch { return getAuth(app); }
-}
-
 // ─── Main Component ─────────────────────────────────────────
 export default function ProfileSettingsScreen() {
   const { colors } = useTheme();
@@ -145,13 +144,16 @@ export default function ProfileSettingsScreen() {
   const [loading,         setLoading]         = useState(true);
   const [saving,          setSaving]          = useState(false);
   const [deleting,        setDeleting]        = useState(false);
+  const [exporting,       setExporting]       = useState(false);
   const [isEditing,       setIsEditing]       = useState(false);
+  const [emailVerified,   setEmailVerified]   = useState(auth.currentUser?.emailVerified ?? true);
+  const [resendingVerify, setResendingVerify]  = useState(false);
   const [uploadProgress,  setUploadProgress]  = useState(0);
   const [isUploadingPhoto,setIsUploadingPhoto]= useState(false);
 
   // ─── Form State ─────────────────────────────────────────
   const [name,             setName]             = useState("");
-  const [phone,            setPhone]            = useState("");
+  const [title,            setTitle]            = useState("");
   const [school,           setSchool]           = useState("");
   const [studentClass,     setStudentClass]     = useState("");
   const [stream,           setStream]           = useState<StudentStream | "">("");
@@ -170,15 +172,13 @@ export default function ProfileSettingsScreen() {
   const [pincodeLoading,   setPincodeLoading]   = useState(false);
   const [original,         setOriginal]         = useState<StudentData | null>(null);
 
-  // ─── Phone OTP State ────────────────────────────────────
-  const [phoneVerified,     setPhoneVerified]     = useState(false);
-  const [otpSent,           setOtpSent]           = useState(false);
-  const [otpValue,          setOtpValue]          = useState("");
-  const [sendingOtp,        setSendingOtp]        = useState(false);
-  const [verifyingOtp,      setVerifyingOtp]      = useState(false);
-  const [confirmationResult,setConfirmationResult]= useState<ConfirmationResult | null>(null);
-  // expo-firebase-recaptcha removed — not compatible with Firebase SDK v12
-  const recaptchaVerifier = { current: null };
+  // ─── Phone OTP State (shared hook — same implementation as onboarding) ──
+  const otpFlow = usePhoneOtpFlow();
+  const { phone, setPhone, otp: otpValue, setOtp: setOtpValue, otpSent, sendingOtp, verifyingOtp, verified: phoneVerified } = otpFlow;
+  useEffect(() => {
+    if (otpFlow.otpError) Alert.alert("OTP Error", otpFlow.otpError);
+  }, [otpFlow.otpError]);
+  const recaptchaRef = useRef<RecaptchaVerifierHandle>(null);
 
   const originalPhone = original?.phone ?? "";
   const phoneDirty    = phone.trim() !== originalPhone.trim();
@@ -202,7 +202,33 @@ export default function ProfileSettingsScreen() {
       }
     };
     fetchProfile();
+
+    // Firebase's client SDK doesn't push server-side emailVerified changes
+    // to auth.currentUser automatically — a reload() is required to pick up
+    // a verification click that happened in another tab/app. Best-effort:
+    // if it fails (offline), fall back to whatever's already cached.
+    auth.currentUser?.reload()
+      .then(() => setEmailVerified(auth.currentUser?.emailVerified ?? true))
+      .catch(() => { /* ignore — use cached value */ });
   }, []);
+
+  const handleResendVerification = async () => {
+    if (!auth.currentUser) return;
+    setResendingVerify(true);
+    try {
+      await sendEmailVerification(auth.currentUser);
+      Alert.alert("✅ Sent", "Verification link sent to the parent's email on file.");
+    } catch (e: unknown) {
+      const err = e as { code?: string; message?: string };
+      if (err.code === "auth/too-many-requests") {
+        Alert.alert("Please wait", "A verification email was already sent recently. Check the inbox (and spam folder) before requesting another.");
+      } else {
+        Alert.alert("Error", err.message ?? "Couldn't send verification email. Please try again.");
+      }
+    } finally {
+      setResendingVerify(false);
+    }
+  };
 
   const populateState = (d: StudentData) => {
     setName(d.name ?? "");
@@ -216,6 +242,7 @@ export default function ProfileSettingsScreen() {
     setDob(d.dob ?? "");
     setPreferredLanguage(d.preferredLanguage ?? "");
     setProfilePic(d.profilePic ?? "");
+    setTitle(d.title ?? "");
     setLocalImage(null);
     setInterests(d.interests ?? []);
     setArea(d.location?.area ?? (d.location as any)?.city ?? "");
@@ -224,12 +251,7 @@ export default function ProfileSettingsScreen() {
     setStateVal(d.location?.state ?? "");
   };
 
-  const resetPhoneOtpState = () => {
-    setPhoneVerified(false);
-    setOtpSent(false);
-    setOtpValue("");
-    setConfirmationResult(null);
-  };
+  const resetPhoneOtpState = () => setPhone(phone);
 
   const fetchLocation = async (pin: string) => {
     if (pin.length !== 6) { setArea(""); setDistrict(""); setStateVal(""); return; }
@@ -251,39 +273,16 @@ export default function ProfileSettingsScreen() {
 
   // ─── Phone OTP ──────────────────────────────────────────
   const handleSendOtp = async () => {
-    const digits = phone.trim().replace(/\D/g, "");
-    if (digits.length !== 10) {
-      Alert.alert("Invalid Number", "Enter a valid 10-digit mobile number.");
-      return;
-    }
-    setSendingOtp(true);
     try {
-      const phoneAuth = getPhoneVerifyAuth();
-      // expo-firebase-recaptcha removed — RN phone auth does not need DOM recaptcha
-      const result = await signInWithPhoneNumber(phoneAuth, "+91" + digits, undefined as any);
-      setConfirmationResult(result);
-      setOtpSent(true);
+      const recaptchaToken = await recaptchaRef.current!.verify();
+      const appVerifier = { type: "recaptcha", verify: async () => recaptchaToken };
+      await otpFlow.sendOtp(getPhoneVerifyAuth(firebaseConfig as any), appVerifier as any);
     } catch (e: any) {
-      Alert.alert("OTP Error", e.message ?? "Failed to send OTP. Try again.");
-    } finally {
-      setSendingOtp(false);
+      Alert.alert("OTP Error", e?.message ?? "Failed to send OTP. Try again.");
     }
   };
 
-  const handleVerifyOtp = async () => {
-    if (!confirmationResult || otpValue.length < 6) return;
-    setVerifyingOtp(true);
-    try {
-      await confirmationResult.confirm(otpValue);
-      setPhoneVerified(true);
-      setOtpSent(false);
-      setOtpValue("");
-    } catch {
-      Alert.alert("Invalid OTP", "The code you entered is incorrect. Try again.");
-    } finally {
-      setVerifyingOtp(false);
-    }
-  };
+  const handleVerifyOtp = () => otpFlow.verifyOtp();
 
   // ─── Pick image ──────────────────────────────────────────
   const handlePickImage = async () => {
@@ -294,7 +293,17 @@ export default function ProfileSettingsScreen() {
       mediaTypes: ["images"] as ImagePicker.MediaType[],
       allowsEditing: true, aspect: [1, 1], quality: 0.7,
     });
-    if (!result.canceled && result.assets?.length > 0) setLocalImage(result.assets[0].uri);
+    if (result.canceled || !result.assets?.length) return;
+    const asset = result.assets[0];
+    // Guardrail matching the web app's upload validation — quality: 0.7
+    // above keeps most photos well under this, but a very large source
+    // image (e.g. a raw modern phone camera photo before compression)
+    // could still land here uncompressed on some devices.
+    if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) {
+      Alert.alert("Image Too Large", "Please choose an image under 5MB.");
+      return;
+    }
+    setLocalImage(asset.uri);
   };
 
   const uploadImageToStorage = async (localUri: string, uid: string): Promise<string> => {
@@ -351,7 +360,7 @@ export default function ProfileSettingsScreen() {
       }
 
       const updatePayload: StudentData = {
-        name: name.trim(), phone: phone.trim(), school: school.trim(),
+        name: name.trim(), title, phone: phone.trim(), school: school.trim(),
         class: studentClass.trim(),
         stream: isStreamClass ? (stream || null) : null,
         board: board.trim(),
@@ -397,32 +406,53 @@ export default function ProfileSettingsScreen() {
     setInterests((prev) => prev.includes(item) ? prev.filter((i) => i !== item) : [...prev, item]);
   };
 
+  // DPDP Act 2023 "right to erasure" — routed through the eraseMyAccount
+  // Cloud Function (Admin SDK) instead of direct client deletes, since a
+  // real erasure has to wipe ~30 Firestore collections this uid's data
+  // touches, most of which clients aren't allowed to delete directly (see
+  // firestore.rules) — not just the students doc + profile pic + Auth user
+  // this used to delete.
   const handleDelete = () => {
-    Alert.alert("⚠️ Delete Account", "This permanently deletes your GLOOWS365E profile and cannot be undone.", [
+    Alert.alert("⚠️ Delete Account", "This permanently deletes your Gloows365 profile and all associated data, and cannot be undone.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete", style: "destructive",
         onPress: async () => {
           setDeleting(true);
           try {
-            const uid = auth.currentUser?.uid;
-            if (!uid) throw new Error("Not authenticated");
-            try { await deleteObject(ref(storage, `profilePics/${uid}/profile.jpg`)); } catch { /* ok */ }
-            await deleteDoc(doc(db, "students", uid));
-            await deleteUser(auth.currentUser as User);
+            await eraseMyAccount();
             router.replace("/");
           } catch (e: unknown) {
             const err = e as { code?: string; message?: string };
-            if (err.code === "auth/requires-recent-login")
-              Alert.alert("Re-login Required", "Please log out and log back in, then try again.");
-            else
-              Alert.alert("Error", err.message ?? "Unknown error");
+            Alert.alert("Error", err.message ?? "Something went wrong. Please try again or contact support@gloows365.in.");
           } finally {
             setDeleting(false);
           }
         },
       },
     ]);
+  };
+
+  // DPDP Act 2023 "right to access" — exports every collection this uid's
+  // data lives in (functions/src/dataRights.ts) as one JSON file, then hands
+  // it to the native share/save sheet.
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const data = await exportMyData();
+      const fileUri = `${FileSystem.documentDirectory}gloows365-my-data-${Date.now()}.json`;
+      await FileSystem.writeAsStringAsync(fileUri, JSON.stringify(data, null, 2));
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, { mimeType: "application/json", dialogTitle: "My Gloows365 Data" });
+      } else {
+        Alert.alert("Export ready", `Your data was saved to ${fileUri}`);
+      }
+    } catch (e: unknown) {
+      const err = e as { message?: string };
+      Alert.alert("Error", err.message ?? "Couldn't export your data. Please try again.");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const displayImage = localImage ?? profilePic ?? null;
@@ -472,11 +502,10 @@ export default function ProfileSettingsScreen() {
               {displayImage ? (
                 <Image source={{ uri: displayImage }} style={[styles.avatarImage, { borderColor: colors.accent }]} />
               ) : (
-                <View style={[styles.avatarPlaceholder, { backgroundColor: `${colors.accent}20`, borderColor: colors.accent }]}>
-                  <Text style={[styles.avatarInitial, { color: colors.accent }]}>
-                    {name ? name.charAt(0).toUpperCase() : "S"}
-                  </Text>
-                </View>
+                // FIX (bug report — avatar problem): previously just a bare
+                // initial letter on a tinted circle. Now shows the same
+                // Title-derived avatar used app-wide (header.tsx, drawer).
+                <TitleAvatar title={title} size={96} style={[styles.avatarImage, { borderWidth: 3, borderColor: colors.accent }]} />
               )}
               {isEditing && (
                 <TouchableOpacity style={[styles.cameraButton, { backgroundColor: colors.accent }]} onPress={handlePickImage}>
@@ -529,6 +558,10 @@ export default function ProfileSettingsScreen() {
           <View style={styles.formContainer}>
 
             <SectionTitle icon="🧑" label={t("basicInfo")} colors={colors as ThemeColors} />
+            <ChipRow label="Title" options={TITLES as unknown as string[]}
+              selected={title ? [title] : []}
+              onToggle={(opt) => { if (isEditing) setTitle(opt === title ? "" : opt); }}
+              isEditing={isEditing} colors={colors as ThemeColors} />
             <Field label="Full Name" icon="person-outline" value={name} onChangeText={setName}
               placeholder="Enter full name" isEditing={isEditing} colors={colors as ThemeColors} />
 
@@ -547,7 +580,7 @@ export default function ProfileSettingsScreen() {
                   <TextInput
                     style={[styles.input, { color: colors.text }]}
                     value={phone}
-                    onChangeText={(t) => { setPhone(t); resetPhoneOtpState(); }}
+                    onChangeText={setPhone}
                     placeholder="10-digit mobile number"
                     placeholderTextColor={colors.textSecondary}
                     keyboardType="phone-pad"
@@ -572,6 +605,8 @@ export default function ProfileSettingsScreen() {
                   </TouchableOpacity>
                 )}
               </View>
+
+              <RecaptchaModal ref={recaptchaRef} firebaseConfig={firebaseConfig} />
 
               {/* OTP input row */}
               {otpSent && !phoneVerified && (
@@ -740,11 +775,43 @@ export default function ProfileSettingsScreen() {
             </View>
           )}
 
+          {/* ── DATA RIGHTS (DPDP Act 2023) ──────────── */}
+          <View style={[styles.dangerZone, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <Text style={[styles.dangerTitle, { color: colors.text }]}>🔐 Your Data Rights</Text>
+            <Text style={[styles.dangerHint, { color: colors.textSecondary }]}>
+              Download a copy of everything Gloows365 holds about you.
+            </Text>
+            <TouchableOpacity style={[styles.dangerRow, { opacity: exporting ? 0.6 : 1 }]}
+              onPress={handleExport} disabled={exporting}>
+              {exporting
+                ? <ActivityIndicator size="small" color={colors.accent} />
+                : <Ionicons name="download-outline" size={16} color={colors.accent} />
+              }
+              <Text style={[styles.dangerText, { color: colors.accent }]}>Export My Data</Text>
+            </TouchableOpacity>
+
+            {!emailVerified && (
+              <>
+                <Text style={[styles.dangerHint, { color: colors.textSecondary, marginTop: 10 }]}>
+                  We sent a verification link to the parent's email on file — ask them to check their inbox to confirm it.
+                </Text>
+                <TouchableOpacity style={[styles.dangerRow, { opacity: resendingVerify ? 0.6 : 1 }]}
+                  onPress={handleResendVerification} disabled={resendingVerify}>
+                  {resendingVerify
+                    ? <ActivityIndicator size="small" color={colors.accent} />
+                    : <Ionicons name="mail-outline" size={16} color={colors.accent} />
+                  }
+                  <Text style={[styles.dangerText, { color: colors.accent }]}>Resend Verification Email</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+
           {/* ── DANGER ZONE ──────────────────────────── */}
           <View style={[styles.dangerZone, { borderColor: "#FF4D4D30", backgroundColor: "#FF4D4D08" }]}>
             <Text style={[styles.dangerTitle, { color: "#FF4D4D" }]}>⚠️ Danger Zone</Text>
             <Text style={[styles.dangerHint, { color: colors.textSecondary }]}>
-              Deleting your account removes all your GLOOWS365E data permanently.
+              Deleting your account removes all your Gloows365 data permanently.
             </Text>
             <TouchableOpacity style={[styles.dangerRow, { opacity: deleting ? 0.6 : 1 }]}
               onPress={handleDelete} disabled={deleting}>
