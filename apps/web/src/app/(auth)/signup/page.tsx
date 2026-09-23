@@ -107,6 +107,7 @@ export default function SignupPage() {
         email: user.email,
         role: "student",
         onboardingComplete: false,
+        onboardingStep: "accountCreated",
         createdAt: serverTimestamp(),
       });
       await setDoc(doc(db, "users", user.uid), {
@@ -122,7 +123,7 @@ export default function SignupPage() {
         createdAt: serverTimestamp(),
       }, { merge: true });
 
-      router.replace("/register");
+      router.replace("/parent-profile");
 
     } catch (err: unknown) {
       // Clean up auth user if Firestore write failed (mirrors mobile)
@@ -188,6 +189,7 @@ export default function SignupPage() {
         email: user.email ?? "",
         role: "student",
         onboardingComplete: false,
+        onboardingStep: "accountCreated",
         createdAt: serverTimestamp(),
       }, { merge: true });
       await setDoc(doc(db, "users", user.uid), {
@@ -203,7 +205,7 @@ export default function SignupPage() {
         createdAt: serverTimestamp(),
       }, { merge: true });
 
-      router.replace("/register");
+      router.replace("/parent-profile");
 
     } catch (err: unknown) {
       const code = (err as { code?: string }).code ?? "";

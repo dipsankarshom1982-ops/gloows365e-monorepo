@@ -25,7 +25,11 @@ export * from "./hooks/useHomeFeed";
 export * from "./hooks/useHomeFlags";
 export * from "./hooks/useHomeReels";
 export * from "./hooks/useReferralConfig";
+// ─── Onboarding ──────────────────────────────────────────────────────────
+export * from "./onboarding/onboardingRouting";
+
 export * from "./hooks/useStories";
+export * from "./hooks/usePhoneOtpFlow";
 export * from "./hooks/useBatchStudents";
 export * from "./hooks/useTutorBatches";
 export * from "./hooks/useStudentBookings";

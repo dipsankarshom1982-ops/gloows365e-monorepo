@@ -10,52 +10,19 @@
 //   - On success → /home
 //   - RestartEducation path → writes profileType to users/{uid} → /restart-education/onboarding
 //
-// Phone OTP (signInWithPhoneNumber) — real verification, mirroring mobile
-// app/(auth)/register.tsx. This used to be skipped entirely on web behind a
-// comment claiming "reCAPTCHA doesn't work in the static export PWA" — that
-// reasoning was mistaken. That constraint is real for *mobile* (React
-// Native's WebView has no native reCAPTCHA support, which is exactly why
-// components/auth/RecaptchaModal.tsx exists there as a workaround), but web
-// is already a real browser: Firebase JS SDK's RecaptchaVerifier is the
-// standard, well-supported mechanism here and needs no workaround. A
-// secondary, in-memory-persistence Firebase app instance (getPhoneVerifyAuth
-// below) mirrors mobile's pattern so verifying the parent's phone never
-// disturbs the student's already-signed-in session.
+// Parent phone OTP verification no longer lives here — it moved to
+// (auth)/parent-profile → (auth)/phone-verification → (auth)/parent-permissions,
+// which must be completed before this page (enforced by the guard effect below).
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getApps, initializeApp } from "firebase/app";
-import {
-  getAuth,
-  initializeAuth,
-  inMemoryPersistence,
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
-  type ConfirmationResult,
-} from "firebase/auth";
-import { getFirestore, doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+import { getFirestore, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { functions, firebaseConfig } from "@/lib/firebase";
-
-// Mirrors mobile app/privacy.tsx's PRIVACY_POLICY_VERSION — kept as a local
-// constant here rather than a cross-package import since the two apps'
-// privacy-policy content/versioning isn't shared infrastructure today.
-const PRIVACY_POLICY_VERSION = "2026-07-17";
-
-// ─── Secondary Firebase app for parent phone OTP (doesn't touch the
-// student's main auth session) — mirrors mobile register.tsx exactly. ──────
-function getPhoneVerifyAuth() {
-  const existing = getApps().find((a) => a.name === "phone-verify");
-  const app = existing ?? initializeApp(firebaseConfig, "phone-verify");
-  try {
-    return initializeAuth(app, { persistence: inMemoryPersistence });
-  } catch {
-    return getAuth(app);
-  }
-}
+import { functions } from "@/lib/firebase";
 import { INDIAN_LANGUAGES, DEFAULT_LANGUAGE, getStoredLanguage, clearStoredLanguage } from "@/lib/languages";
 import { TITLES } from "@/lib/avatars";
-import { CLASS_RANGE_LABEL, STREAM_CLASS_LEVELS, STUDENT_STREAMS, SUPPORTED_CLASS_LEVEL_STRINGS, type StudentStream } from "@gloows/shared-logic";
+import { CLASS_RANGE_LABEL, resolveOnboardingRoute, STREAM_CLASS_LEVELS, STUDENT_STREAMS, SUPPORTED_CLASS_LEVEL_STRINGS, type StudentStream } from "@gloows/shared-logic";
 
 // Matches mobile services/referralService.ts — deterministic 8-char code from UID.
 // Written to users/{uid} at registration so the referral page can display it
@@ -222,28 +189,25 @@ export default function RegisterPage() {
   const [showRestartBlock, setShowRestartBlock] = useState(false);
   const [detectedAge,      setDetectedAge]      = useState(0);
 
-  // Parent phone OTP
-  const [confirmationResult,  setConfirmationResult]  = useState<ConfirmationResult | null>(null);
-  const [otp,                 setOtp]                 = useState("");
-  const [otpSent,              setOtpSent]            = useState(false);
-  const [sendingOtp,           setSendingOtp]         = useState(false);
-  const [verifyingOtp,         setVerifyingOtp]       = useState(false);
-  const [parentPhoneVerified,  setParentPhoneVerified]= useState(false);
-  const [otpError,             setOtpError]           = useState("");
-  const [parentalConsent,      setParentalConsent]    = useState(false);
-  const recaptchaContainerRef = useRef<HTMLDivElement>(null);
-  const recaptchaVerifierRef  = useRef<RecaptchaVerifier | null>(null);
-
-  // Cleanup on unmount (navigation away, hot reload, etc.) — clear() only
-  // tears down the existing widget/token, it never creates a new one, so
-  // this can't re-trigger initialization during teardown. Runs once; reads
-  // the ref via its current value at unmount time rather than depending on
-  // it, since ref identity never changes across renders.
+  // Parent phone was collected + OTP-verified upstream (parent-profile →
+  // phone-verification → parent-permissions). Read it back for the `phone`
+  // field this form still writes, and guard against deep-linking in early.
   useEffect(() => {
-    return () => {
-      try { recaptchaVerifierRef.current?.clear(); } catch { /* ignore */ }
-      recaptchaVerifierRef.current = null;
-    };
+    const unsub = getAuth().onAuthStateChanged(async (user) => {
+      if (!user) return;
+      try {
+        const snap = await getDoc(doc(getFirestore(), "students", user.uid));
+        const d = snap.exists() ? snap.data() : undefined;
+        const next = resolveOnboardingRoute(d as any);
+        if (next === "parent-profile") { router.replace("/parent-profile"); return; }
+        if (next === "phone-verification") { router.replace("/phone-verification"); return; }
+        if (next === "parent-permissions") { router.replace("/parent-permissions"); return; }
+        if (next === "home") { router.replace("/home"); return; }
+        if (d?.parentPhone) setPhone(d.parentPhone);
+      } catch { /* let the user proceed rather than get stuck */ }
+    });
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchLocation = async (pin: string) => {
@@ -275,90 +239,6 @@ export default function RegisterPage() {
     setDob(formatted);
   };
 
-  // ── Parent phone OTP ────────────────────────────────────────────────────
-  const handleSendOtp = async () => {
-    // Defensive guard against concurrent sendVerificationCode calls (e.g. a
-    // second click landing before the disabled-button re-render commits) —
-    // the button's disabled={sendingOtp} covers the normal case, this
-    // covers the race.
-    if (sendingOtp) return;
-    if (!/^[6-9]\d{9}$/.test(phone)) {
-      setOtpError("Enter a valid 10-digit parent phone number first");
-      return;
-    }
-    setSendingOtp(true);
-    setOtpError("");
-    try {
-      const phoneAuth = getPhoneVerifyAuth();
-      // Invisible reCAPTCHA bound to the hidden container div rendered
-      // below — reused across sends/resends rather than recreated each
-      // time, matching Firebase's own recommended usage.
-      if (!recaptchaVerifierRef.current && recaptchaContainerRef.current) {
-        recaptchaVerifierRef.current = new RecaptchaVerifier(
-          phoneAuth,
-          recaptchaContainerRef.current,
-          { size: "invisible" }
-        );
-      }
-      const result = await signInWithPhoneNumber(phoneAuth, `+91${phone}`, recaptchaVerifierRef.current!);
-      setConfirmationResult(result);
-      setOtpSent(true);
-    } catch (err: unknown) {
-      const e = err as { code?: string; message?: string };
-      // Log the full error object (safe — Firebase Auth errors never carry
-      // secrets/tokens, just a code + message) so the actual cause is
-      // visible in the console rather than just the user-facing summary.
-      console.error("handleSendOtp failed:", e);
-      const code = e?.code ?? "";
-      if (code === "auth/invalid-phone-number") {
-        setOtpError("Invalid phone number");
-      } else if (code === "auth/too-many-requests") {
-        setOtpError("Too many attempts. Try again later.");
-      } else if (code === "auth/quota-exceeded") {
-        setOtpError("SMS limit reached for today. Please try again tomorrow or contact support.");
-      } else if (code === "auth/captcha-check-failed" || code === "auth/invalid-app-credential") {
-        setOtpError("Verification check failed. Please refresh and try again.");
-      } else {
-        setOtpError(code ? `Failed to send OTP (${code}). Please try again.` : "Failed to send OTP. Please try again.");
-      }
-      // A failed attempt can leave the invisible widget in a state that
-      // won't retry cleanly — drop it so the next tap builds a fresh one.
-      //
-      // BUGFIX (confirmed live): RecaptchaVerifier.clear() does NOT
-      // reliably empty the container div synchronously — retrying after
-      // any failed send (reproduced here with the reCAPTCHA-Enterprise-
-      // fallback / invalid-app-credential failure, but not specific to it)
-      // had `new RecaptchaVerifier(...)` on the same container throw
-      // "reCAPTCHA has already been rendered in this element", a raw Error
-      // with no `.code`, which fell through to the generic message and
-      // left the widget permanently broken until a full page reload —
-      // exactly the "leave the registration page in a broken state" case
-      // this flow needs to avoid. Wiping the container's DOM ourselves
-      // guarantees the next RecaptchaVerifier renders into a truly empty
-      // element regardless of clear()'s internal timing.
-      try { recaptchaVerifierRef.current?.clear(); } catch { /* ignore */ }
-      recaptchaVerifierRef.current = null;
-      if (recaptchaContainerRef.current) recaptchaContainerRef.current.innerHTML = "";
-    } finally {
-      setSendingOtp(false);
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (!confirmationResult || otp.length !== 6) { setOtpError("Enter the 6-digit OTP"); return; }
-    setVerifyingOtp(true);
-    setOtpError("");
-    try {
-      await confirmationResult.confirm(otp);
-      setParentPhoneVerified(true);
-      setOtpError("");
-    } catch {
-      setOtpError("Incorrect OTP. Please try again.");
-    } finally {
-      setVerifyingOtp(false);
-    }
-  };
-
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -383,18 +263,6 @@ export default function RegisterPage() {
     }
     if (isStreamClass && !stream) {
       setError("Please select your stream");
-      return;
-    }
-    if (!/^[6-9]\d{9}$/.test(phone)) {
-      setError("Invalid parent phone number (10 digits, starting 6-9)");
-      return;
-    }
-    if (!parentPhoneVerified) {
-      setError("Please verify the parent phone number with the OTP sent to it");
-      return;
-    }
-    if (!parentalConsent) {
-      setError("Parent/guardian consent is required to continue");
       return;
     }
     if (!/^\d{6}$/.test(pincode)) {
@@ -432,23 +300,16 @@ export default function RegisterPage() {
         name, title, phone, school, board,
         class: studentClass, stream: isStreamClass ? (stream || null) : null,
         preferredLanguage,
-        parentPhone: phone,
-        parentPhoneVerified: true,
-        parentalConsent: {
-          granted: true,
-          grantedAt: serverTimestamp(),
-          parentPhone: phone,
-          policyVersion: PRIVACY_POLICY_VERSION,
-        },
         dob, age,
         location: { state: stateVal, district, area, pincode },
         interests: finalInterests,
         profilePic: defaultProfilePic,
         stats:           { xp: 0, level: 1, streak: 0 },
         learningProfile: { goal: "Improve learning", dailyTarget: 30 },
+        onboardingStep: "studentRegistration",
         onboardingComplete: true,
         createdAt: serverTimestamp(),
-      });
+      }, { merge: true });
 
       await setDoc(doc(db, "users", user.uid), {
         role: "student", roles: ["student"],
@@ -596,110 +457,6 @@ export default function RegisterPage() {
                 </button>
               ))}
             </div>
-          </div>
-
-          {/* Parent Phone + OTP — by verifying this number, you as the
-              parent/guardian confirm you're completing this registration
-              for your child; the consent checkbox below is the separate,
-              explicit affirmation DPDP Act 2023 requires alongside it. */}
-          <div>
-            <label style={labelStyle}>Parent Phone *</label>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                style={{ ...inputStyle, flex: 1, ...(parentPhoneVerified ? { borderColor: "#34D399" } : {}) }}
-                placeholder="10-digit parent phone number"
-                type="tel"
-                maxLength={10}
-                value={phone}
-                disabled={parentPhoneVerified}
-                onChange={(e) => {
-                  setPhone(e.target.value.replace(/\D/g, ""));
-                  setParentPhoneVerified(false);
-                  setOtpSent(false);
-                  setConfirmationResult(null);
-                  setOtp("");
-                  setOtpError("");
-                  setParentalConsent(false);
-                }}
-              />
-              {parentPhoneVerified ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#34D399", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
-                  ✓ Verified
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleSendOtp}
-                  disabled={sendingOtp}
-                  style={{
-                    flexShrink: 0, borderRadius: 12, border: "none",
-                    background: "#6366F1", color: "#fff", fontWeight: 700, fontSize: 13,
-                    padding: "0 16px", cursor: sendingOtp ? "not-allowed" : "pointer",
-                    opacity: sendingOtp ? 0.6 : 1,
-                  }}
-                >
-                  {sendingOtp ? "Sending…" : otpSent ? "Resend" : "Send OTP"}
-                </button>
-              )}
-            </div>
-
-            {/* Invisible reCAPTCHA host — required by Firebase's phone auth,
-                renders nothing visible in the "invisible" size. */}
-            <div ref={recaptchaContainerRef} />
-
-            {otpSent && !parentPhoneVerified && (
-              <div style={{ marginTop: 10 }}>
-                <p style={{ color: "#94a3b8", fontSize: 12, marginBottom: 8 }}>
-                  Enter the 6-digit OTP sent to +91 {phone} — the parent/guardian entering it is confirming they're completing this registration.
-                </p>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    style={{ ...inputStyle, flex: 1, letterSpacing: 3 }}
-                    placeholder="6-digit OTP"
-                    type="tel"
-                    maxLength={6}
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                    autoComplete="one-time-code"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleVerifyOtp}
-                    disabled={verifyingOtp || otp.length !== 6}
-                    style={{
-                      flexShrink: 0, borderRadius: 12, border: "none",
-                      background: "#22C55E", color: "#fff", fontWeight: 700, fontSize: 13,
-                      padding: "0 16px", cursor: (verifyingOtp || otp.length !== 6) ? "not-allowed" : "pointer",
-                      opacity: (verifyingOtp || otp.length !== 6) ? 0.6 : 1,
-                    }}
-                  >
-                    {verifyingOtp ? "Verifying…" : "Verify"}
-                  </button>
-                </div>
-              </div>
-            )}
-            {otpError && (
-              <p style={{ color: "#f87171", fontSize: 12, marginTop: 6 }}>{otpError}</p>
-            )}
-
-            {/* Parental consent — a distinct, explicit affirmation separate
-                from OTP verification (which only proves phone ownership,
-                not consent), per DPDP Act 2023. Mirrors mobile register.tsx. */}
-            {parentPhoneVerified && (
-              <label style={{
-                display: "flex", alignItems: "flex-start", gap: 8,
-                color: "#c7d2fe", fontSize: 13, marginTop: 10, cursor: "pointer", lineHeight: "18px",
-              }}>
-                <input
-                  type="checkbox"
-                  checked={parentalConsent}
-                  onChange={(e) => setParentalConsent(e.target.checked)}
-                  style={{ marginTop: 2, flexShrink: 0 }}
-                />
-                I am the parent/legal guardian of this student and I consent to the collection
-                and processing of their personal data as described in the Privacy Policy.
-              </label>
-            )}
           </div>
 
           {/* Pincode */}
@@ -865,16 +622,6 @@ export default function RegisterPage() {
             {loading ? "Saving..." : "Continue →"}
           </button>
 
-          {!parentPhoneVerified && (
-            <p style={{ color: "#64748b", fontSize: 11, textAlign: "center" }}>
-              * Verify parent phone with OTP to enable registration
-            </p>
-          )}
-          {parentPhoneVerified && !parentalConsent && (
-            <p style={{ color: "#64748b", fontSize: 11, textAlign: "center" }}>
-              * Parent/guardian consent required to enable registration
-            </p>
-          )}
         </form>
       </div>
     </div>

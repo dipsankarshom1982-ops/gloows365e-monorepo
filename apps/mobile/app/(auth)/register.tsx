@@ -4,7 +4,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -28,24 +28,21 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
 import {
   CLASS_RANGE_LABEL,
+  resolveOnboardingRoute,
   STREAM_CLASS_LEVELS,
   STUDENT_STREAMS,
   StudentStream,
   SUPPORTED_CLASS_LEVEL_STRINGS,
 } from "@gloows/shared-logic";
-import { auth, db, firebaseConfig, functions } from "@/lib/firebase";
+import { auth, db, functions } from "@/lib/firebase";
 import { ensureReferralCode } from "@/lib/initUser";
 import { ensureStudentId } from "@/services/studentIdService";
 import { applyReferral } from "@/services/referralService";
 import { TITLES } from "@/lib/avatars";
-import { PRIVACY_POLICY_VERSION } from "@/app/privacy";
 import { Ionicons } from "@expo/vector-icons";
-import { getApps, initializeApp } from "firebase/app";
-import { getAuth, inMemoryPersistence, initializeAuth, signInWithPhoneNumber } from "firebase/auth";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
-import RecaptchaModal, { type RecaptchaVerifierHandle } from "@/components/auth/RecaptchaModal";
 
 // ─── Restart Education full-screen block ──────────────────────────────────────
 // Shown only when user taps Continue and age >= 18
@@ -163,18 +160,6 @@ const block = StyleSheet.create({
   note:         { color: "rgba(134,239,172,0.6)", fontSize: 12, textAlign: "center", fontStyle: "italic" },
 });
 
-// ─── Secondary Firebase app for parent phone OTP ──────────────────────────────
-
-function getPhoneVerifyAuth() {
-  const existing = getApps().find((a) => a.name === "phone-verify");
-  const app = existing ?? initializeApp(firebaseConfig, "phone-verify");
-  try {
-    return initializeAuth(app, { persistence: inMemoryPersistence });
-  } catch {
-    return getAuth(app);
-  }
-}
-
 // ─── Main registration component ─────────────────────────────────────────────
 
 export default function StudentRegister() {
@@ -189,7 +174,6 @@ export default function StudentRegister() {
   const [section,           setSection]           = useState("");
   const [studentClass,      setStudentClass]      = useState("");
   const [stream,            setStream]            = useState<StudentStream | "">("");
-  const [parentGuardianName, setParentGuardianName] = useState("");
   const [preferredLanguage, setPreferredLanguage] = useState("");
   const [profilePic,        setProfilePic]        = useState<string | null>(null);
 
@@ -213,21 +197,35 @@ export default function StudentRegister() {
   const [showRestartBlock, setShowRestartBlock] = useState(false);
   const [detectedAge,      setDetectedAge]      = useState<number>(0);
 
-  // Parent phone OTP
-  const [confirmationResult,  setConfirmResult]       = useState<any>(null);
-  const [otp,                 setOtp]                 = useState("");
-  const [otpSent,             setOtpSent]             = useState(false);
-  const [sendingOtp,          setSendingOtp]          = useState(false);
-  const [verifyingOtp,        setVerifyingOtp]        = useState(false);
-  const [parentPhoneVerified, setParentPhoneVerified] = useState(false);
-  const [otpError,            setOtpError]            = useState("");
-  const [parentalConsent,     setParentalConsent]     = useState(false);
-  const recaptchaRef = useRef<RecaptchaVerifierHandle>(null);
-
   const boards       = ["CBSE", "ICSE", "State Board", "Other"];
   const classOptions = SUPPORTED_CLASS_LEVEL_STRINGS;
   const streamClasses = STREAM_CLASS_LEVELS.map(String);
   const isStreamClass = streamClasses.includes(studentClass);
+
+  // The parent's phone (and its verified status) was already collected and
+  // verified upstream in (auth)/parent-profile + (auth)/phone-verification.
+  // This screen only reads it back — once to populate the `phone` field this
+  // form still writes to students/{uid} (read by e.g. the admin panel), and
+  // to guard against someone deep-linking straight into Student Registration
+  // before finishing the earlier steps.
+  useEffect(() => {
+    const guard = async () => {
+      const user = auth.currentUser;
+      if (!user) { router.replace("/login" as any); return; }
+      try {
+        const snap = await getDoc(doc(db, "students", user.uid));
+        const d = snap.exists() ? snap.data() : undefined;
+        const nextRoute = resolveOnboardingRoute(d as any);
+        if (nextRoute === "parent-profile") { router.replace("/(auth)/parent-profile" as any); return; }
+        if (nextRoute === "phone-verification") { router.replace("/(auth)/phone-verification" as any); return; }
+        if (nextRoute === "parent-permissions") { router.replace("/(auth)/parent-permissions" as any); return; }
+        if (nextRoute === "home") { router.replace("/(drawer)/(tabs)/home" as any); return; }
+        if (d?.parentPhone) setPhone(d.parentPhone);
+      } catch { /* if this fails, let the user proceed rather than get stuck */ }
+    };
+    guard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -291,79 +289,16 @@ export default function StudentRegister() {
     }
   };
 
-  // ── OTP ──────────────────────────────────────────────────────────────────────
-
-  const handleSendOtp = async () => {
-    if (!/^[6-9]\d{9}$/.test(phone)) {
-      setOtpError("Enter a valid 10-digit parent phone number first");
-      return;
-    }
-    setSendingOtp(true);
-    setOtpError("");
-    try {
-      const phoneAuth = getPhoneVerifyAuth();
-      // signInWithPhoneNumber requires a real ApplicationVerifier — the
-      // invisible reCAPTCHA WebView (see components/auth/RecaptchaModal.tsx)
-      // resolves an actual verification token here instead of `undefined`,
-      // which used to make every OTP send throw immediately.
-      const recaptchaToken = await recaptchaRef.current!.verify();
-      const appVerifier = { type: "recaptcha", verify: async () => recaptchaToken };
-      const result = await signInWithPhoneNumber(phoneAuth, `+91${phone}`, appVerifier as any);
-      setConfirmResult(result);
-      setOtpSent(true);
-    } catch (err: any) {
-      // Logged so a device's release-build logs (or Sentry/crash reporter,
-      // if wired to console.error) capture the real Firebase error code —
-      // the UI below only ever shows a friendly message, which previously
-      // made "OTP send failed" reports impossible to diagnose remotely.
-      console.error("handleSendOtp failed:", err?.code, err?.message);
-      const code = err?.code ?? "";
-      const msg  = err?.message ?? "";
-      if (code === "auth/invalid-phone-number" || msg.includes("TOO_SHORT") || msg.includes("INVALID_PHONE")) {
-        setOtpError("Invalid phone number");
-      } else if (code === "auth/too-many-requests" || msg.includes("TOO_MANY_REQUESTS")) {
-        setOtpError("Too many attempts. Try again later.");
-      } else if (code === "auth/quota-exceeded") {
-        setOtpError("SMS limit reached for today. Please try again tomorrow or contact support.");
-      } else if (code === "auth/captcha-check-failed" || code === "auth/invalid-app-credential") {
-        setOtpError("Verification check failed. Please check your internet connection and try again.");
-      } else if (msg.includes("cancelled")) {
-        setOtpError("Verification cancelled.");
-      } else {
-        // Include the raw code so it can be reported back verbatim instead
-        // of "Failed to send OTP" with no other detail.
-        setOtpError(code ? `Failed to send OTP (${code}). Please try again.` : "Failed to send OTP. Please try again.");
-      }
-    } finally {
-      setSendingOtp(false);
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (otp.length !== 6) { setOtpError("Enter the 6-digit OTP"); return; }
-    setVerifyingOtp(true);
-    setOtpError("");
-    try {
-      await confirmationResult.confirm(otp);
-      setParentPhoneVerified(true);
-      setOtpError("");
-    } catch {
-      setOtpError("Incorrect OTP. Please try again.");
-    } finally {
-      setVerifyingOtp(false);
-    }
-  };
-
   // ── Validation (for normal student path only) ─────────────────────────────
+  // Parent phone verification and parental consent already happened upstream
+  // in (auth)/parent-profile → (auth)/phone-verification → (auth)/parent-permissions
+  // before this screen is ever reachable (enforced by the mount guard above).
 
   const validate = () => {
-    if (!name || !title || !phone || !pincode || !school || !board || !dob || !studentClass || !preferredLanguage || !parentGuardianName.trim()) {
+    if (!name || !title || !phone || !pincode || !school || !board || !dob || !studentClass || !preferredLanguage) {
       return "Please fill all required fields";
     }
     if (isStreamClass && !stream)              return "Please select your stream";
-    if (!/^[6-9]\d{9}$/.test(phone))         return "Invalid parent phone number";
-    if (!parentPhoneVerified)                  return "Please verify parent phone number";
-    if (!parentalConsent)                      return "Parent/guardian consent is required to continue";
     if (!/^\d{6}$/.test(pincode))             return "Invalid pincode";
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(dob))  return "Invalid date of birth";
     const age = calculateAge(dob);
@@ -426,29 +361,25 @@ export default function StudentRegister() {
         profilePicUrl = profilePic;
       }
 
+      // parentGuardianName, parentPhone, parentPhoneVerified and
+      // parentalConsent were already written earlier (parent-profile,
+      // phone-verification, parent-permissions) — not repeated here so this
+      // merge-write can't clobber them.
       await setDoc(doc(db, "students", user.uid), {
         name, title, phone, school, board, section,
         class: studentClass,
         stream: isStreamClass ? (stream || null) : null,
-        parentGuardianName: parentGuardianName.trim(),
         preferredLanguage,
         profilePic: profilePicUrl,
-        parentPhone: phone,
-        parentPhoneVerified: true,
-        parentalConsent: {
-          granted: true,
-          grantedAt: serverTimestamp(),
-          parentPhone: phone,
-          policyVersion: PRIVACY_POLICY_VERSION,
-        },
         dob, age,
         location: { state: stateVal, district, area, pincode },
         interests: finalInterests,
         stats:           { xp: 0, level: 1, streak: 0 },
         learningProfile: { goal: "Improve learning", dailyTarget: 30 },
+        onboardingStep: "studentRegistration",
         onboardingComplete: true,
         createdAt: serverTimestamp(),
-      });
+      }, { merge: true });
 
       await setDoc(doc(db, "users", user.uid), {
         role: "student", roles: ["student"],
@@ -576,113 +507,6 @@ export default function StudentRegister() {
             ))}
           </View>
 
-          {/* Parent Phone + OTP */}
-          <View style={S.phoneRow}>
-            <TextInput
-              style={[S.input, S.phoneInput, parentPhoneVerified && S.inputVerified]}
-              placeholder="Parent Phone *"
-              keyboardType="phone-pad"
-              maxLength={10}
-              placeholderTextColor="#aaa"
-              value={phone}
-              onChangeText={(t) => {
-                setPhone(t);
-                if (parentPhoneVerified) setParentPhoneVerified(false);
-                if (otpSent) setOtpSent(false);
-                setConfirmResult(null);
-                setOtp(""); setOtpError("");
-                setParentalConsent(false);
-              }}
-              editable={!parentPhoneVerified}
-            />
-            {parentPhoneVerified ? (
-              <View style={S.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={20} color="#34D399" />
-                <Text style={S.verifiedText}>Verified</Text>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={[S.otpBtn, sendingOtp && { opacity: 0.6 }]}
-                onPress={handleSendOtp}
-                disabled={sendingOtp}
-              >
-                {sendingOtp
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={S.otpBtnText}>{otpSent ? "Resend" : "Send OTP"}</Text>
-                }
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <RecaptchaModal ref={recaptchaRef} firebaseConfig={firebaseConfig} />
-
-          {otpSent && !parentPhoneVerified && (
-            <View style={S.otpSection}>
-              <Text style={S.otpHint}>
-                Enter the 6-digit OTP sent to +91 {phone} — the parent/guardian entering it is confirming they're completing this registration.
-              </Text>
-              <View style={S.otpRow}>
-                <TextInput
-                  style={[S.input, S.otpInput]}
-                  placeholder="6-digit OTP"
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  placeholderTextColor="#aaa"
-                  value={otp}
-                  onChangeText={setOtp}
-                  // Best-effort autofill: iOS scans incoming Messages for a
-                  // code and offers it above the keyboard; Android's Autofill
-                  // framework can do the same via the SMS Retriever API, IF
-                  // the incoming SMS carries this app's retriever hash (not
-                  // guaranteed with Firebase's JS SDK phone auth, unlike the
-                  // native @react-native-firebase/auth SDK). Neither prop
-                  // requires a native module, so both are safe to leave on
-                  // even on platforms/SMS formats where they end up being a
-                  // no-op.
-                  textContentType="oneTimeCode"
-                  autoComplete={Platform.OS === "android" ? "sms-otp" : "one-time-code"}
-                />
-                <TouchableOpacity
-                  style={[S.otpBtn, S.verifyBtn, verifyingOtp && { opacity: 0.6 }]}
-                  onPress={handleVerifyOtp}
-                  disabled={verifyingOtp}
-                >
-                  {verifyingOtp
-                    ? <ActivityIndicator size="small" color="#fff" />
-                    : <Text style={S.otpBtnText}>Verify</Text>
-                  }
-                </TouchableOpacity>
-              </View>
-              {otpError ? <Text style={S.otpError}>{otpError}</Text> : null}
-            </View>
-          )}
-          {otpError && !otpSent ? <Text style={S.otpError}>{otpError}</Text> : null}
-
-          {/* Parental consent — DPDP Act 2023 requires this to be a distinct,
-              explicit affirmation, separate from the OTP step (which only
-              proves phone ownership, not consent). */}
-          {parentPhoneVerified && (
-            <TouchableOpacity
-              style={S.consentRow}
-              onPress={() => setParentalConsent((v) => !v)}
-              activeOpacity={0.75}
-            >
-              <Ionicons
-                name={parentalConsent ? "checkbox" : "square-outline"}
-                size={20}
-                color={parentalConsent ? "#34D399" : "#c7d2fe"}
-              />
-              <Text style={S.consentText}>
-                I am the parent/legal guardian of this student and I consent to the
-                collection and processing of their personal data as described in the{" "}
-                <Text style={S.consentLink} onPress={() => router.push("/privacy" as any)}>
-                  Privacy Policy
-                </Text>
-                , in accordance with the Digital Personal Data Protection Act, 2023.
-              </Text>
-            </TouchableOpacity>
-          )}
-
           {/* Pincode */}
           <TextInput
             style={S.input}
@@ -795,13 +619,6 @@ export default function StudentRegister() {
             </>
           )}
 
-          {/* Parent / Guardian Name */}
-          <TextInput
-            style={S.input} placeholder="Parent / Guardian Name *"
-            placeholderTextColor="#aaa" value={parentGuardianName}
-            onChangeText={(t) => setParentGuardianName(t.slice(0, 60))}
-          />
-
           {/* Language */}
           <Text style={S.label}>Preferred Language *</Text>
           <View style={S.row}>
@@ -875,16 +692,6 @@ export default function StudentRegister() {
             </LinearGradient>
           </TouchableOpacity>
 
-          {!parentPhoneVerified && (
-            <Text style={S.verifyNote}>
-              * Verify parent phone to enable registration
-            </Text>
-          )}
-          {parentPhoneVerified && !parentalConsent && (
-            <Text style={S.verifyNote}>
-              * Parent/guardian consent is required to enable registration
-            </Text>
-          )}
         </ScrollView>
       </LinearGradient>
     </SafeAreaView>
@@ -908,22 +715,6 @@ const S = StyleSheet.create({
   profilePicText:       { fontSize: 48, marginBottom: 8 },
   profilePicLabel:      { color: "#aaa", fontSize: 12 },
   input:         { backgroundColor: "rgba(255,255,255,0.06)", padding: 14, borderRadius: 14, marginBottom: 12, color: "#fff" },
-  inputVerified: { borderWidth: 1, borderColor: "#34D399" },
-  phoneRow:      { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
-  phoneInput:    { flex: 1, marginBottom: 0 },
-  otpBtn:        { backgroundColor: "#6366F1", paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12 },
-  verifyBtn:     { backgroundColor: "#059669" },
-  otpBtnText:    { color: "#fff", fontWeight: "700", fontSize: 13 },
-  verifiedBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
-  verifiedText:  { color: "#34D399", fontWeight: "700", fontSize: 13 },
-  otpSection:    { marginBottom: 12 },
-  otpHint:       { color: "#94a3b8", fontSize: 12, marginBottom: 8 },
-  otpRow:        { flexDirection: "row", alignItems: "center", gap: 8 },
-  otpInput:      { flex: 1, marginBottom: 0 },
-  otpError:      { color: "#F87171", fontSize: 12, marginBottom: 8 },
-  consentRow:    { flexDirection: "row", alignItems: "flex-start", gap: 10, marginTop: 4, marginBottom: 14 },
-  consentText:   { color: "#c7d2fe", fontSize: 12, flex: 1, lineHeight: 18 },
-  consentLink:   { color: "#FFD700", fontWeight: "700" },
   auto:          { color: "#34D399", marginBottom: 10 },
   label:         { color: "#c7d2fe", marginTop: 10, marginBottom: 6 },
   row:           { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
@@ -938,7 +729,6 @@ const S = StyleSheet.create({
   referralHint:  { color: "#94a3b8", fontSize: 11, marginBottom: 8 },
   referralValid: { color: "#34D399", fontSize: 11, marginBottom: 8 },
   error:         { color: "#F87171", marginTop: 10, textAlign: "center" },
-  verifyNote:    { color: "#64748b", fontSize: 11, textAlign: "center", marginTop: 8 },
   button:        { marginTop: 20, borderRadius: 30, overflow: "hidden" },
   buttonInner:   { paddingVertical: 16, alignItems: "center" },
   buttonText:    { color: "#fff", fontWeight: "700", fontSize: 16 },

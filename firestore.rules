@@ -31,12 +31,23 @@ service cloud.firestore {
       // 'stream' and 'parentGuardianName' added 2026-09-14 (Class 11/12
       // stream + parent/guardian name architecture update) — register.tsx
       // and profile-settings.tsx now write both on create.
+      //
+      // 'onboardingStep', 'parentRelationship', 'parentPermissions' added
+      // 2026-09-23 (Parent Profile / Phone Verification / Parent Permissions
+      // onboarding steps moved ahead of Student Registration) — the initial
+      // students/{uid} stub (signup.tsx) and the new (auth)/parent-profile,
+      // (auth)/phone-verification and (auth)/parent-permissions screens
+      // write these incrementally, ahead of the final Student Registration
+      // submit. Existing writes to this doc are otherwise unaffected: once
+      // the stub exists, every later write here is an `update`, governed by
+      // the deny-list below, not this create allowlist.
       allow create: if request.auth.uid == userId
         && request.resource.data.keys().hasOnly([
           'name', 'title', 'phone', 'school', 'board', 'section', 'class',
-          'stream', 'parentGuardianName',
+          'stream', 'parentGuardianName', 'parentRelationship',
           'preferredLanguage', 'profilePic', 'parentPhone', 'parentPhoneVerified',
-          'parentalConsent', 'dob', 'age', 'location', 'interests', 'stats',
+          'parentalConsent', 'parentPermissions', 'onboardingStep',
+          'dob', 'age', 'location', 'interests', 'stats',
           'learningProfile', 'onboardingComplete', 'createdAt', 'updatedAt',
           'email', 'role', 'pushToken',
           'LearnFunXP', 'LearnFunStreak', 'LearnFunLastMissionDate',

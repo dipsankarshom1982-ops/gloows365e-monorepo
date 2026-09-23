@@ -13,10 +13,14 @@ import {
   Text,
   View,
 } from "react-native";
+import { resolveOnboardingRoute } from "@gloows/shared-logic";
 
 type Route =
   | "welcome"
   | "login"
+  | "parent-profile"
+  | "phone-verification"
+  | "parent-permissions"
   | "register"
   | "restart-onboarding"
   | "restart-home"
@@ -100,6 +104,9 @@ export default function Index() {
   }
 
   console.log("🚦 Final route:", route);
+  if (route === "parent-profile")     return <Redirect href={"/(auth)/parent-profile" as any} />;
+  if (route === "phone-verification") return <Redirect href={"/(auth)/phone-verification" as any} />;
+  if (route === "parent-permissions") return <Redirect href={"/(auth)/parent-permissions" as any} />;
 
   if (route === "welcome")            return <Redirect href="/welcome" />;
   if (route === "login")              return <Redirect href="/login" />;
@@ -155,17 +162,21 @@ async function readFirestoreAndRoute(
     console.log("📄 students/ exists:", studentSnap.exists());
 
     if (studentSnap.exists()) {
-      const onboarding = studentSnap.data()?.onboardingComplete ?? false;
-      console.log("📄 students/ onboardingComplete:", onboarding);
+      const next = resolveOnboardingRoute(studentSnap.data() as any);
+      console.log("📄 students/ onboarding route:", next);
       if (!isMounted) return;
-      setRoute(onboarding ? "student-home" : "register");
+      setRoute(
+        next === "home" ? "student-home"
+        : next === "student-registration" ? "register"
+        : next,
+      );
       setLoading(false);
       return;
     }
 
     // Nothing found
-    console.log("⚠️ No docs found → register");
-    if (isMounted) { setRoute("register"); setLoading(false); }
+    console.log("⚠️ No docs found → parent-profile");
+    if (isMounted) { setRoute("parent-profile"); setLoading(false); }
 
   } catch (e: any) {
     console.log("❌ Firestore error:", e?.code, e?.message);

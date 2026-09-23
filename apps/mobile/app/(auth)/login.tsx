@@ -34,6 +34,20 @@ import { GoogleAuthProvider, signInWithCredential, signInWithEmailAndPassword } 
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import * as Google from "expo-auth-session/providers/google";
 import * as WebBrowser from "expo-web-browser";
+import { resolveOnboardingRoute, type OnboardingRoute } from "@gloows/shared-logic";
+
+// Maps the platform-agnostic OnboardingRoute onto this app's actual expo-router
+// paths — the one place that translation happens, alongside index.tsx and
+// signup.tsx's equivalent usages of resolveOnboardingRoute().
+function pathForOnboardingRoute(route: OnboardingRoute): string {
+  switch (route) {
+    case "parent-profile":       return "/(auth)/parent-profile";
+    case "phone-verification":   return "/(auth)/phone-verification";
+    case "parent-permissions":   return "/(auth)/parent-permissions";
+    case "student-registration": return "/(auth)/register";
+    case "home":                 return "/(drawer)/(tabs)/reels";
+  }
+}
 
 // Required once per app for the OAuth redirect to close the in-app browser
 // correctly after Google hands control back. Expo's own docs put this at
@@ -204,9 +218,10 @@ export default function LoginScreen() {
       }
 
       const studentSnap = await getDoc(doc(db, "students", user.uid));
-      if (!studentSnap.exists() || !studentSnap.data()?.onboardingComplete) {
+      const nextRoute = resolveOnboardingRoute(studentSnap.exists() ? (studentSnap.data() as any) : undefined);
+      if (nextRoute !== "home") {
         setMessage("Redirecting to complete your profile...");
-        setTimeout(() => router.replace("/(auth)/register" as any), 500);
+        setTimeout(() => router.replace(pathForOnboardingRoute(nextRoute) as any), 500);
         return;
       }
 
@@ -268,11 +283,12 @@ export default function LoginScreen() {
 
       const userCred = await signInWithEmailAndPassword(auth, trimmedEmail, password.trim());
       await AsyncStorage.setItem("lastEmail", trimmedEmail);
+      const nextRoute = resolveOnboardingRoute(snap.exists() ? (snap.data() as any) : undefined);
       const snap = await getDoc(doc(db, "students", userCred.user.uid));
 
-      if (!snap.exists() || !snap.data()?.onboardingComplete) {
+      if (nextRoute !== "home") {
         setMessage("Redirecting to complete your profile...");
-        setTimeout(() => router.replace("/(auth)/register" as any), 500);
+        setTimeout(() => router.replace(pathForOnboardingRoute(nextRoute) as any), 500);
         return;
       }
 

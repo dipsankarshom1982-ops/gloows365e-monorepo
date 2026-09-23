@@ -31,6 +31,8 @@ import { useRouter } from "next/navigation";
 import { GoogleAuthProvider, signInWithEmailAndPassword, signInWithPopup } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { resolveOnboardingRoute } from "@gloows/shared-logic";
+import { ONBOARDING_PATHS } from "@/lib/onboardingPaths";
 
 // Mirrors mobile index.tsx constants
 const RESTART_TYPES = ["restartEducation", "restart_education", "restart"];
@@ -192,10 +194,10 @@ export default function LoginPage() {
     // ── Step 2: Check students/{uid} (normal student / legacy path) ───
     const studentSnap = await getDoc(doc(db, "students", uid));
     if (studentSnap.exists()) {
-      const onboarding = studentSnap.data()?.onboardingComplete ?? false;
-      if (!onboarding) {
+      const next = resolveOnboardingRoute(studentSnap.data() as any);
+      if (next !== "home") {
         setMessage("Redirecting to complete your profile...");
-        setTimeout(() => router.replace("/register"), 500);
+        setTimeout(() => router.replace(ONBOARDING_PATHS[next]), 500);
         return;
       }
       setMessage("Login successful!");
@@ -207,7 +209,7 @@ export default function LoginPage() {
 
     // ── Step 3: Neither doc found → register ─────────────────────────
     setMessage("Redirecting to complete your profile...");
-    setTimeout(() => router.replace("/register"), 500);
+    setTimeout(() => router.replace("/parent-profile"), 500);
   };
 
   const routeAfterAuth = async (uid: string) => {

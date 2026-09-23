@@ -25,6 +25,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { resolveOnboardingRoute } from "@gloows/shared-logic";
+import { ONBOARDING_PATHS } from "@/lib/onboardingPaths";
 
 const RESTART_TYPES = ["restartEducation", "restart_education", "restart"];
 const RESTART_INDICATOR_FIELDS = ["lastClassPassed", "educationGapReason", "currentOccupation"];
@@ -83,13 +85,12 @@ export default function RootPage() {
         // --- Fall back to students/{uid} (legacy / normal student path) ---
         const studentSnap = await getDoc(doc(db, "students", user.uid));
         if (studentSnap.exists()) {
-          const onboarding = studentSnap.data()?.onboardingComplete ?? false;
-          router.replace(onboarding ? "/reels" : "/register");
+          router.replace(ONBOARDING_PATHS[resolveOnboardingRoute(studentSnap.data() as any)]);
           return;
         }
 
-        // --- Nothing found → send to registration ---
-        router.replace("/register");
+        // --- Nothing found → start onboarding ---
+        router.replace("/parent-profile");
 
       } catch (e) {
         console.warn("Root routing error:", e);
