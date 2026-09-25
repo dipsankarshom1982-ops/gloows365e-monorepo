@@ -25,7 +25,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { getPhoneVerifyAuth, usePhoneOtpFlow } from "@gloows/shared-logic";
 
 import { auth, db, firebaseConfig } from "@/lib/firebase";
@@ -40,35 +40,73 @@ export default function PhoneVerification() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
+  const [sendError, setSendError] = useState("");
+  const startedRef = useRef(false);
+
   useEffect(() => {
-    if (params.phone) otpFlow.setPhone(String(params.phone));
-    // Auto-send on arrival so the parent doesn't need an extra tap.
-    if (params.phone) {
-      handleSend(String(params.phone));
-    }
+    if (params.phone) { otpFlow.setPhone(String(params.phone)); return; }
+    // Resumed directly (login / cold start) — use the number saved by Parent Profile.
+    const user = auth.currentUser;
+    if (!user) { router.replace("/login" as any); return; }
+    getDoc(doc(db, "students", user.uid))
+      .then((snap) => {
+        const saved = snap.exists() ? snap.data()?.parentPhone : undefined;
+        if (saved) otpFlow.setPhone(saved); else router.replace("/(auth)/parent-profile" as any);
+      })
+      .catch(() => router.replace("/(auth)/parent-profile" as any));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.phone]);
 
-  const handleSend = async (phoneOverride?: string) => {
-    const phoneAuth = getPhoneVerifyAuth(firebaseConfig as any);
-    const recaptchaToken = await recaptchaRef.current!.verify();
+  const handleSend = async () => {
+    setSendError("");
+    let recaptchaToken: string;
+    try {
+      recaptchaToken = await recaptchaRef.current!.verify();
+    } catch (e: any) {
+      setSendError(e?.message === "Verification cancelled" ? "Verification cancelled." : "Verification check failed. Please check your internet connection and try again.");
+      return;
+    }
     const appVerifier = { type: "recaptcha", verify: async () => recaptchaToken };
-    await otpFlow.sendOtp(phoneAuth, appVerifier as any);
+    await otpFlow.sendOtp(getPhoneVerifyAuth(firebaseConfig as any), appVerifier as any);
   };
 
+  // Auto-send once, on the render where the phone has actually landed in the
+  // hook's state — sendOtp closes over `phone`, so firing it from the same
+  // effect that calls setPhone would validate the previous (empty) value.
+  useEffect(() => {
+    if (otpFlow.phone && !startedRef.current) {
+      startedRef.current = true;
+      handleSend();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otpFlow.phone]);
+
+  const saveVerified = async () => {
+    const user = auth.currentUser;
+    if (!user) return false;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await setDoc(doc(db, "students", user.uid), {
+        parentPhone: otpFlow.phone,
+        parentPhoneVerified: true,
+        onboardingStep: "phoneVerified",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      return true;
+    } catch (e: any) {
+      setSaveError(e?.message || "Failed to save verification. Please tap Continue to retry.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const savedRef = useRef(false);
   useEffect(() => {
     if (!otpFlow.verified) return;
-    const user = auth.currentUser;
-    if (!user) return;
-    setSaving(true);
-    setDoc(doc(db, "students", user.uid), {
-      parentPhone: otpFlow.phone,
-      parentPhoneVerified: true,
-      onboardingStep: "phoneVerified",
-      updatedAt: serverTimestamp(),
-    }, { merge: true })
-      .catch((e: any) => setSaveError(e?.message || "Failed to save verification. Please try Continue again."))
-      .finally(() => setSaving(false));
+    saveVerified().then((ok) => { savedRef.current = ok; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otpFlow.verified]);
 
   const handleChangeNumber = () => {
@@ -76,7 +114,8 @@ export default function PhoneVerification() {
     router.back();
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
+    if (!savedRef.current && !(await saveVerified())) return;
     router.replace("/(auth)/parent-permissions" as any);
   };
 
@@ -128,7 +167,7 @@ export default function PhoneVerification() {
                 autoComplete={Platform.OS === "android" ? "sms-otp" : "one-time-code"}
               />
 
-              {otpFlow.otpError ? <Text style={S.error}>{otpFlow.otpError}</Text> : null}
+              {otpFlow.otpError || sendError ? <Text style={S.error}>{otpFlow.otpError || sendError}</Text> : null}
 
               <TouchableOpacity
                 style={[S.button, otpFlow.verifyingOtp && { opacity: 0.6 }]}
@@ -145,7 +184,7 @@ export default function PhoneVerification() {
 
               <TouchableOpacity
                 style={S.linkBtn}
-                onPress={() => handleSend()}
+                onPress={handleSend}
                 disabled={otpFlow.sendingOtp}
               >
                 <Text style={S.linkText}>

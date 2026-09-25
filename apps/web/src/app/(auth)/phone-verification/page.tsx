@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAuth, RecaptchaVerifier } from "firebase/auth";
-import { doc, getFirestore, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, getFirestore, serverTimestamp, setDoc } from "firebase/firestore";
 import { getPhoneVerifyAuth, usePhoneOtpFlow } from "@gloows/shared-logic";
 import { firebaseConfig } from "@/lib/firebase";
 
@@ -48,8 +48,17 @@ export default function PhoneVerificationPage() {
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search).get("phone");
-    if (p) setPhone(p);
-    else router.replace("/parent-profile");
+    if (p) { setPhone(p); return; }
+    // Resumed directly (login / cold start) — use the number saved by Parent Profile.
+    const unsub = getAuth().onAuthStateChanged(async (user) => {
+      if (!user) { router.replace("/login"); return; }
+      try {
+        const snap = await getDoc(doc(getFirestore(), "students", user.uid));
+        const saved = snap.exists() ? snap.data()?.parentPhone : undefined;
+        if (saved) setPhone(saved); else router.replace("/parent-profile");
+      } catch { router.replace("/parent-profile"); }
+    });
+    return () => unsub();
   }, [setPhone, router]);
 
   useEffect(() => {

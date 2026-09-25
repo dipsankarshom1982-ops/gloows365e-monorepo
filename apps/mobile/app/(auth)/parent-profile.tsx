@@ -82,6 +82,7 @@ export default function ParentProfile() {
         parentGuardianName: fullName.trim(),
         parentRelationship: relationship,
         parentPhone: phone,
+        parentPhoneVerified: false,
         onboardingStep: "parentProfileCompleted",
         updatedAt: serverTimestamp(),
       }, { merge: true });

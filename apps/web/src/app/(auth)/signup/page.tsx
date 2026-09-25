@@ -17,6 +17,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { resolveOnboardingRoute } from "@gloows/shared-logic";
+import { ONBOARDING_PATHS } from "@/lib/onboardingPaths";
 import {
   getAuth,
   createUserWithEmailAndPassword,
@@ -189,7 +191,8 @@ export default function SignupPage() {
         email: user.email ?? "",
         role: "student",
         onboardingComplete: false,
-        onboardingStep: "accountCreated",
+        // Don't rewind a returning user who already got further.
+        ...(studentSnap.data()?.onboardingStep ? {} : { onboardingStep: "accountCreated" }),
         createdAt: serverTimestamp(),
       }, { merge: true });
       await setDoc(doc(db, "users", user.uid), {
@@ -205,7 +208,10 @@ export default function SignupPage() {
         createdAt: serverTimestamp(),
       }, { merge: true });
 
-      router.replace("/parent-profile");
+      router.replace(ONBOARDING_PATHS[resolveOnboardingRoute({
+        ...(studentSnap.exists() ? studentSnap.data() : {}),
+        onboardingStep: studentSnap.data()?.onboardingStep ?? "accountCreated",
+      })]);
 
     } catch (err: unknown) {
       const code = (err as { code?: string }).code ?? "";

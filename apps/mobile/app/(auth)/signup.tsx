@@ -30,6 +30,7 @@ import * as Google from "expo-auth-session/providers/google";
 import * as WebBrowser from "expo-web-browser";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PRIVACY_POLICY_VERSION } from "@/app/privacy";
+import { resolveOnboardingRoute } from "@gloows/shared-logic";
 
 // Required once per app for the OAuth redirect to close the in-app browser
 // correctly — see login.tsx, which already does this at module scope. Safe
@@ -156,7 +157,8 @@ export default function Signup() {
         email: user.email ?? "",
         role: "student",
         onboardingComplete: false,
-        onboardingStep: "accountCreated",
+        // Don't rewind a returning user who already got further.
+        ...(studentSnap.data()?.onboardingStep ? {} : { onboardingStep: "accountCreated" }),
         createdAt: serverTimestamp(),
       }, { merge: true });
       await setDoc(userRef, {
@@ -174,7 +176,11 @@ export default function Signup() {
         },
       }, { merge: true });
 
-      router.replace("/(auth)/parent-profile" as any);
+      const nextRoute = resolveOnboardingRoute({
+        ...(studentSnap.exists() ? studentSnap.data() : {}),
+        onboardingStep: studentSnap.data()?.onboardingStep ?? "accountCreated",
+      });
+      router.replace((nextRoute === "student-registration" ? "/(auth)/register" : `/(auth)/${nextRoute}`) as any);
     } catch (err: any) {
       if (err.code === "auth/account-exists-with-different-credential") {
         setError("This email is already registered with a password. Please log in with email & password instead.");
