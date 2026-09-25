@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { collection, getDocs, doc, updateDoc, setDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, runTransaction } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { motion } from "framer-motion";
 import ToggleSwitch from "../components/ToggleSwitch";
@@ -34,6 +34,7 @@ export default function AppModules() {
   const [newName, setNewName]   = useState("");
   const [newIcon, setNewIcon]   = useState("");
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     // BUGFIX ("previous module not showing"): this used to run once with
@@ -65,9 +66,11 @@ export default function AppModules() {
   const createModule = async () => {
     const id = newId.trim();
     const name = newName.trim();
-    if (!id || !name || modules.some((m) => m.id === id)) return;
+    if (!id || !name) return;
     setCreating(true);
+    setCreateError(null);
     try {
+      const ref = doc(db, "appModules", id);
       const nextOrder = modules.reduce((max, m) => Math.max(max, m.order ?? 0), 0) + 1;
       const newModule: AppModule = {
         id, name,
@@ -76,12 +79,29 @@ export default function AppModules() {
         isEnabled: false, // review here first, then flip on via the toggle
         isComingSoon: false,
       };
-      await setDoc(doc(db, "appModules", id), {
-        name: newModule.name, icon: newModule.icon ?? null,
-        order: newModule.order, isEnabled: false, isComingSoon: false,
+      // FIX (audit): the local `modules` duplicate check above raced another
+      // admin creating the same id between this page's load and the click —
+      // and setDoc without merge would silently overwrite whatever they'd
+      // just created. A transaction reads the CURRENT server doc and creates
+      // it atomically only if it's still absent, so no phantom local state
+      // is ever added before the server actually confirms the create.
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        if (snap.exists()) throw new Error(`DUPLICATE_MODULE:${id}`);
+        tx.set(ref, {
+          name: newModule.name, icon: newModule.icon ?? null,
+          order: newModule.order, isEnabled: false, isComingSoon: false,
+        });
       });
       setModules((prev) => [...prev, newModule].sort((a, b) => (a.order ?? 99) - (b.order ?? 99)));
       setNewId(""); setNewName(""); setNewIcon(""); setShowAddForm(false);
+    } catch (err: any) {
+      const msg = String(err?.message ?? "");
+      setCreateError(
+        msg.startsWith("DUPLICATE_MODULE:")
+          ? `A module with id "${id}" already exists.`
+          : `Create failed: ${msg || "Check Firestore rules are deployed."}`
+      );
     } finally {
       setCreating(false);
     }
@@ -100,13 +120,22 @@ export default function AppModules() {
         </div>
         {canManage && (
           <button
-            onClick={() => setShowAddForm((v) => !v)}
+            onClick={() => { setShowAddForm((v) => !v); setCreateError(null); }}
             className="shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold px-4 py-2 rounded-xl transition-colors"
           >
             {showAddForm ? "Cancel" : "+ Add Module"}
           </button>
         )}
       </div>
+
+      {createError && (
+        <div className="bg-red-950/50 border border-red-900 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+          <p className="text-red-300 text-sm">{createError}</p>
+          <button onClick={() => setCreateError(null)} className="text-red-400 text-xs font-bold hover:text-red-300 shrink-0">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {canManage && showAddForm && (
         <motion.div

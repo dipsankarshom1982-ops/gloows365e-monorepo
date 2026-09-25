@@ -39,8 +39,8 @@
 // data those already-correct consumers read; it introduces no new access
 // control logic of its own.
 
-import { doc, getDoc, getDocs, collection, setDoc } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { doc, onSnapshot, collection, setDoc } from "firebase/firestore";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ToggleSwitch from "../components/ToggleSwitch";
 import { useAuth } from "../context/AuthContext";
 import { db } from "../lib/firebase";
@@ -161,21 +161,44 @@ export default function AppStructure() {
   const [expanded, setExpanded]       = useState<Set<string>>(new Set());
   const [search, setSearch]           = useState("");
 
+  // Reliability fix: these 4 sources used to be one-time reads (getDocs/
+  // getDoc at mount), so this page could sit on stale data indefinitely —
+  // another admin's change, or the same admin in another tab, never showed
+  // up without a manual reload. Live onSnapshot listeners make Firestore the
+  // continuous source of truth: appModules/homeSection/aiGuru/drawerItems
+  // are the exact same 4 documents/collections, same shape, no new keys.
   useEffect(() => {
-    Promise.all([
-      getDocs(collection(db, "appModules")),
-      getDoc(doc(db, "featureFlags", "homeSection")),
-      getDoc(doc(db, "featureFlags", "aiGuru")),
-      getDoc(doc(db, "featureFlags", "drawerItems")),
-    ]).then(([modulesSnap, homeSnap, aiSnap, drawerSnap]) => {
-      const modules: Record<string, AppModuleDoc> = {};
-      modulesSnap.docs.forEach((d) => { modules[d.id] = d.data() as AppModuleDoc; });
-      setAppModules(modules);
-      if (homeSnap.exists())   setHomeFlags(homeSnap.data() as Record<string, boolean>);
-      if (aiSnap.exists())     setAiFlags(aiSnap.data() as Record<string, boolean>);
-      if (drawerSnap.exists()) setDrawerFlags(drawerSnap.data() as Record<string, boolean>);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    let loaded = 0;
+    const total = 4; // appModules collection + the 3 featureFlags docs below
+    const check = () => { if (++loaded === total) setLoading(false); };
+
+    const unsubModules = onSnapshot(
+      collection(db, "appModules"),
+      (snap) => {
+        const modules: Record<string, AppModuleDoc> = {};
+        snap.forEach((d) => { modules[d.id] = d.data() as AppModuleDoc; });
+        setAppModules(modules);
+        check();
+      },
+      () => check()
+    );
+    const unsubHome = onSnapshot(
+      doc(db, "featureFlags", "homeSection"),
+      (snap) => { setHomeFlags(snap.exists() ? (snap.data() as Record<string, boolean>) : {}); check(); },
+      () => check()
+    );
+    const unsubAi = onSnapshot(
+      doc(db, "featureFlags", "aiGuru"),
+      (snap) => { setAiFlags(snap.exists() ? (snap.data() as Record<string, boolean>) : {}); check(); },
+      () => check()
+    );
+    const unsubDrawer = onSnapshot(
+      doc(db, "featureFlags", "drawerItems"),
+      (snap) => { setDrawerFlags(snap.exists() ? (snap.data() as Record<string, boolean>) : {}); check(); },
+      () => check()
+    );
+
+    return () => { unsubModules(); unsubHome(); unsubAi(); unsubDrawer(); };
   }, []);
 
   // isEnabled defaults to true when no doc/key exists yet — matches every
@@ -184,26 +207,60 @@ export default function AppStructure() {
   const isModuleEnabled = (id: string) => appModules[id]?.isEnabled !== false;
   const isFlagEnabled   = (flags: Record<string, boolean>, key: string) => flags[key] ?? true;
 
-  const toggleModule = async (id: string, label: string) => {
-    if (!canManage) return;
-    const next = !isModuleEnabled(id);
-    setAppModules((prev) => ({ ...prev, [id]: { ...prev[id], isEnabled: next } }));
-    // merge:true — creates the doc on first-ever toggle if Admin never
-    // configured this module before (see header comment); never
-    // overwrites isComingSoon or any other existing field.
-    await setDoc(doc(db, "appModules", id), { name: label, isEnabled: next }, { merge: true });
+  // Per-control write-in-flight guard, keyed e.g. "module:ai-guru" or
+  // "flag:homeSection:stories". pendingRef is the actual click guard — a
+  // plain ref so it's checked synchronously and can't race a rapid second
+  // click that lands before React re-renders the disabled toggle; `pending`
+  // (state) only drives that visual disabled state. On a failed write,
+  // nothing here needs to manually roll the toggle back: appModules/
+  // homeFlags/aiFlags/drawerFlags are live Firestore state, and the
+  // Firestore SDK itself reverts its local optimistic cache — and so these
+  // onSnapshot listeners — back to the last known-good server value when a
+  // write is rejected, so the toggle snaps back on its own.
+  const pendingRef = useRef<Set<string>>(new Set());
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const isPending = (key: string) => pending.has(key);
+
+  const withPending = async (key: string, fn: () => Promise<void>) => {
+    if (pendingRef.current.has(key)) return; // a write for this exact control is already in flight
+    pendingRef.current.add(key);
+    setPending((prev) => new Set(prev).add(key));
+    setError(null);
+    try {
+      await fn();
+    } catch (err: any) {
+      setError(`Save failed: ${err?.message ?? "Check Firestore rules are deployed."}`);
+    } finally {
+      pendingRef.current.delete(key);
+      setPending((prev) => { const next = new Set(prev); next.delete(key); return next; });
+    }
   };
 
-  const toggleFlag = async (
+  const toggleModule = (id: string, label: string) => {
+    if (!canManage) return;
+    withPending(`module:${id}`, async () => {
+      // Read the CURRENT live value at write time (appModules is
+      // listener-driven, never a stale one-time copy) — never toggle off of
+      // what render happened to show when the click started.
+      const next = !isModuleEnabled(id);
+      // merge:true — creates the doc on first-ever toggle if Admin never
+      // configured this module before (see header comment); never
+      // overwrites isComingSoon or any other existing field.
+      await setDoc(doc(db, "appModules", id), { name: label, isEnabled: next }, { merge: true });
+    });
+  };
+
+  const toggleFlag = (
     docName: "homeSection" | "aiGuru" | "drawerItems",
     flags: Record<string, boolean>,
-    setFlags: (f: Record<string, boolean>) => void,
     key: string
   ) => {
     if (!canManage) return;
-    const next = !isFlagEnabled(flags, key);
-    setFlags({ ...flags, [key]: next });
-    await setDoc(doc(db, "featureFlags", docName), { [key]: next }, { merge: true });
+    withPending(`flag:${docName}:${key}`, async () => {
+      const next = !isFlagEnabled(flags, key);
+      await setDoc(doc(db, "featureFlags", docName), { [key]: next }, { merge: true });
+    });
   };
 
   const toggleExpanded = (id: string) => {
@@ -254,6 +311,15 @@ export default function AppStructure() {
         className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
       />
 
+      {error && (
+        <div className="bg-red-950/50 border border-red-900 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+          <p className="text-red-300 text-sm">{error}</p>
+          <button onClick={() => setError(null)} className="text-red-400 text-xs font-bold hover:text-red-300 shrink-0">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <div className="space-y-4">
         {SUPER_MODULES.map((sm) => {
           const counts = superModuleCounts[sm.id];
@@ -282,8 +348,8 @@ export default function AppStructure() {
                     <FeatureGrid
                       items={HOME_SECTIONS.filter((f) => matches(f.label))}
                       flags={homeFlags}
-                      canManage={canManage}
-                      onToggle={(key) => toggleFlag("homeSection", homeFlags, setHomeFlags, key)}
+                      isDisabled={(key) => !canManage || isPending(`flag:homeSection:${key}`)}
+                      onToggle={(key) => toggleFlag("homeSection", homeFlags, key)}
                     />
                   )}
 
@@ -300,12 +366,13 @@ export default function AppStructure() {
                           key={m.key}
                           mod={m}
                           enabled={isModuleEnabled(m.key)}
-                          canManage={canManage}
+                          isDisabled={!canManage || isPending(`module:${m.key}`)}
                           onToggleModule={() => toggleModule(m.key, m.label)}
                           expanded={expanded.has(`learn:${m.key}`) || !!q}
                           onExpand={() => toggleExpanded(`learn:${m.key}`)}
                           featureFlags={aiFlags}
-                          onToggleFeature={(key) => toggleFlag("aiGuru", aiFlags, setAiFlags, key)}
+                          featureIsDisabled={(key) => !canManage || isPending(`flag:aiGuru:${key}`)}
+                          onToggleFeature={(key) => toggleFlag("aiGuru", aiFlags, key)}
                           featureFilter={matches}
                         />
                       ))}
@@ -319,11 +386,12 @@ export default function AppStructure() {
                           key={m.key}
                           mod={m}
                           enabled={isModuleEnabled(m.key)}
-                          canManage={canManage}
+                          isDisabled={!canManage || isPending(`module:${m.key}`)}
                           onToggleModule={() => toggleModule(m.key, m.label)}
                           expanded={false}
                           onExpand={() => {}}
                           featureFlags={{}}
+                          featureIsDisabled={() => true}
                           onToggleFeature={() => {}}
                           featureFilter={matches}
                         />
@@ -342,8 +410,8 @@ export default function AppStructure() {
                             <FeatureGrid
                               items={filtered}
                               flags={drawerFlags}
-                              canManage={canManage}
-                              onToggle={(key) => toggleFlag("drawerItems", drawerFlags, setDrawerFlags, key)}
+                              isDisabled={(key) => !canManage || isPending(`flag:drawerItems:${key}`)}
+                              onToggle={(key) => toggleFlag("drawerItems", drawerFlags, key)}
                             />
                           </div>
                         );
@@ -366,10 +434,10 @@ export default function AppStructure() {
 
 // ─── Sub-components ──────────────────────────────────────────────────────
 
-function FeatureGrid({ items, flags, canManage, onToggle }: {
+function FeatureGrid({ items, flags, isDisabled, onToggle }: {
   items: FeatureDef[];
   flags: Record<string, boolean>;
-  canManage: boolean;
+  isDisabled: (key: string) => boolean;
   onToggle: (key: string) => void;
 }) {
   if (items.length === 0) {
@@ -391,7 +459,7 @@ function FeatureGrid({ items, flags, canManage, onToggle }: {
               <p className="text-slate-500 text-xs truncate">{f.description}</p>
             </div>
           </div>
-          <ToggleSwitch value={flags[f.key] ?? true} onChange={() => onToggle(f.key)} disabled={!canManage} />
+          <ToggleSwitch value={flags[f.key] ?? true} onChange={() => onToggle(f.key)} disabled={isDisabled(f.key)} />
         </div>
       ))}
     </div>
@@ -399,15 +467,16 @@ function FeatureGrid({ items, flags, canManage, onToggle }: {
 }
 
 function ModuleRow({
-  mod, enabled, canManage, onToggleModule, expanded, onExpand, featureFlags, onToggleFeature, featureFilter,
+  mod, enabled, isDisabled, onToggleModule, expanded, onExpand, featureFlags, featureIsDisabled, onToggleFeature, featureFilter,
 }: {
   mod: ModuleDef;
   enabled: boolean;
-  canManage: boolean;
+  isDisabled: boolean;
   onToggleModule: () => void;
   expanded: boolean;
   onExpand: () => void;
   featureFlags: Record<string, boolean>;
+  featureIsDisabled: (key: string) => boolean;
   onToggleFeature: (key: string) => void;
   featureFilter: (label: string) => boolean;
 }) {
@@ -431,7 +500,7 @@ function ModuleRow({
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${enabled ? "text-emerald-400 bg-emerald-500/10" : "text-slate-500 bg-slate-800"}`}>
             {enabled ? "● ENABLED" : "○ DISABLED"}
           </span>
-          <ToggleSwitch value={enabled} onChange={onToggleModule} disabled={!canManage} />
+          <ToggleSwitch value={enabled} onChange={onToggleModule} disabled={isDisabled} />
         </div>
       </div>
       {hasFeatures && expanded && (
@@ -439,7 +508,7 @@ function ModuleRow({
           <FeatureGrid
             items={mod.features.filter((f) => featureFilter(f.label))}
             flags={featureFlags}
-            canManage={canManage}
+            isDisabled={featureIsDisabled}
             onToggle={onToggleFeature}
           />
         </div>

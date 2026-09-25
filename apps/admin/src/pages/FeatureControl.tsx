@@ -1,9 +1,10 @@
 // PATH: admin-web/src/pages/FeatureControl.tsx
 
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ToggleSwitch from "../components/ToggleSwitch";
+import { diffFlags, saveFlagDiffs, type FlagDocName, type FlagMap } from "../lib/flagDiffSave";
 import { db } from "../lib/firebase";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -133,31 +134,127 @@ export default function FeatureControl() {
   const [saving,  setSaving]   = useState(false);
   const [saved,   setSaved]    = useState(false);
 
+  // What this page last loaded from / successfully saved to Firestore. Save
+  // writes only the flags that differ from this, as field-level merges — see
+  // lib/flagDiffSave.ts — so a stale page can't revert another Admin's changes.
+  // UNCHANGED role/mechanism from the earlier fix — still the sole input to
+  // diffFlags()/saveFlagDiffs() below.
+  const baseline = useRef<Record<FlagDocName, FlagMap>>({
+    homeSection: defaultHomeFlags, aiGuru: defaultAiFlags, drawerItems: defaultDrawerFlags,
+  });
+
+  // Keys the Admin has locally toggled (via a card or Enable/Disable All)
+  // since the last successful Save — i.e. a pending, unsaved edit. Live
+  // snapshots below must skip these keys entirely (both the displayed value
+  // AND baseline) so a remote change never silently erases what the Admin is
+  // mid-editing; Save removes a key once its write succeeds. A ref, not
+  // state — it doesn't drive rendering on its own, only alongside the
+  // homeFlags/aiFlags/drawerFlags updates that already do.
+  const dirtyKeys = useRef<Record<FlagDocName, Set<string>>>({
+    homeSection: new Set(), aiGuru: new Set(), drawerItems: new Set(),
+  });
+
+  // Reliability fix: this used to be a one-time getDoc() at mount, so this
+  // page could sit on stale data indefinitely — another admin's change, or
+  // the same admin in another tab, never showed up without a manual reload
+  // (same issue AppStructure.tsx had, fixed the same way there). Live
+  // onSnapshot listeners make Firestore the continuous source of truth for
+  // any key the Admin hasn't locally touched, while dirtyKeys (above)
+  // protects whatever they're still mid-editing.
   useEffect(() => {
-    Promise.all([
-      getDoc(doc(db, "featureFlags", "homeSection")),
-      getDoc(doc(db, "featureFlags", "aiGuru")),
-      getDoc(doc(db, "featureFlags", "drawerItems")),
-    ]).then(([homeSnap, aiSnap, drawerSnap]) => {
-      if (homeSnap.exists())   setHomeFlags({   ...defaultHomeFlags,   ...homeSnap.data()   });
-      if (aiSnap.exists())     setAiFlags({     ...defaultAiFlags,     ...aiSnap.data()     });
-      if (drawerSnap.exists()) setDrawerFlags({ ...defaultDrawerFlags, ...drawerSnap.data() });
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    let loaded = 0;
+    const total = 3;
+    const check = () => { if (++loaded === total) setLoading(false); };
+
+    const unsubHome = onSnapshot(
+      doc(db, "featureFlags", "homeSection"),
+      (snap) => {
+        if (snap.exists()) {
+          const next = { ...defaultHomeFlags, ...(snap.data() as FlagMap) };
+          const dirty = dirtyKeys.current.homeSection;
+          setHomeFlags((prev) => {
+            const merged = { ...prev };
+            for (const k of Object.keys(next)) if (!dirty.has(k)) merged[k] = next[k];
+            return merged;
+          });
+          const newBaseline = { ...baseline.current.homeSection };
+          for (const k of Object.keys(next)) if (!dirty.has(k)) newBaseline[k] = next[k];
+          baseline.current.homeSection = newBaseline;
+        }
+        check();
+      },
+      () => check()
+    );
+    const unsubAi = onSnapshot(
+      doc(db, "featureFlags", "aiGuru"),
+      (snap) => {
+        if (snap.exists()) {
+          const next = { ...defaultAiFlags, ...(snap.data() as FlagMap) };
+          const dirty = dirtyKeys.current.aiGuru;
+          setAiFlags((prev) => {
+            const merged = { ...prev };
+            for (const k of Object.keys(next)) if (!dirty.has(k)) merged[k] = next[k];
+            return merged;
+          });
+          const newBaseline = { ...baseline.current.aiGuru };
+          for (const k of Object.keys(next)) if (!dirty.has(k)) newBaseline[k] = next[k];
+          baseline.current.aiGuru = newBaseline;
+        }
+        check();
+      },
+      () => check()
+    );
+    const unsubDrawer = onSnapshot(
+      doc(db, "featureFlags", "drawerItems"),
+      (snap) => {
+        if (snap.exists()) {
+          const next = { ...defaultDrawerFlags, ...(snap.data() as FlagMap) };
+          const dirty = dirtyKeys.current.drawerItems;
+          setDrawerFlags((prev) => {
+            const merged = { ...prev };
+            for (const k of Object.keys(next)) if (!dirty.has(k)) merged[k] = next[k];
+            return merged;
+          });
+          const newBaseline = { ...baseline.current.drawerItems };
+          for (const k of Object.keys(next)) if (!dirty.has(k)) newBaseline[k] = next[k];
+          baseline.current.drawerItems = newBaseline;
+        }
+        check();
+      },
+      () => check()
+    );
+
+    return () => { unsubHome(); unsubAi(); unsubDrawer(); };
   }, []);
 
-  const save = async (overrides?: {
-    home?: Record<string, boolean>;
-    ai?: Record<string, boolean>;
-    drawer?: Record<string, boolean>;
-  }) => {
+  const toggleHome   = (key: string) => { dirtyKeys.current.homeSection.add(key); setHomeFlags((p) => ({ ...p, [key]: !p[key] })); };
+  const toggleAi     = (key: string) => { dirtyKeys.current.aiGuru.add(key);      setAiFlags((p) => ({ ...p, [key]: !p[key] })); };
+  const toggleDrawer = (key: string) => { dirtyKeys.current.drawerItems.add(key); setDrawerFlags((p) => ({ ...p, [key]: !p[key] })); };
+
+  const setAllHome   = (value: boolean, keys: string[]) => { keys.forEach((k) => dirtyKeys.current.homeSection.add(k));   setHomeFlags(Object.fromEntries(keys.map((k) => [k, value]))); };
+  const setAllAi     = (value: boolean, keys: string[]) => { keys.forEach((k) => dirtyKeys.current.aiGuru.add(k));        setAiFlags(Object.fromEntries(keys.map((k) => [k, value]))); };
+  const setAllDrawer = (mapper: (d: Section) => boolean, items: Section[]) => { items.forEach((d) => dirtyKeys.current.drawerItems.add(d.key)); setDrawerFlags(Object.fromEntries(items.map((d) => [d.key, mapper(d)]))); };
+
+  const save = async () => {
     setSaving(true); setSaved(false);
     try {
-      await Promise.all([
-        setDoc(doc(db, "featureFlags", "homeSection"), overrides?.home   ?? homeFlags),
-        setDoc(doc(db, "featureFlags", "aiGuru"),      overrides?.ai     ?? aiFlags),
-        setDoc(doc(db, "featureFlags", "drawerItems"), overrides?.drawer ?? drawerFlags),
-      ]);
+      const results = await saveFlagDiffs(db, {
+        homeSection: diffFlags(baseline.current.homeSection, homeFlags),
+        aiGuru:      diffFlags(baseline.current.aiGuru,      aiFlags),
+        drawerItems: diffFlags(baseline.current.drawerItems, drawerFlags),
+      });
+      // Only documents whose write succeeded become the new baseline, so a
+      // failed write is never treated as persisted (it stays in the next diff
+      // and next Save attempt). A written key also leaves dirtyKeys — it's no
+      // longer a pending edit, so future remote snapshots resume updating it.
+      for (const r of results) {
+        if (!r.error) {
+          baseline.current[r.name] = { ...baseline.current[r.name], ...r.written };
+          for (const k of Object.keys(r.written)) dirtyKeys.current[r.name].delete(k);
+        }
+      }
+      const failed = results.find((r) => r.error);
+      if (failed) throw failed.error;
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err: any) {
@@ -208,11 +305,11 @@ export default function FeatureControl() {
             </p>
           </div>
           <div className="flex gap-2 ml-auto">
-            <button onClick={() => setDrawerFlags(Object.fromEntries(DRAWER_ITEMS.map((d) => [d.key, true])))}
+            <button onClick={() => setAllDrawer(() => true, DRAWER_ITEMS)}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">
               Enable All
             </button>
-            <button onClick={() => setDrawerFlags(Object.fromEntries(DRAWER_ITEMS.map((d) => [d.key, d.locked ? true : false])))}
+            <button onClick={() => setAllDrawer((d) => (d.locked ? true : false), DRAWER_ITEMS)}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">
               Disable All
             </button>
@@ -224,7 +321,7 @@ export default function FeatureControl() {
               <SectionCard
                 item={item}
                 enabled={drawerFlags[item.key] ?? true}
-                onToggle={() => setDrawerFlags((p) => ({ ...p, [item.key]: !p[item.key] }))}
+                onToggle={() => toggleDrawer(item.key)}
               />
             </motion.div>
           ))}
@@ -239,9 +336,9 @@ export default function FeatureControl() {
             <p className="text-slate-500 text-xs mt-0.5">{homeEnabledCount} of {HOME_SECTIONS.length} sections enabled</p>
           </div>
           <div className="flex gap-2 ml-auto">
-            <button onClick={() => setHomeFlags(Object.fromEntries(HOME_SECTIONS.map((s) => [s.key, true])))}
+            <button onClick={() => setAllHome(true, HOME_SECTIONS.map((s) => s.key))}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">Enable All</button>
-            <button onClick={() => setHomeFlags(Object.fromEntries(HOME_SECTIONS.map((s) => [s.key, false])))}
+            <button onClick={() => setAllHome(false, HOME_SECTIONS.map((s) => s.key))}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">Disable All</button>
           </div>
         </div>
@@ -251,7 +348,7 @@ export default function FeatureControl() {
               <SectionCard
                 item={section}
                 enabled={homeFlags[section.key] ?? true}
-                onToggle={() => setHomeFlags((p) => ({ ...p, [section.key]: !p[section.key] }))}
+                onToggle={() => toggleHome(section.key)}
               />
             </motion.div>
           ))}
@@ -266,9 +363,9 @@ export default function FeatureControl() {
             <p className="text-slate-500 text-xs mt-0.5">{aiEnabledCount} of {AIGURU_FEATURES.length} features enabled</p>
           </div>
           <div className="flex gap-2 ml-auto">
-            <button onClick={() => setAiFlags(Object.fromEntries(AIGURU_FEATURES.map((f) => [f.key, true])))}
+            <button onClick={() => setAllAi(true, AIGURU_FEATURES.map((f) => f.key))}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">Enable All</button>
-            <button onClick={() => setAiFlags(Object.fromEntries(AIGURU_FEATURES.map((f) => [f.key, false])))}
+            <button onClick={() => setAllAi(false, AIGURU_FEATURES.map((f) => f.key))}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">Disable All</button>
           </div>
         </div>
@@ -278,7 +375,7 @@ export default function FeatureControl() {
               <SectionCard
                 item={feature}
                 enabled={aiFlags[feature.key] ?? true}
-                onToggle={() => setAiFlags((p) => ({ ...p, [feature.key]: !p[feature.key] }))}
+                onToggle={() => toggleAi(feature.key)}
               />
             </motion.div>
           ))}

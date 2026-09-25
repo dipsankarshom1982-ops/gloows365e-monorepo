@@ -10,6 +10,7 @@ import { useAppTranslation, useLanguage } from "@/context/LanguageContext";
 import { useStudentProfile, useFeatureFlags } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { useAdFeed } from "@/hooks/useAdFeed";
+import { useModuleGate } from "@/hooks/useModuleGate";
 import { auth } from "@/lib/firebase";
 import { isSubscribed } from "@/services/aiGuruFirestore";
 import { Ionicons } from "@expo/vector-icons";
@@ -73,6 +74,10 @@ export default function AiGuruTab() {
   const { colors, isDarkMode } = useTheme();
   const { studentProfile }     = useStudentProfile();
   const { aiGuru }             = useFeatureFlags();
+  // Same gate as app/ai-guru/index.tsx: this hidden tab copy is also reachable
+  // via the explicit group path /(drawer)/(tabs)/ai-guru, so it must enforce
+  // the same rule as the canonical /ai-guru route.
+  useModuleGate("ai-guru", { homeSectionKey: "aiguru" });
   const classLevel             = String(studentProfile?.class ?? "all");
 
   const [subscribed, setSubscribed] = useState(false);
