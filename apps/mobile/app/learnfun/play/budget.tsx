@@ -100,7 +100,7 @@ export default function BudgetSimulatorGameScreen() {
       Array.isArray(todaysMission.choicesOrItems)
     ) return todaysMission;
     const local = getMissionForClass(studentClass);
-    if (local.gameType === "budget_simulator") return local;
+    if (local?.gameType === "budget_simulator") return local;
     return FALLBACK_MISSIONS[0];
   }, [todaysMission, studentClass]);
 

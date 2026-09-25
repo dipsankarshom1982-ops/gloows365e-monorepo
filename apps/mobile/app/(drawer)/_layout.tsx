@@ -1,8 +1,21 @@
-// PATH: app/(drawer)/_layout.tsx
+// PATH: apps/mobile/app/(drawer)/_layout.tsx
 // Changes:
 //  • Removed LearnFunCoins and Pan-India learnScore rank
 //  • Replaced with VCoins balance + VCoins annual rank
 //  • Added surprise gift claim banner (if gift is available and unclaimed)
+//  • Added Skill Boost drawer item
+//
+// Drawer rebuild/polish (2026): fixed several menu labels that were
+// silently rendering as raw i18next keys (t("reels"), t("myProfile"),
+// t("quickAccess"), etc. were never actually declared in translations.ts,
+// so every `?? "Nice Label"` fallback in this file was dead code — a
+// returned key string is truthy) by adding those keys to the English
+// resource (see lib/i18n/translations.ts). Also: dropped the "Subscription"
+// shortcut to match the drawer's specified Account section (My Profile +
+// Settings only) — Billing History is still fully reachable from Settings,
+// nothing was deleted; made the drawer width responsive (~78% viewport on
+// phones, clamped 300-340px on tablets) instead of a fixed 300px; bumped
+// item/icon/section-header sizing toward the spec's touch-friendly ranges.
 
 import { Drawer } from "expo-router/drawer";
 import {
@@ -12,18 +25,21 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 
 import { useTheme } from "@/context/ThemeContext";
 import { useLanguage, useAppTranslation } from "@/context/LanguageContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
-import { useFeatureFlags } from "@/context/FeatureFlagsContext";
+import { useStudentProfile, useFeatureFlags } from "@gloows/shared-logic";
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
 import { auth, db } from "@/lib/firebase";
 import { getLevelFromXP, XP_PER_LEVEL } from "@/lib/learnfun/constants";
+import { ensureStudentId } from "@/services/studentIdService";
+import TitleAvatar from "@/components/TitleAvatar";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
@@ -32,11 +48,24 @@ import {
   doc,
   getCountFromServer,
   onSnapshot,
+  orderBy,
   query,
   where,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+
+// Same detection used by app/index.tsx's boot-time routing — duplicated
+// (not shared) to match that file's own convention. This is a defensive
+// guard, not the primary routing mechanism: index.tsx already sends
+// restart-education users straight to /restart-education/home and never
+// into this (drawer) stack in the first place. This exists so that if a
+// restart-education profile's studentProfile resolves while this layout
+// is somehow already mounted (stale nav state, a deep link, app-state
+// restore after being killed, etc.), they still can't end up looking at
+// the main student app — they get bounced back out immediately.
+const RESTART_TYPES = ["restartEducation", "restart_education", "restart"];
+const RESTART_INDICATOR_FIELDS = ["lastClassPassed", "educationGapReason", "currentOccupation"];
 
 export default function DrawerLayout() {
   const router = useRouter();
@@ -46,19 +75,63 @@ export default function DrawerLayout() {
   const { t } = useAppTranslation();
   const insets = useSafeAreaInsets();
 
+  // Responsive drawer width — phones get ~78% of the viewport (spec:
+  // 75-82%), tablets/large screens are clamped to a fixed 300-340px band
+  // instead of also scaling to 78% (which would be far too wide, e.g.
+  // ~630px on a 10" tablet). Reacts to rotation via useWindowDimensions
+  // instead of a one-time Dimensions.get() snapshot.
+  const { width: screenWidth } = useWindowDimensions();
+  const drawerWidth = screenWidth <= 480
+    ? Math.round(screenWidth * 0.78)
+    : Math.min(340, Math.max(300, Math.round(screenWidth * 0.32)));
+
   const { studentProfile, profileLoading: loading } = useStudentProfile();
 
-  // VCoins balance (real-time from users/{uid})
-  const [vCoins, setVCoins] = useState<number>(0);
-  // Annual VCoins rank
-  const [vCoinRank, setVCoinRank] = useState<number | null>(null);
-  // Surprise gift state
+  useEffect(() => {
+    if (!studentProfile) return;
+    const profile = studentProfile as Record<string, any>;
+    const isRestartUser =
+      (profile.profileType && RESTART_TYPES.includes(profile.profileType)) ||
+      RESTART_INDICATOR_FIELDS.some((f) => f in profile);
+    if (isRestartUser) {
+      router.replace("/restart-education/home" as any);
+    }
+  }, [studentProfile]);
+
+  const [vCoins,        setVCoins]        = useState<number>(0);
+  const [vCoinRank,     setVCoinRank]     = useState<number | null>(null);
   const [giftAvailable, setGiftAvailable] = useState(false);
-  const [giftClaimed, setGiftClaimed] = useState(false);
+  const [giftClaimed,   setGiftClaimed]   = useState(false);
+  const [studentIdCopied, setStudentIdCopied] = useState(false);
+
+  // Self-heal: any account that predates this feature (or whose
+  // registration-time ensureStudentId() call failed non-fatally) still
+  // won't have a studentId on their profile — request one the first time
+  // the drawer sees that gap. Idempotent server-side, and the ref guard
+  // keeps this to one call per mount even though studentProfile updates
+  // (e.g. vCoins ticking) re-run this effect.
+  const studentIdRequestedRef = useRef(false);
+  useEffect(() => {
+    if (loading || !studentProfile || studentProfile.studentId) return;
+    if (studentIdRequestedRef.current) return;
+    studentIdRequestedRef.current = true;
+    ensureStudentId().catch(() => { studentIdRequestedRef.current = false; });
+  }, [loading, studentProfile]);
 
   const currentYear = new Date().getFullYear();
 
-  // Listen to user doc for vCoins balance + gift
+  // Listen to user doc for vCoins balance (gift is its own effect below —
+  // it moved off users/{uid}.surpriseGift onto prizeClaims).
+  // FIX (bug report — "all updated v-coins must be shown in drawer and
+  // v-coins page properly"): there are two separate, disconnected balance
+  // fields on users/{uid} — vCoinsBalance (written by services/
+  // vCoinsService.ts's creditVCoins(), used for reels/videos/contests/
+  // registration) and vCoins (written by a separate backend Cloud
+  // Function, claimVCoinReward, used by the Daily Streak Quiz). Nothing
+  // reconciles them. This used to read vCoins alone, so any coins earned
+  // through the other pipeline never showed here. hooks/useVCoins.ts,
+  // VCoinsHeaderBadge (via services/vCoinsService.ts), and this drawer now
+  // all sum both fields the same way.
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
@@ -66,24 +139,40 @@ export default function DrawerLayout() {
     const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
       if (!snap.exists()) return;
       const d = snap.data();
-      const bal = d.vCoins ?? 0;
-      setVCoins(bal);
-
-      // Gift: admin sets surpriseGift.year + surpriseGift.available
-      const gift = d.surpriseGift;
-      if (gift && gift.available && gift.year === currentYear) {
-        setGiftAvailable(true);
-        setGiftClaimed(!!gift.claimed);
-      } else {
-        setGiftAvailable(false);
-        setGiftClaimed(false);
-      }
+      setVCoins((d.vCoinsBalance ?? 0) + (d.vCoins ?? 0));
     });
 
     return () => unsub();
   }, []);
 
-  // Compute annual VCoins rank: count users with more yearlyVCoins than current user
+  // Surprise Gift banner — prizeClaims/{id} docs (periodType
+  // "surprise_gift"), same collection/workflow as VidyaStar Starboard
+  // prizes (apps/mobile/app/my-prizes.tsx, apps/admin's PrizeDeliveries.tsx
+  // and VCoinLeaderboard.tsx). Reuses the exact same query shape
+  // my-prizes.tsx already uses (uid ==, orderBy wonAt desc) so it needs no
+  // index beyond the one that query already relies on — filtering down to
+  // this year's gift happens client-side instead of adding a second
+  // equality clause that'd need its own composite index.
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const q = query(collection(db, "prizeClaims"), where("uid", "==", user.uid), orderBy("wonAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const gift = snap.docs
+        .map((d) => d.data())
+        .find((g) => g.periodType === "surprise_gift" && g.periodKey === `surprise_gift_${currentYear}`);
+      setGiftAvailable(!!gift);
+      setGiftClaimed(!!gift && gift.status !== "unclaimed");
+    }, () => {
+      setGiftAvailable(false);
+      setGiftClaimed(false);
+    });
+
+    return () => unsub();
+  }, [currentYear]);
+
+  // Compute annual VCoins rank
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
@@ -107,13 +196,22 @@ export default function DrawerLayout() {
   const xpInLevel = learnXP % XP_PER_LEVEL;
   const xpPct     = Math.min((xpInLevel / XP_PER_LEVEL) * 100, 100);
 
-  const name         = studentProfile?.name         || auth.currentUser?.email?.split("@")[0] || "Student";
-  const school       = studentProfile?.school       || t("yourSchool") || "Your School";
-  const studentClass = studentProfile?.class        || "";
-  const language     = studentProfile?.preferredLanguage || "English";
+  const name         = studentProfile?.name               || auth.currentUser?.email?.split("@")[0] || "Student";
+  const school       = studentProfile?.school             || t("yourSchool") || "Your School";
+  const studentClass = studentProfile?.class              || "";
+  const language     = studentProfile?.preferredLanguage  || "English";
   const district     = studentProfile?.location?.district || "";
   const state        = studentProfile?.location?.state    || "";
-  const profilePic   = studentProfile?.profilePic   || null;
+  const profilePic   = studentProfile?.profilePic         || null;
+  const studentTitle = (studentProfile as Record<string, any> | null | undefined)?.title as string | undefined;
+  const studentId    = studentProfile?.studentId;
+
+  const handleCopyStudentId = async () => {
+    if (!studentId) return;
+    await Clipboard.setStringAsync(studentId);
+    setStudentIdCopied(true);
+    setTimeout(() => setStudentIdCopied(false), 1500);
+  };
 
   const handleLogout = async () => {
     if (auth.currentUser?.email) {
@@ -129,8 +227,14 @@ export default function DrawerLayout() {
         headerShown: false,
         drawerStyle: {
           backgroundColor: colors.background,
-          width: 300,
+          width: drawerWidth,
         },
+        // "front" (the default) keeps the underlying page in place behind a
+        // dark scrim while the drawer slides in over it — matches the spec's
+        // "underlying page should remain visible behind a subtle overlay"
+        // rather than "slide", which would shove the page content sideways.
+        drawerType: "front",
+        overlayColor: "rgba(0,0,0,0.5)",
       }}
       drawerContent={() => (
         <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -151,14 +255,37 @@ export default function DrawerLayout() {
                 <ActivityIndicator color="#fff" size="large" />
               ) : (
                 <>
-                  <Image
-                    source={{
-                      uri: profilePic || "https://i.pravatar.cc/150?u=" + (auth.currentUser?.email || "user"),
-                    }}
-                    style={styles.avatar}
-                  />
+                  {profilePic ? (
+                    <Image source={{ uri: profilePic }} style={styles.avatar} />
+                  ) : (
+                    // FIX (bug report — avatar problem): same fallback fix
+                    // as header.tsx — no more random pravatar.cc image.
+                    <TitleAvatar title={studentTitle} size={70} style={styles.avatar} />
+                  )}
 
                   <Text style={styles.name}>{name}</Text>
+
+                  {/* Student ID — auto-assigned, human-readable (e.g.
+                      GLS000123), stable for the account's lifetime. Tap to
+                      copy for support/reference use. Shown once assigned;
+                      the self-heal effect above requests one for accounts
+                      that don't have it yet, so this appears within a
+                      moment even for pre-existing users. */}
+                  {!!studentId && (
+                    <TouchableOpacity
+                      style={styles.studentIdBadge}
+                      onPress={handleCopyStudentId}
+                      activeOpacity={0.75}
+                    >
+                      <Ionicons name="id-card-outline" size={12} color="#c7d2fe" />
+                      <Text style={styles.studentIdText}>{studentId}</Text>
+                      <Ionicons
+                        name={studentIdCopied ? "checkmark" : "copy-outline"}
+                        size={11}
+                        color={studentIdCopied ? "#34D399" : "#818cf8"}
+                      />
+                    </TouchableOpacity>
+                  )}
 
                   <View style={styles.infoBox}>
                     <Text style={styles.infoText}>🏫 {school}</Text>
@@ -212,18 +339,21 @@ export default function DrawerLayout() {
                       style={styles.rankViewBtn}
                       onPress={() => router.push("/vcoins/wallet")}
                     >
-                      <Text style={styles.rankViewText}>{t("viewLabel") ?? "View"}</Text>
+                      <Text style={styles.rankViewText}>{t("walletLabel") ?? "Wallet"}</Text>
                     </TouchableOpacity>
                   </View>
 
-                  {/* Surprise Gift Banner */}
+                  {/* Surprise Gift Banner — visually separated from the
+                      V-Coins Rank banner above (extra marginTop on
+                      giftBanner) and its own "Wallet" vs. gift-emoji+title
+                      framing, so the two aren't mistaken for one control. */}
                   {giftAvailable && (
                     <TouchableOpacity
                       style={[
                         styles.giftBanner,
                         giftClaimed && styles.giftBannerClaimed,
                       ]}
-                      onPress={() => router.push("/vcoins/claim-gift")}
+                      onPress={() => router.push("/my-prizes")}
                       activeOpacity={0.85}
                     >
                       <Text style={styles.giftEmoji}>🎁</Text>
@@ -248,43 +378,73 @@ export default function DrawerLayout() {
 
             {/* MENU */}
             <View style={styles.menu}>
-              {drawerItem("home") && (
-                <DrawerItem icon="home" label={t("home")}
-                  onPress={() => router.push("/(drawer)/(tabs)/home")} active colors={colors} />
-              )}
-              {drawerItem("leaderboard") && (
-                <DrawerItem icon="trophy-outline" label={t("leaderboard")}
-                  onPress={() => router.push("/leaderboard")} colors={colors} />
+              {/* QUICK ACCESS — Home, Dashboard, and the Learn/Challenge
+                  module shortcuts (AI Guru, LearnFun, SkillBoost, Starboard,
+                  Daily Streak Quiz, SkillBoard) were removed from here: they
+                  now live in the bottom nav's Home/Dashboard/Learn/Challenge
+                  tabs, so keeping a Drawer shortcut too was a duplicate.
+                  Reels, Wallet, and My Prizes don't have another Drawer-free
+                  path (Reels is reachable via the tab bar too, but the nav
+                  spec explicitly wants a Drawer shortcut for it as well). */}
+              <SectionHeader label={t("quickAccess") ?? "Quick Access"} colors={colors} />
+              {drawerItem("reels") && (
+                <DrawerItem icon="film-outline" label={t("reels") ?? "Reels"}
+                  onPress={() => router.push("/(drawer)/(tabs)/reels")} colors={colors} />
               )}
               {drawerItem("wallet") && (
                 <DrawerItem icon="wallet-outline" label={t("wallet")}
                   onPress={() => router.push("/vcoins/wallet")} colors={colors} />
               )}
+              {drawerItem("myPrizes") && (
+                <DrawerItem icon="gift-outline" label={t("myPrizes")}
+                 onPress={() => router.push("/my-prizes" as any)} colors={colors} />
+              )}
+
+              {/* ACCOUNT — per the drawer rebuild spec's exact structure,
+                  this section is My Profile + Settings only. The old
+                  "Subscription" shortcut (→ /billing-history) isn't part of
+                  that structure; it's dropped as a Drawer entry only — the
+                  billing-history screen itself is untouched and still
+                  reachable from Settings, so nothing was deleted. */}
+              <SectionHeader label={t("account") ?? "Account"} colors={colors} />
+              {drawerItem("myProfile") && (
+                <DrawerItem icon="person-circle-outline" label={t("myProfile") ?? "My Profile"}
+                  onPress={() => router.push("/profile-settings")} colors={colors} />
+              )}
               {drawerItem("settings") && (
                 <DrawerItem icon="settings-outline" label={t("settings")}
                   onPress={() => router.push("/settings")} colors={colors} />
               )}
-              {drawerItem("dashboard") && (
-                <DrawerItem icon="grid-outline" label={t("dashboard")}
-                  onPress={() => router.push("/dashboard")} colors={colors} />
+
+              {/* SUPPORT — "Help & Support" and "Terms" have no existing
+                  screen anywhere in the app (verified again for this task —
+                  see the report), so they're intentionally left out rather
+                  than invented. */}
+              <SectionHeader label={t("support") ?? "Support"} colors={colors} />
+              {drawerItem("feedback") && (
+                <DrawerItem icon="star-outline" label={t("drawerFeedbackRating") ?? "Feedback & Rating"}
+                  onPress={() => router.push("/feedback" as any)} colors={colors} />
               )}
-              {drawerItem("aiguru") && (
-                <DrawerItem icon="school-outline" label={t("aiGuru")}
-                  onPress={() => router.push("/ai-guru")} colors={colors} />
+              {drawerItem("about") && (
+                <DrawerItem icon="information-circle-outline" label={t("aboutGloows365") ?? "About Gloows365"}
+                  onPress={() => router.push("/about" as any)} colors={colors} />
               )}
-              {drawerItem("learnfun") && (
-                <DrawerItem icon="book-outline" label={t("learnFunLabel") ?? "LearnFun"}
-                  onPress={() => router.push("/(drawer)/(tabs)/learnFun")} colors={colors} />
+              {drawerItem("privacy") && (
+                <DrawerItem icon="lock-closed-outline" label={t("privacyPolicy") ?? "Privacy Policy"}
+                  onPress={() => router.push("/privacy" as any)} colors={colors} />
               )}
 
-              {/* Language selector */}
+              {/* OTHER — Language selector and GloStore, moved here from
+                  the old flat list. Neither duplicates a bottom-nav tab. */}
+              <SectionHeader label={t("other") ?? "Other"} colors={colors} />
               {drawerItem("language") && (
                 <TouchableOpacity
                   style={[styles.langItem, { backgroundColor: colors.background }]}
                   onPress={() => router.push("/language-settings" as any)}
+                  activeOpacity={0.7}
                 >
                   <View style={[styles.langIconBox, { backgroundColor: `${colors.accent}20` }]}>
-                    <Ionicons name="globe-outline" size={18} color={colors.accent} />
+                    <Ionicons name="globe-outline" size={20} color={colors.accent} />
                   </View>
                   <View style={styles.langTextBlock}>
                     <Text style={[styles.langItemLabel, { color: colors.text }]}>{t("language")}</Text>
@@ -300,20 +460,22 @@ export default function DrawerLayout() {
                   <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
               )}
-
-              {drawerItem("skillboard") && (
-                <SkillBoardItem onPress={() => router.push("/skillboard")} />
+              {drawerItem("glostore") && (
+                <GloStoreItem onPress={() => router.push("/glostore" as any)} />
               )}
             </View>
           </ScrollView>
 
-          {/* LOGOUT — pinned at bottom */}
+          {/* LOGOUT — pinned at bottom, kept clear of the Android nav bar /
+              iOS home indicator via insets.bottom (SafeArea, not a
+              hard-coded height). */}
           <TouchableOpacity
-            style={[styles.logout, { backgroundColor: `${colors.text}10`, marginBottom: insets.bottom }]}
+            style={[styles.logout, { backgroundColor: "rgba(248,113,113,0.08)", borderColor: colors.border, marginBottom: insets.bottom }]}
             onPress={handleLogout}
+            activeOpacity={0.7}
           >
-            <Ionicons name="log-out-outline" size={20} color="#F87171" />
-            <Text style={[styles.logoutText, { color: colors.text }]}>{t("logout")}</Text>
+            <Ionicons name="log-out-outline" size={22} color="#F87171" />
+            <Text style={styles.logoutText}>{t("logout")}</Text>
           </TouchableOpacity>
 
         </SafeAreaView>
@@ -324,24 +486,35 @@ export default function DrawerLayout() {
   );
 }
 
-function SkillBoardItem({ onPress }: { onPress: () => void }) {
+// 🛍️ GloStore — admin-curated affiliate products (books, stationery, kits).
+// Its own gold gradient pill so it stands out from the plain list items,
+// since it's a monetization surface.
+function GloStoreItem({ onPress }: { onPress: () => void }) {
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.85} style={styles.skillBoardWrapper}>
       <LinearGradient
-        colors={["#92400e", "#d97706", "#fbbf24"]}
+        colors={["#7c2d12", "#ea580c", "#fb923c"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={styles.skillBoardGradient}
       >
         <View style={styles.skillBoardLeft}>
-          <Ionicons name="trophy" size={22} color="#fff" />
-          <Text style={styles.skillBoardLabel}>Skill Board</Text>
+          <Ionicons name="storefront" size={24} color="#fff" />
+          <Text style={styles.skillBoardLabel}>GloStore</Text>
         </View>
         <View style={styles.skillBoardBadge}>
-          <Text style={styles.skillBoardBadgeText}>⭐ TOP</Text>
+          <Text style={styles.skillBoardBadgeText}>🛍️ SHOP</Text>
         </View>
       </LinearGradient>
     </TouchableOpacity>
+  );
+}
+
+function SectionHeader({ label, colors }: { label: string; colors: any }) {
+  return (
+    <Text style={[styles.sectionHeader, { color: colors.textSecondary, borderTopColor: colors.border }]}>
+      {label.toUpperCase()}
+    </Text>
   );
 }
 
@@ -350,8 +523,9 @@ function DrawerItem({ icon, label, onPress, active, colors }: any) {
     <TouchableOpacity
       style={[styles.item, { backgroundColor: active ? `${colors.accent}20` : colors.background }]}
       onPress={onPress}
+      activeOpacity={0.7}
     >
-      <Ionicons name={icon} size={20} color={active ? colors.accent : colors.textSecondary} />
+      <Ionicons name={icon} size={24} color={active ? colors.accent : colors.textSecondary} />
       <Text style={[styles.label, { color: active ? colors.accent : colors.text }]}>
         {label}
       </Text>
@@ -361,12 +535,19 @@ function DrawerItem({ icon, label, onPress, active, colors }: any) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  scrollContent: { padding: 20, paddingBottom: 12 },
+  scrollContent: { paddingHorizontal: 28, paddingTop: 20, paddingBottom: 12 },
   profileCard: {
     borderRadius: 20, padding: 20, alignItems: "center", gap: 8,
   },
   avatar: { width: 70, height: 70, borderRadius: 35, marginBottom: 4 },
   name: { color: "#fff", fontSize: 17, fontWeight: "800" },
+  studentIdBadge: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    backgroundColor: "rgba(0,0,0,0.3)", borderRadius: 10,
+    paddingHorizontal: 10, paddingVertical: 4, marginTop: 4,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
+  },
+  studentIdText: { color: "#c7d2fe", fontSize: 11, fontWeight: "700", letterSpacing: 0.5 },
   infoBox: { alignItems: "center", marginVertical: 4 },
   infoText: { color: "#c7d2fe", fontSize: 12, marginVertical: 2, fontWeight: "500" },
   statsRow: {
@@ -400,33 +581,39 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
   },
   rankViewText: { color: "#fff", fontSize: 11, fontWeight: "700" },
-
-  // Surprise gift banner
   giftBanner: {
     flexDirection: "row", alignItems: "center", gap: 10,
     backgroundColor: "#d97706", borderRadius: 12,
     paddingVertical: 10, paddingHorizontal: 14, width: "100%",
-    marginTop: 6,
+    // Extra breathing room from the V-Coins Rank banner right above (whose
+    // own "Wallet" button was easy to tap by mistake thinking it was this
+    // gift banner) — was 6, clearly too tight given the two are the same
+    // width and nearly touching.
+    marginTop: 16,
   },
   giftBannerClaimed: { backgroundColor: "#4B5563" },
   giftEmoji: { fontSize: 22 },
   giftTitle: { color: "#fff", fontSize: 13, fontWeight: "800" },
   giftSub:   { color: "rgba(255,255,255,0.8)", fontSize: 11, fontWeight: "500" },
-
   menu:     { marginTop: 20 },
-  item:     { flexDirection: "row", alignItems: "center", paddingVertical: 14 },
-  label:    { marginLeft: 15, fontSize: 15 },
-  langItem: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10 },
-  langIconBox: { width: 34, height: 34, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+  sectionHeader: {
+    fontSize: 13, fontWeight: "800", letterSpacing: 0.9,
+    marginTop: 18, marginBottom: 6, paddingTop: 14,
+    borderTopWidth: 1,
+  },
+  item:     { flexDirection: "row", alignItems: "center", paddingVertical: 17, minHeight: 56 },
+  label:    { marginLeft: 18, fontSize: 17, fontWeight: "500" },
+  langItem: { flexDirection: "row", alignItems: "center", paddingVertical: 13, gap: 12, minHeight: 56 },
+  langIconBox: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
   langTextBlock: { flex: 1 },
-  langItemLabel: { fontSize: 15, fontWeight: "600" },
-  langItemSub:   { fontSize: 12, fontWeight: "600", marginTop: 1 },
+  langItemLabel: { fontSize: 17, fontWeight: "600" },
+  langItemSub:   { fontSize: 13, fontWeight: "600", marginTop: 1 },
   logout: {
     flexDirection: "row", alignItems: "center",
-    paddingVertical: 15, paddingHorizontal: 20,
+    paddingVertical: 17, paddingHorizontal: 28,
     borderTopWidth: 1, borderColor: "#222",
   },
-  logoutText: { color: "#F87171", marginLeft: 10, fontSize: 16, fontWeight: "600" },
+  logoutText: { color: "#F87171", marginLeft: 12, fontSize: 17, fontWeight: "700" },
   skillBoardWrapper: {
     marginVertical: 6, borderRadius: 14, overflow: "hidden",
     shadowColor: "#d97706", shadowOffset: { width: 0, height: 4 },

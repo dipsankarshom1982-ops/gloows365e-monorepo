@@ -33,9 +33,6 @@ import { useTheme } from "@/context/ThemeContext";
 import type { GuruMessage, GuruState } from "@/lib/vidyaguru/types";
 import { askVidyaGuru, playGuruAudio } from "@/services/vidyaguruApi";
 
-const GREETING =
-  "Namaste! I am VidyaGuru AI — your personal AI teacher. Ask me anything about your studies — maths, science, history, anything! I'm here to help you learn and grow.";
-
 export default function VidyaGuruScreen() {
   const { colors, isDarkMode } = useTheme();
   const { t } = useAppTranslation();
@@ -50,6 +47,9 @@ export default function VidyaGuruScreen() {
   const [guruState, setGuruState] = useState<GuruState>("idle");
   const [isRecording, setIsRecording] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
+  // Set only on a CREDITS_EXHAUSTED response — undefined keeps the
+  // paywall's plain pre-credits copy/CTA.
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
   const flatListRef = useRef<FlatList>(null);
   const currentPlayerRef = useRef<any>(null);
   // Keep messages in a ref so sendMessage callback never goes stale
@@ -57,12 +57,18 @@ export default function VidyaGuruScreen() {
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
-  // Show greeting on mount — greeting updates when language changes
+  // Show greeting on mount — greeting updates when language changes.
+  // Greeting now tells the student VidyaGuru can also answer in their
+  // currently selected language.
   useEffect(() => {
+    const greetingBody =
+      t("vidyaGuruGreeting", { language: languageName }) ??
+      `I am VidyaGuru AI — your personal AI teacher. Ask me anything about your studies — maths, science, history, anything! I'm here to help you learn and grow. I can answer in ${languageName} too!`;
+
     const greetMsg: GuruMessage = {
       id: "greeting",
       role: "guru",
-      text: `${t("helloGreet") ?? "Hello"} ${studentName}! ${GREETING}`,
+      text: `${t("helloGreet") ?? "Hello"} ${studentName}! ${greetingBody}`,
       createdAt: Date.now(),
     };
     setMessages([greetMsg]);
@@ -137,7 +143,11 @@ export default function VidyaGuruScreen() {
         }
       } catch (err: any) {
         setGuruState("idle");
-        if (err?.code === "FREE_LIMIT_REACHED") {
+        if (err?.code === "CREDITS_EXHAUSTED") {
+          setCreditInfo({ balance: err.creditBalance ?? 0, required: err.creditsRequired ?? 1 });
+          setShowPaywall(true);
+        } else if (err?.code === "FREE_LIMIT_REACHED") {
+          setCreditInfo(undefined);
           setShowPaywall(true);
         } else {
           Alert.alert("Oops!", err?.message ?? "Failed to get a response. Please try again.");
@@ -291,14 +301,22 @@ export default function VidyaGuruScreen() {
             },
           ]}
         >
-          {/* Selected language badge */}
+          {/* Selected language badge — tappable: jumps straight to
+              language settings, since "preferred language" matters
+              enough here that a student should be able to act on it
+              without leaving the chat to dig through Settings manually. */}
           <View style={S.langRow}>
-            <View style={[S.langBadge, { backgroundColor: isDarkMode ? "rgba(99,102,241,0.15)" : "#ede9fe", borderColor: "#6366f1" }]}>
+            <TouchableOpacity
+              style={[S.langBadge, { backgroundColor: isDarkMode ? "rgba(99,102,241,0.15)" : "#ede9fe", borderColor: "#6366f1" }]}
+              onPress={() => router.push("/language-settings" as any)}
+              activeOpacity={0.75}
+            >
               <Ionicons name="globe-outline" size={12} color="#6366f1" />
               <Text style={[S.langBadgeText, { color: "#6366f1" }]}>
                 {t("respondingIn", { lang: languageName }) ?? `Responding in ${languageName}`}
               </Text>
-            </View>
+              <Ionicons name="chevron-forward" size={11} color="#6366f1" />
+            </TouchableOpacity>
           </View>
 
           {/* Text + mic row */}
@@ -371,19 +389,30 @@ export default function VidyaGuruScreen() {
           >
             <GuruAvatar state="idle" size={80} />
             <Text style={[S.paywallTitle, { color: colors.text }]}>{t("paywallTitle")}</Text>
-            <Text style={[S.paywallBody, { color: colors.textSecondary }]}>{t("paywallBody")}</Text>
+            <Text style={[S.paywallBody, { color: colors.textSecondary }]}>
+              {creditInfo
+                ? `You've used your free question for today. You have ${creditInfo.balance} credit${creditInfo.balance === 1 ? "" : "s"} — buy more or upgrade to Premium for unlimited conversations.`
+                : t("paywallBody")}
+            </Text>
             <TouchableOpacity
               style={S.paywallPrimary}
               onPress={() => {
                 setShowPaywall(false);
-                router.push("/ai-guru/subscription" as any);
+                router.push((creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription") as any);
               }}
             >
               <LinearGradient colors={["#6366f1", "#4f46e5"]} style={S.paywallGradient}>
-                <Ionicons name="sparkles" size={16} color="#fff" />
-                <Text style={S.paywallPrimaryText}>{t("upgradeToPremium")}</Text>
+                <Ionicons name={creditInfo ? "flash" : "sparkles"} size={16} color="#fff" />
+                <Text style={S.paywallPrimaryText}>{creditInfo ? "Buy Credits" : t("upgradeToPremium")}</Text>
               </LinearGradient>
             </TouchableOpacity>
+            {creditInfo && (
+              <TouchableOpacity onPress={() => { setShowPaywall(false); router.push("/ai-guru/subscription" as any); }}>
+                <Text style={[S.paywallBody, { color: "#a5b4fc", fontSize: 12 }]}>
+                  Or upgrade to Premium for unlimited access
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={S.paywallClose} onPress={() => setShowPaywall(false)}>
               <Text style={[S.paywallCloseText, { color: colors.textSecondary }]}>{t("maybeLater")}</Text>
             </TouchableOpacity>

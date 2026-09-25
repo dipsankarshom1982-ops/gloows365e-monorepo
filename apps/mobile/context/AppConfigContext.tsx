@@ -6,7 +6,13 @@
  *   - Testers/admins → ALL modules shown regardless of isEnabled flag
  *
  * How it works:
- *   - Reads studentProfile.role from StudentProfileContext
+ *   - Reads role off users/{uid} — NOT studentProfile.role. The tester
+ *     toggle in apps/admin/src/pages/Students.tsx writes role to
+ *     users/{uid}, while StudentProfileContext (studentProfile) reads a
+ *     separate students/{uid} doc that never has role on it. Reading
+ *     studentProfile.role here always evaluated to undefined, so testers
+ *     never actually got the bypass — see functions/src/usageCheck.ts's
+ *     getSubscription() for the same users/{uid} read done server-side.
  *   - If role=="tester" or "admin": fetches ALL appModules (no isEnabled filter)
  *     and forces isEnabled=true on every one before passing to consumers
  *   - Everyone else: same as before — only isEnabled==true modules
@@ -17,54 +23,74 @@
 
 import { useStudentProfile } from "@/context/StudentProfileContext";
 import { db } from "@/lib/firebase";
-import type { AppModule, SubscriptionPlan } from "@/services/appConfigService";
+import type { AppModule, CreditPack, SubscriptionPlan } from "@/services/appConfigService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  collection, getDocs, onSnapshot, orderBy, query, where,
+  collection, doc, getDocs, onSnapshot, orderBy, query, where,
 } from "firebase/firestore";
 import { createContext, useContext, useEffect, useState } from "react";
 
 const CACHE_VERSION     = "v2";
 const CACHE_KEY_MODULES = `appConfig_modules_${CACHE_VERSION}`;
 const CACHE_KEY_PLANS   = `appConfig_plans_${CACHE_VERSION}`;
+const CACHE_KEY_CREDIT_PACKS = `appConfig_creditPacks_${CACHE_VERSION}`;
 
 type AppConfigContextType = {
   modules:       AppModule[];
   plans:         SubscriptionPlan[];
+  creditPacks:   CreditPack[];
   configLoading: boolean;
 };
 
 const AppConfigContext = createContext<AppConfigContextType>({
   modules:       [],
   plans:         [],
+  creditPacks:   [],
   configLoading: true,
 });
 
 export const useAppConfig = () => useContext(AppConfigContext);
 
 export function AppConfigProvider({ children }: { children: React.ReactNode }) {
-  const { studentProfile } = useStudentProfile();
+  const { user } = useStudentProfile();
 
   const [modules,       setModules]       = useState<AppModule[]>([]);
   const [plans,         setPlans]         = useState<SubscriptionPlan[]>([]);
+  const [creditPacks,   setCreditPacks]   = useState<CreditPack[]>([]);
   const [modulesReady,  setModulesReady]  = useState(false);
   const [plansReady,    setPlansReady]    = useState(false);
+  const [creditPacksReady, setCreditPacksReady] = useState(false);
 
-  const configLoading = !modulesReady || !plansReady;
+  const configLoading = !modulesReady || !plansReady || !creditPacksReady;
 
-  // Is this user a tester or admin?
-  const isTester =
-    studentProfile?.role === "tester" ||
-    studentProfile?.role === "admin";
+  // Is this user a tester or admin? Role lives on users/{uid}, not on the
+  // students/{uid} profile doc — see the header comment above.
+  const [isTester, setIsTester] = useState(false);
+
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) { setIsTester(false); return; }
+    const unsub = onSnapshot(
+      doc(db, "users", uid),
+      (snap) => {
+        const role = snap.exists() ? (snap.data()?.role as string | undefined) : undefined;
+        setIsTester(role === "tester" || role === "admin");
+      },
+      () => setIsTester(false)
+    );
+    return unsub;
+  }, [user?.uid]);
 
   useEffect(() => {
     // Seed UI from versioned cache
     Promise.all([
       AsyncStorage.getItem(CACHE_KEY_MODULES),
       AsyncStorage.getItem(CACHE_KEY_PLANS),
-    ]).then(([cachedMods, cachedPlans]) => {
+      AsyncStorage.getItem(CACHE_KEY_CREDIT_PACKS),
+    ]).then(([cachedMods, cachedPlans, cachedPacks]) => {
       if (cachedMods)  setModules(JSON.parse(cachedMods));
       if (cachedPlans) setPlans(JSON.parse(cachedPlans));
+      if (cachedPacks) setCreditPacks(JSON.parse(cachedPacks));
     }).catch(() => {});
 
     // ── appModules listener ───────────────────────────────────────────────────
@@ -98,13 +124,26 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
         }
       );
     } else {
-      // Normal user: only enabled modules
+      // Normal user: fetch ALL modules (not just isEnabled==true).
+      //
+      // FIX (App Structure verification pass): this used to query
+      // where("isEnabled","==",true), which means Firestore itself
+      // filtered out a disabled module's doc before it ever reached the
+      // client — a disabled module and a module with NO doc at all were
+      // then indistinguishable here (both simply absent from `modules`).
+      // Learn/Challenge (apps/mobile/app/(drawer)/(tabs)/learn.tsx,
+      // challenge.tsx) rely on exactly that distinction —
+      // `modules.find(m => m.id === key)?.isEnabled !== false` treats
+      // "absent" as visible on purpose, so a module Admin hasn't
+      // configured yet doesn't wrongly vanish. With the old
+      // isEnabled-filtered query, an explicitly DISABLED module was
+      // ALSO absent, so it stayed visible too — disabling a module via
+      // AppStructure had no actual effect on normal students. Fetching
+      // every doc (isEnabled true or false) and leaving the raw value
+      // intact — never forced, unlike the tester branch above — lets
+      // consumers see the real disabled state and correctly hide it.
       unsubModules = onSnapshot(
-        query(
-          collection(db, "appModules"),
-          where("isEnabled", "==", true),
-          orderBy("order", "asc")
-        ),
+        query(collection(db, "appModules"), orderBy("order", "asc")),
         (snap) => {
           const fresh = snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppModule));
           setModules(fresh);
@@ -112,11 +151,9 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
           AsyncStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(fresh)).catch(() => {});
         },
         async () => {
-          // Composite index not ready — fallback to client-side filter
+          // Fallback: getDocs without orderBy (e.g. transient listener error)
           try {
-            const snap = await getDocs(
-              query(collection(db, "appModules"), where("isEnabled", "==", true))
-            );
+            const snap = await getDocs(collection(db, "appModules"));
             const fresh = snap.docs
               .map((d) => ({ id: d.id, ...d.data() } as AppModule))
               .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -156,14 +193,46 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
+    // ── aiGuruCreditPacks listener ────────────────────────────────────────────
+    // Same isActive+order query/fallback shape as subscriptionPlans above —
+    // coexists with it, doesn't replace it (see apps/admin/src/pages/
+    // AiGuruCredits.tsx for the admin side of this collection).
+    const unsubCreditPacks = onSnapshot(
+      query(
+        collection(db, "aiGuruCreditPacks"),
+        where("isActive", "==", true),
+        orderBy("order", "asc")
+      ),
+      (snap) => {
+        const fresh = snap.docs.map((d) => ({ id: d.id, ...d.data() } as CreditPack));
+        setCreditPacks(fresh);
+        setCreditPacksReady(true);
+        AsyncStorage.setItem(CACHE_KEY_CREDIT_PACKS, JSON.stringify(fresh)).catch(() => {});
+      },
+      async () => {
+        try {
+          const snap = await getDocs(
+            query(collection(db, "aiGuruCreditPacks"), where("isActive", "==", true))
+          );
+          const fresh = snap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as CreditPack))
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+          setCreditPacks(fresh);
+          AsyncStorage.setItem(CACHE_KEY_CREDIT_PACKS, JSON.stringify(fresh)).catch(() => {});
+        } catch {}
+        setCreditPacksReady(true);
+      }
+    );
+
     return () => {
       unsubModules();
       unsubPlans();
+      unsubCreditPacks();
     };
   }, [isTester]); // re-subscribe when tester status changes (login/logout)
 
   return (
-    <AppConfigContext.Provider value={{ modules, plans, configLoading }}>
+    <AppConfigContext.Provider value={{ modules, plans, creditPacks, configLoading }}>
       {children}
     </AppConfigContext.Provider>
   );

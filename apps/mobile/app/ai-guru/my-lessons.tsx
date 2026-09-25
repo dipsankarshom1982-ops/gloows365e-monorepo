@@ -7,6 +7,7 @@ import { auth } from "@/lib/firebase";
 import { getUserLessons } from "@/services/aiGuruFirestore";
 import { AiGuruLesson } from "@/lib/aiGuru/types";
 import { SUBJECT_ICONS } from "@/lib/aiGuru/constants";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 
 export default function MyLessonsScreen() {
   const [lessons, setLessons]     = useState<AiGuruLesson[]>([]);
@@ -84,13 +85,7 @@ export default function MyLessonsScreen() {
 
   return (
     <LinearGradient colors={["#0a0a1a", "#0f172a"]} style={S.bg}>
-      <View style={S.header}>
-        <TouchableOpacity onPress={() => router.back()} style={S.backBtn}>
-          <Ionicons name="chevron-back" size={22} color="#94a3b8" />
-        </TouchableOpacity>
-        <Text style={S.headerTitle}>My AI Lessons</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <AiGuruHeader title="My AI Lessons" showLanguageBadge />
 
       {loading ? (
         <View style={S.center}>
@@ -125,9 +120,6 @@ export default function MyLessonsScreen() {
 const S = StyleSheet.create({
   bg:             { flex: 1 },
   center:         { flex: 1, justifyContent: "center", alignItems: "center" },
-  header:         { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 56, paddingBottom: 12, paddingHorizontal: 16 },
-  backBtn:        { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.08)", justifyContent: "center", alignItems: "center" },
-  headerTitle:    { color: "#f1f5f9", fontSize: 18, fontWeight: "800" },
   list:           { padding: 16, gap: 12 },
   lessonCard:     { flexDirection: "row", backgroundColor: "#1e293b", borderRadius: 18, padding: 14, gap: 12, borderWidth: 1, borderColor: "#334155", alignItems: "flex-start" },
   lessonIconWrap: { width: 44, height: 44, borderRadius: 14, backgroundColor: "#0f172a", justifyContent: "center", alignItems: "center" },

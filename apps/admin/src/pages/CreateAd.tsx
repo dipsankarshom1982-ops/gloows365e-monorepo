@@ -5,11 +5,12 @@ import { useNavigate, useParams } from "react-router-dom";
 import MediaUpload from "../components/MediaUpload";
 import SafetyBadge from "../components/SafetyBadge";
 import { db } from "../lib/firebase";
+import { SUPPORTED_CLASS_LEVEL_STRINGS } from "../lib/educationConfig";
 
 const AD_TYPES    = ["feed", "rewarded", "sponsored_reel", "scholarship"];
 const AD_CATS     = ["education", "scholarship", "exam", "course", "skill", "olympiad"];
 const ALL_MODULES = ["home","aiGuru","seekho","skillBoost","skillBattle","vidyaStar","learnFun","all"];
-const ALL_CLASSES = ["6","7","8","9","10","11","12","all"];
+const ALL_CLASSES = [...SUPPORTED_CLASS_LEVEL_STRINGS, "all"];
 
 const EMPTY = {
   adType: "feed", title: "", description: "", imageUrl: "", videoUrl: "", ctaText: "Learn More",

@@ -15,6 +15,7 @@ import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 
 import { useTheme } from "@/context/ThemeContext";
 import { useAppTranslation } from "@/context/LanguageContext";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 import {
   getNotebookEntries, deleteNotebookEntry, togglePin,
   NotebookEntry,
@@ -54,7 +55,6 @@ export default function NotebookScreen() {
   const text    = isDarkMode ? "#f1f5f9" : colors.text;
   const muted   = isDarkMode ? "#94a3b8" : colors.textSecondary;
   const dim     = isDarkMode ? "#64748b" : colors.textSecondary;
-  const backBg  = isDarkMode ? "rgba(255,255,255,0.08)" : colors.card;
 
   const [entries,     setEntries]     = useState<NotebookEntry[]>([]);
   const [loading,     setLoading]     = useState(true);
@@ -118,23 +118,20 @@ export default function NotebookScreen() {
     <View style={[S.root, { backgroundColor: bg }]}>
       {isDarkMode && <LinearGradient colors={["#060612", "#0a0a1a"]} style={StyleSheet.absoluteFillObject} />}
 
-      {/* Header */}
-      <Animated.View entering={FadeIn.duration(350)} style={[S.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[S.backBtn, { backgroundColor: backBg }]}>
-          <Ionicons name="chevron-back" size={22} color={muted} />
-        </TouchableOpacity>
-        <View style={S.headerCenter}>
-          <Text style={[S.headerTitle, { color: text }]}>📓 {t("notebookTitle") ?? "My AI Notebook"}</Text>
-          <Text style={[S.headerSub, { color: dim }]}>{entries.length} saved conversation{entries.length !== 1 ? "s" : ""}</Text>
-        </View>
-        <TouchableOpacity
-          onPress={() => router.push("/ai-guru/ask" as any)}
-          style={[S.askBtn, { backgroundColor: "rgba(99,102,241,0.15)", borderColor: "#6366f1" }]}
-        >
-          <Ionicons name="add" size={16} color="#818cf8" />
-          <Text style={S.askBtnText}>Ask AI</Text>
-        </TouchableOpacity>
-      </Animated.View>
+      <AiGuruHeader
+        title={`📓 ${t("notebookTitle") ?? "My AI Notebook"}`}
+        subtitle={`${entries.length} saved conversation${entries.length !== 1 ? "s" : ""}`}
+        showLanguageBadge
+        rightElement={
+          <TouchableOpacity
+            onPress={() => router.push("/ai-guru/ask" as any)}
+            style={[S.askBtn, { backgroundColor: "rgba(99,102,241,0.15)", borderColor: "#6366f1" }]}
+          >
+            <Ionicons name="add" size={16} color="#818cf8" />
+            <Text style={S.askBtnText}>Ask AI</Text>
+          </TouchableOpacity>
+        }
+      />
 
       {/* Search bar */}
       <View style={[S.searchBar, { backgroundColor: surface, borderColor: border, marginHorizontal: 16 }]}>
@@ -287,11 +284,6 @@ export default function NotebookScreen() {
 
 const S = StyleSheet.create({
   root:   { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, gap: 10 },
-  backBtn:{ width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  headerCenter: { flex: 1 },
-  headerTitle:  { fontSize: 18, fontWeight: "900" },
-  headerSub:    { fontSize: 11, marginTop: 1 },
   askBtn:       { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 20, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 6 },
   askBtnText:   { color: "#818cf8", fontSize: 12, fontWeight: "700" },
 

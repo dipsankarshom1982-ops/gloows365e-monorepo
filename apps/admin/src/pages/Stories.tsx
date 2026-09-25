@@ -1,12 +1,12 @@
 // PATH: admin-web/src/pages/Stories.tsx
-// Full story management with media upload:
-//   • Review Queue — approve/reject user-submitted stories
+// Full story management with media upload. Students can no longer submit
+// stories for review — only an admin creates them, from here:
 //   • Create Story — upload image OR video + all metadata fields
 //     - Images → Firebase Storage
 //     - Videos → Cloudflare Stream (two-step upload)
-//   • All stories auto-approved when created by admin
+//     - Always auto-approved (status: "approved") — no review queue
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   addDoc,
   collection,
@@ -16,19 +16,16 @@ import {
   updateDoc,
   doc,
 } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
 import {
   getDownloadURL,
   ref,
   uploadBytesResumable,
 } from "firebase/storage";
-import { db, functions, storage } from "../lib/firebase";
-import ApprovalQueue, { ApprovalItem } from "../components/ApprovalQueue";
+import { db, storage } from "../lib/firebase";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Filter  = "pending" | "approved" | "rejected" | "all";
-type TabView = "queue" | "create";
+type TabView = "create";
 type MediaType = "image" | "video" | null;
 
 // Cloudflare Stream worker URL (same as mobile app)
@@ -89,20 +86,10 @@ async function cfUploadVideo(
   });
 }
 
-// ─── approveContent callable ──────────────────────────────────────────────────
-
-const approveContentFn = httpsCallable<
-  { collection: string; docId: string; action: "approve" | "reject"; reason?: string },
-  { success: boolean }
->(functions, "approveContent");
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Stories() {
-  const [tab,     setTab]     = useState<TabView>("queue");
-  const [items,   setItems]   = useState<ApprovalItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter,  setFilter]  = useState<Filter>("pending");
+  const [tab, setTab] = useState<TabView>("create");
 
   // Create form state
   const [title,       setTitle]       = useState("");
@@ -128,50 +115,6 @@ export default function Stories() {
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
-
-  // ── Load queue ───────────────────────────────────────────────────────────
-
-  const loadQueue = async () => {
-    setLoading(true);
-    try {
-      const snap = await getDocs(collection(db, "stories"));
-      const all: ApprovalItem[] = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id:             d.id,
-          title:          data.title || "Untitled Story",
-          thumbnailUrl:   data.thumbnailUrl || data.mediaUrl || "",
-          uploaderName:   data.userName || "Unknown",
-          createdAt:      data.createdAt,
-          approvalStatus: data.status === "approved"
-            ? "approved"
-            : data.status === "rejected"
-            ? "rejected"
-            : "pending",
-          category: data.educationalCategory || data.category || "",
-          subtitle: data.language || "",
-        } as ApprovalItem;
-      });
-      const filtered = filter === "all" ? all : all.filter((i) => i.approvalStatus === filter);
-      setItems(filtered);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { loadQueue(); }, [filter]);
-
-  // ── Approve / Reject ─────────────────────────────────────────────────────
-
-  const handleApprove = async (id: string) => {
-    await approveContentFn({ collection: "stories", docId: id, action: "approve" });
-    setItems((prev) => prev.map((i) => i.id === id ? { ...i, approvalStatus: "approved" } : i));
-  };
-
-  const handleReject = async (id: string, reason: string) => {
-    await approveContentFn({ collection: "stories", docId: id, action: "reject", reason });
-    setItems((prev) => prev.map((i) => i.id === id ? { ...i, approvalStatus: "rejected" } : i));
-  };
 
   // ── Media selection ──────────────────────────────────────────────────────
 
@@ -288,7 +231,6 @@ export default function Stories() {
         clearMedia();
         setUploadPhase("idle");
         setUploading(false);
-        loadQueue();
       }, 2000);
 
     } catch (e: any) {
@@ -299,10 +241,6 @@ export default function Stories() {
   };
 
   // ── Render ───────────────────────────────────────────────────────────────
-
-  const counts = {
-    pending: items.filter((i) => i.approvalStatus === "pending").length,
-  };
 
   const inp = "bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm w-full focus:outline-none focus:border-indigo-500";
   const sel = "bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 w-full";
@@ -315,23 +253,10 @@ export default function Stories() {
         <div>
           <h1 className="text-3xl font-black text-white">📖 Stories</h1>
           <p className="text-slate-400 text-sm mt-1">
-            Upload educational stories or review user submissions
+            Upload educational stories
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setTab("queue")}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
-              tab === "queue" ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"
-            }`}
-          >
-            Review Queue
-            {counts.pending > 0 && (
-              <span className="ml-1.5 bg-amber-500 text-white text-xs px-1.5 py-0.5 rounded-full">
-                {counts.pending}
-              </span>
-            )}
-          </button>
           <button
             onClick={() => setTab("create")}
             className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
@@ -342,32 +267,6 @@ export default function Stories() {
           </button>
         </div>
       </div>
-
-      {/* ── QUEUE TAB ── */}
-      {tab === "queue" && (
-        <>
-          <div className="flex gap-2 flex-wrap">
-            {(["pending", "approved", "rejected", "all"] as Filter[]).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors capitalize ${
-                  filter === f ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"
-                }`}
-              >
-                {f}
-              </button>
-            ))}
-          </div>
-          <ApprovalQueue
-            items={items}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            loading={loading}
-            emptyMessage={`No ${filter === "all" ? "" : filter} stories.`}
-          />
-        </>
-      )}
 
       {/* ── CREATE TAB ── */}
       {tab === "create" && (

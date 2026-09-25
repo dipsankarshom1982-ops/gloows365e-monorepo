@@ -89,9 +89,18 @@ export const getReelsFeed = functionsV1
       } catch { /* Redis unavailable */ }
     }
 
+    // SECURITY FIX (video moderation pipeline audit, Phase A): this query
+    // used to have NO status filter at all — every SkillBattle reel was
+    // publicly served through this feed the instant submitSkillBattleReel
+    // created it, regardless of moderation status. `status=="approved"`
+    // is the same field updateSkillboard's trigger (functions/src/index.ts)
+    // already requires before a post's engagement counts toward the
+    // leaderboard — this makes the public feed honor that exact same gate
+    // instead of exposing unmoderated video. See firestore.indexes.json
+    // for the two composite indexes this needs.
     let q: admin.firestore.Query = cls !== "all"
-      ? db.collection("posts").where("postType", "==", "reel").where("class", "==", cls).orderBy("views", "desc")
-      : db.collection("posts").where("postType", "==", "reel").orderBy("views", "desc");
+      ? db.collection("posts").where("postType", "==", "reel").where("status", "==", "approved").where("class", "==", cls).orderBy("views", "desc")
+      : db.collection("posts").where("postType", "==", "reel").where("status", "==", "approved").orderBy("views", "desc");
 
     if (data.cursor) {
       const cursorDoc = await db.doc(`posts/${data.cursor}`).get();

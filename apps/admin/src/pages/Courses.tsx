@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import ToggleSwitch from "../components/ToggleSwitch";
 
-interface Course { id: string; title: string; subject?: string; targetClass?: string[]; thumbnailUrl?: string; estimatedMinutes?: number; isPublished: boolean; order?: number; }
+interface Course { id: string; title: string; subject?: string; class?: number; board?: string; chapterNumber?: number; targetClass?: string[]; thumbnailUrl?: string; estimatedMinutes?: number; isPublished: boolean; order?: number; }
 
 export default function Courses() {
   const [courses, setCourses] = useState<Course[]>([]);
@@ -60,7 +60,11 @@ export default function Courses() {
                     </div>
                   </td>
                   <td className="p-4 text-slate-400">{c.subject ?? "—"}</td>
-                  <td className="p-4 text-slate-400">{c.targetClass?.join(", ") ?? "—"}</td>
+                  <td className="p-4 text-slate-400">
+                    {c.class !== undefined
+                      ? `Class ${c.class}${c.board ? ` · ${c.board}` : ""}${c.chapterNumber ? ` · Ch ${c.chapterNumber}` : ""}`
+                      : c.targetClass?.length ? `${c.targetClass.join(", ")} (needs class/board)` : "—"}
+                  </td>
                   <td className="p-4 text-right text-slate-400">{c.estimatedMinutes ? `${c.estimatedMinutes}m` : "—"}</td>
                   <td className="p-4 text-right"><ToggleSwitch value={c.isPublished} onChange={() => toggle(c.id, c.isPublished)} /></td>
                   <td className="p-4 text-right">

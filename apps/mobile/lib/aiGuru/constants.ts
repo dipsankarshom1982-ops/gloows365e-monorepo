@@ -1,9 +1,11 @@
+import { SUPPORTED_CLASS_LEVEL_STRINGS, withPrimarySubjects } from "@gloows/shared-logic";
+
 export const BOARDS = [
   "CBSE", "ICSE", "State Board",
   "Tripura Board", "West Bengal Board", "Assam Board", "Other",
 ];
 
-export const CLASSES = Array.from({ length: 7 }, (_, i) => String(i + 6)); // "6" to "12"
+export const CLASSES = [...SUPPORTED_CLASS_LEVEL_STRINGS];
 
 export const SUBJECTS = [
   "Computer", "Science", "Math", "English",
@@ -12,8 +14,13 @@ export const SUBJECTS = [
 
 export const SUBJECT_ICONS: Record<string, string> = {
   Computer: "💻", Science: "🔬", Math: "🔢", English: "📖",
-  "Social Science": "🌍", Hindi: "🇮🇳", Bengali: "🅱️", Other: "📚",
+  "Social Science": "🌍", Hindi: "🇮🇳", Bengali: "🅱️", Other: "📚", EVS: "🌱",
 };
+
+/** Class 3–5 also get EVS (Environmental Studies), listed first; every other class keeps the standard list. */
+export function getSubjectsForClass(classLevel: unknown): string[] {
+  return withPrimarySubjects(SUBJECTS, classLevel);
+}
 
 export const LANGUAGES = ["English", "Bengali", "Hindi", "Assamese"];
 

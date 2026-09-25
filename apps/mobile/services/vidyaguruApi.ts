@@ -43,6 +43,8 @@ export async function askVidyaGuru(payload: VidyaGuruPayload): Promise<VidyaGuru
     const err: any = new Error(data.error ?? "VidyaGuru request failed");
     err.code = data.code ?? "UNKNOWN";
     err.status = resp.status;
+    if (data.creditBalance   !== undefined) err.creditBalance   = data.creditBalance;
+    if (data.creditsRequired !== undefined) err.creditsRequired = data.creditsRequired;
     throw err;
   }
   return data as VidyaGuruResponse;

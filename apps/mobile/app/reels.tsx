@@ -55,6 +55,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth, db } from "@/lib/firebase";
+import ReelMoreMenu from "@/components/ReelMoreMenu";
+import ReportVideoModal from "@/components/ReportVideoModal";
+import { isPubliclyVisible } from "@/lib/feedVisibility";
 import {
   addDoc,
   collection,
@@ -101,6 +104,9 @@ type Post = {
   shares?: number;
   status?: PostStatus | string;
   createdAt?: any;
+  // Report Video (student reporting UI) — required by
+  // reportSkillBattleContent's schema alongside the post's own id.
+  battleId?: string;
   // short_reels fields
   category?: string;
   cfVideoId?: string;
@@ -223,11 +229,14 @@ function VideoItem({
   const [comments,        setComments]        = useState<any[]>([]);
   const [commentText,     setCommentText]     = useState("");
   const [commentCount,    setCommentCount]    = useState(item.comments || 0);
+  const [reportVisible,   setReportVisible]   = useState(false);
   const [cfState,         setCfState]         = useState<CfState>("checking");
   const [pollAttempt,     setPollAttempt]     = useState(0);
   const [pollMax,         setPollMax]         = useState(20);
   const pollingRef = useRef(false);
   const isOwner    = !isShortReel && auth.currentUser?.uid === item.userId;
+  // See app/(drawer)/(tabs)/reels.tsx's identical isReportable comment.
+  const isReportable = !isShortReel && item.isSkillBattle === true && !isOwner && !!item.battleId;
 
   const playbackUrl = resolvePlaybackUrl(item);
 
@@ -396,6 +405,13 @@ function VideoItem({
         <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
         {renderProcessingOverlay()}
 
+        {/* Report Video — top-right "⋮" menu, Skill Battle posts only */}
+        {isReportable && (
+          <View style={[styles.moreMenuWrap, { top: 50 }]}>
+            <ReelMoreMenu colors={colors} onReport={() => setReportVisible(true)} />
+          </View>
+        )}
+
         {/* Status watermark — only for own pending posts */}
         {isOwner && item.status !== "approved" && (
           <>
@@ -510,6 +526,17 @@ function VideoItem({
           </View>
         </Modal>
       )}
+
+      {isReportable && (
+        <ReportVideoModal
+          visible={reportVisible}
+          onClose={() => setReportVisible(false)}
+          contentType="post"
+          contentId={item.id}
+          battleId={item.battleId ?? ""}
+          colors={colors}
+        />
+      )}
     </>
   );
 }
@@ -620,7 +647,12 @@ export default function Reels() {
           const snap = await getDoc(doc(db, "posts", params.postId as string));
           if (snap.exists()) {
             const post = { id: snap.id, ...(snap.data() as Omit<Post, "id">) };
-            if ((post as any).status !== "rejected") {
+            // A shared/deep link to an unapproved Skill Battle video must
+            // not bypass moderation just because the viewer has the direct
+            // link — see isPubliclyVisible's header. A student's OWN
+            // pending post has its own separate, watermarked surface
+            // (ownPending below); this is the generic/public route.
+            if (isPubliclyVisible(post as any)) {
               setReels([post]);
               setCurrentIndex(0);
               hasScrolled.current = true;
@@ -631,12 +663,12 @@ export default function Reels() {
         // Fill rest of feed after pinned post
         try {
           const q = isSkillBattleFilter
-            ? query(collection(db, "posts"), where("isSkillBattle", "==", true),  orderBy("views", "desc"), limit(20))
-            : query(collection(db, "posts"), where("postType", "==", "reel"),     orderBy("views", "desc"), limit(20));
+            ? query(collection(db, "posts"), where("isSkillBattle", "==", true), where("status", "==", "approved"), orderBy("views", "desc"), limit(20))
+            : query(collection(db, "posts"), where("postType", "==", "reel"),    orderBy("views", "desc"), limit(20));
           const snap = await getDocs(q);
           const rest = snap.docs
             .map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">) }))
-            .filter((p) => p.id !== params.postId && (p as any).status !== "rejected");
+            .filter((p) => p.id !== params.postId && isPubliclyVisible(p as any));
           setReels((prev) => {
             const pinned = prev[0];
             return pinned ? [pinned, ...rest] : rest;
@@ -646,16 +678,20 @@ export default function Reels() {
       }
 
       // ── NORMAL / SKILL BATTLE feed ────────────────────────────
-      // FIX 2: No status=="approved" filter — posts never get approved.
-      // Only filter out explicitly rejected posts.
+      // SECURITY FIX: Skill Battle content now REQUIRES status=="approved"
+      // as an actual Firestore query constraint (not just a post-fetch
+      // array filter) — see isPubliclyVisible's header above for why.
+      // Non-Skill-Battle "reel" posts keep their existing, unchanged
+      // publication model (still no approval flow for them — out of
+      // scope for this fix, see Step 14 of the audit this fix came from).
       try {
         const q = isSkillBattleFilter
-          ? query(collection(db, "posts"), where("isSkillBattle", "==", true),  orderBy("views", "desc"), limit(20))
-          : query(collection(db, "posts"), where("postType", "==", "reel"),     orderBy("views", "desc"), limit(20));
+          ? query(collection(db, "posts"), where("isSkillBattle", "==", true), where("status", "==", "approved"), orderBy("views", "desc"), limit(20))
+          : query(collection(db, "posts"), where("postType", "==", "reel"),    orderBy("views", "desc"), limit(20));
         const snap = await getDocs(q);
         const data = snap.docs
           .map((d) => ({ id: d.id, ...(d.data() as Omit<Post, "id">) }))
-          .filter((p) => (p as any).status !== "rejected");
+          .filter((p) => isPubliclyVisible(p as any));
         setReels(data);
       } catch (e) {
         console.log("[Reels] loadReels error:", e);
@@ -830,6 +866,7 @@ export default function Reels() {
 
 const styles = StyleSheet.create({
   back:           { position: "absolute", top: 50, left: 20 },
+  moreMenuWrap:   { position: "absolute", right: 16, zIndex: 5 },
   ownStatusBar:   { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 10 },
   ownStatusIcon:  { fontSize: 22 },
   ownStatusInfo:  { flex: 1 },

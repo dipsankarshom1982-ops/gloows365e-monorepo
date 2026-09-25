@@ -4,7 +4,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -26,13 +26,22 @@ if (Platform.OS !== "web") {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
-import { auth, db, firebaseConfig } from "@/lib/firebase";
+import {
+  CLASS_RANGE_LABEL,
+  resolveOnboardingRoute,
+  STREAM_CLASS_LEVELS,
+  STUDENT_STREAMS,
+  StudentStream,
+  SUPPORTED_CLASS_LEVEL_STRINGS,
+} from "@gloows/shared-logic";
+import { auth, db, functions } from "@/lib/firebase";
 import { ensureReferralCode } from "@/lib/initUser";
+import { ensureStudentId } from "@/services/studentIdService";
 import { applyReferral } from "@/services/referralService";
+import { TITLES } from "@/lib/avatars";
 import { Ionicons } from "@expo/vector-icons";
-import { getApps, initializeApp } from "firebase/app";
-import { getAuth, inMemoryPersistence, initializeAuth, signInWithPhoneNumber } from "firebase/auth";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
 
 // ─── Restart Education full-screen block ──────────────────────────────────────
@@ -65,7 +74,7 @@ function RestartEducationBlock({
         <View style={block.card}>
           <Text style={block.cardTitle}>About this platform</Text>
           <Text style={block.cardBody}>
-            GLOOWS365E is designed for current school students in Class 6–12
+            GLOOWS365E is designed for current school students in {CLASS_RANGE_LABEL}
             (under 18 years of age).{"\n\n"}
             Based on your age ({age} years), you are eligible for our{" "}
             <Text style={block.highlight}>Restart My Education</Text> programme
@@ -151,30 +160,20 @@ const block = StyleSheet.create({
   note:         { color: "rgba(134,239,172,0.6)", fontSize: 12, textAlign: "center", fontStyle: "italic" },
 });
 
-// ─── Secondary Firebase app for parent phone OTP ──────────────────────────────
-
-function getPhoneVerifyAuth() {
-  const existing = getApps().find((a) => a.name === "phone-verify");
-  const app = existing ?? initializeApp(firebaseConfig, "phone-verify");
-  try {
-    return initializeAuth(app, { persistence: inMemoryPersistence });
-  } catch {
-    return getAuth(app);
-  }
-}
-
 // ─── Main registration component ─────────────────────────────────────────────
 
 export default function StudentRegister() {
   const router = useRouter();
 
   const [name,              setName]              = useState("");
+  const [title,             setTitle]             = useState("");
   const [phone,             setPhone]             = useState("");
   const [pincode,           setPincode]           = useState("");
   const [school,            setSchool]            = useState("");
   const [board,             setBoard]             = useState("");
   const [section,           setSection]           = useState("");
   const [studentClass,      setStudentClass]      = useState("");
+  const [stream,            setStream]            = useState<StudentStream | "">("");
   const [preferredLanguage, setPreferredLanguage] = useState("");
   const [profilePic,        setProfilePic]        = useState<string | null>(null);
 
@@ -198,17 +197,35 @@ export default function StudentRegister() {
   const [showRestartBlock, setShowRestartBlock] = useState(false);
   const [detectedAge,      setDetectedAge]      = useState<number>(0);
 
-  // Parent phone OTP
-  const [confirmationResult,  setConfirmResult]       = useState<any>(null);
-  const [otp,                 setOtp]                 = useState("");
-  const [otpSent,             setOtpSent]             = useState(false);
-  const [sendingOtp,          setSendingOtp]          = useState(false);
-  const [verifyingOtp,        setVerifyingOtp]        = useState(false);
-  const [parentPhoneVerified, setParentPhoneVerified] = useState(false);
-  const [otpError,            setOtpError]            = useState("");
-
   const boards       = ["CBSE", "ICSE", "State Board", "Other"];
-  const classOptions = ["6", "7", "8", "9", "10", "11", "12"];
+  const classOptions = SUPPORTED_CLASS_LEVEL_STRINGS;
+  const streamClasses = STREAM_CLASS_LEVELS.map(String);
+  const isStreamClass = streamClasses.includes(studentClass);
+
+  // The parent's phone (and its verified status) was already collected and
+  // verified upstream in (auth)/parent-profile + (auth)/phone-verification.
+  // This screen only reads it back — once to populate the `phone` field this
+  // form still writes to students/{uid} (read by e.g. the admin panel), and
+  // to guard against someone deep-linking straight into Student Registration
+  // before finishing the earlier steps.
+  useEffect(() => {
+    const guard = async () => {
+      const user = auth.currentUser;
+      if (!user) { router.replace("/login" as any); return; }
+      try {
+        const snap = await getDoc(doc(db, "students", user.uid));
+        const d = snap.exists() ? snap.data() : undefined;
+        const nextRoute = resolveOnboardingRoute(d as any);
+        if (nextRoute === "parent-profile") { router.replace("/(auth)/parent-profile" as any); return; }
+        if (nextRoute === "phone-verification") { router.replace("/(auth)/phone-verification" as any); return; }
+        if (nextRoute === "parent-permissions") { router.replace("/(auth)/parent-permissions" as any); return; }
+        if (nextRoute === "home") { router.replace("/(drawer)/(tabs)/home" as any); return; }
+        if (d?.parentPhone) setPhone(d.parentPhone);
+      } catch { /* if this fails, let the user proceed rather than get stuck */ }
+    };
+    guard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -245,7 +262,13 @@ export default function StudentRegister() {
         aspect: [1, 1],
         quality: 0.7,
       });
-      if (!result.canceled) setProfilePic(result.assets[0].uri);
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) {
+        setError("Image too large — please choose one under 5MB.");
+        return;
+      }
+      setProfilePic(asset.uri);
     } catch { /* ignore */ }
   };
 
@@ -266,57 +289,16 @@ export default function StudentRegister() {
     }
   };
 
-  // ── OTP ──────────────────────────────────────────────────────────────────────
-
-  const handleSendOtp = async () => {
-    if (!/^[6-9]\d{9}$/.test(phone)) {
-      setOtpError("Enter a valid 10-digit parent phone number first");
-      return;
-    }
-    setSendingOtp(true);
-    setOtpError("");
-    try {
-      const phoneAuth = getPhoneVerifyAuth();
-      const result = await signInWithPhoneNumber(phoneAuth, `+91${phone}`, undefined as any);
-      setConfirmResult(result);
-      setOtpSent(true);
-    } catch (err: any) {
-      const msg = err?.message ?? "";
-      if (msg.includes("TOO_SHORT") || msg.includes("INVALID_PHONE")) {
-        setOtpError("Invalid phone number");
-      } else if (msg.includes("TOO_MANY_REQUESTS")) {
-        setOtpError("Too many attempts. Try again later.");
-      } else {
-        setOtpError("Failed to send OTP. Please try again.");
-      }
-    } finally {
-      setSendingOtp(false);
-    }
-  };
-
-  const handleVerifyOtp = async () => {
-    if (otp.length !== 6) { setOtpError("Enter the 6-digit OTP"); return; }
-    setVerifyingOtp(true);
-    setOtpError("");
-    try {
-      await confirmationResult.confirm(otp);
-      setParentPhoneVerified(true);
-      setOtpError("");
-    } catch {
-      setOtpError("Incorrect OTP. Please try again.");
-    } finally {
-      setVerifyingOtp(false);
-    }
-  };
-
   // ── Validation (for normal student path only) ─────────────────────────────
+  // Parent phone verification and parental consent already happened upstream
+  // in (auth)/parent-profile → (auth)/phone-verification → (auth)/parent-permissions
+  // before this screen is ever reachable (enforced by the mount guard above).
 
   const validate = () => {
-    if (!name || !phone || !pincode || !school || !board || !dob || !studentClass || !preferredLanguage) {
+    if (!name || !title || !phone || !pincode || !school || !board || !dob || !studentClass || !preferredLanguage) {
       return "Please fill all required fields";
     }
-    if (!/^[6-9]\d{9}$/.test(phone))         return "Invalid parent phone number";
-    if (!parentPhoneVerified)                  return "Please verify parent phone number";
+    if (isStreamClass && !stream)              return "Please select your stream";
     if (!/^\d{6}$/.test(pincode))             return "Invalid pincode";
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(dob))  return "Invalid date of birth";
     const age = calculateAge(dob);
@@ -379,27 +361,52 @@ export default function StudentRegister() {
         profilePicUrl = profilePic;
       }
 
+      // parentGuardianName, parentPhone, parentPhoneVerified and
+      // parentalConsent were already written earlier (parent-profile,
+      // phone-verification, parent-permissions) — not repeated here so this
+      // merge-write can't clobber them.
       await setDoc(doc(db, "students", user.uid), {
-        name, phone, school, board, section,
-        class: studentClass, preferredLanguage,
+        name, title, phone, school, board, section,
+        class: studentClass,
+        stream: isStreamClass ? (stream || null) : null,
+        preferredLanguage,
         profilePic: profilePicUrl,
-        parentPhone: phone,
-        parentPhoneVerified: true,
         dob, age,
         location: { state: stateVal, district, area, pincode },
         interests: finalInterests,
-        stats:           { xp: 0, level: 1, coins: 200, streak: 0 },
+        stats:           { xp: 0, level: 1, streak: 0 },
         learningProfile: { goal: "Improve learning", dailyTarget: 30 },
+        onboardingStep: "studentRegistration",
         onboardingComplete: true,
         createdAt: serverTimestamp(),
-      });
+      }, { merge: true });
 
       await setDoc(doc(db, "users", user.uid), {
         role: "student", roles: ["student"],
         profileType: "student",
-        coins: 200, onboardingComplete: true,
+        onboardingComplete: true,
         createdAt: serverTimestamp(),
       }, { merge: true });
+
+      // FIX (bug report — "200 v-coins not updated"): this used to just set
+      // users/{uid}.coins = 200 directly — a field nothing in the app ever
+      // reads (hooks/useVCoins.ts, the Wallet page, and the Drawer all read
+      // vCoinsBalance + vCoins, never `coins`). Routed through the
+      // creditSignupBonus Cloud Function instead — moved server-side
+      // (functions/src/vcoins.ts) since firestore.rules now blocks direct
+      // client writes to vCoinsBalance. Idempotent server-side (fixed
+      // referenceId "signup_bonus" per uid), so it can only ever credit
+      // once even if handleRegister somehow runs twice for the same uid.
+      try {
+        await httpsCallable(functions, "creditSignupBonus")();
+      } catch { /* non-fatal — a coin-credit hiccup must never block registration */ }
+
+      // Non-fatal — an ID-assignment hiccup must never block registration.
+      // The drawer lazily retries this for any account that still lacks
+      // one, so a failure here just means the badge shows up a bit later.
+      try {
+        await ensureStudentId();
+      } catch { /* non-fatal */ }
 
       await ensureReferralCode(user.uid);
 
@@ -461,7 +468,12 @@ export default function StudentRegister() {
           contentContainerStyle={S.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={S.brand}>Vidya<Text style={S.gold}>AI</Text></Text>
+          <Text style={S.brand}>
+            <Text style={S.brandGl}>Gl</Text>
+            <Text style={S.brandOows}>oows</Text>
+            <Text style={S.brand365}>365</Text>
+            <Text style={S.brandE}>E</Text>
+          </Text>
           <Text style={S.title}>Create Your Profile 🚀</Text>
 
           {/* Profile picture */}
@@ -481,71 +493,19 @@ export default function StudentRegister() {
             placeholderTextColor="#aaa" value={name} onChangeText={setName}
           />
 
-          {/* Parent Phone + OTP */}
-          <View style={S.phoneRow}>
-            <TextInput
-              style={[S.input, S.phoneInput, parentPhoneVerified && S.inputVerified]}
-              placeholder="Parent Phone *"
-              keyboardType="phone-pad"
-              maxLength={10}
-              placeholderTextColor="#aaa"
-              value={phone}
-              onChangeText={(t) => {
-                setPhone(t);
-                if (parentPhoneVerified) setParentPhoneVerified(false);
-                if (otpSent) setOtpSent(false);
-                setConfirmResult(null);
-                setOtp(""); setOtpError("");
-              }}
-              editable={!parentPhoneVerified}
-            />
-            {parentPhoneVerified ? (
-              <View style={S.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={20} color="#34D399" />
-                <Text style={S.verifiedText}>Verified</Text>
-              </View>
-            ) : (
+          {/* Title — drives the fallback avatar shown around the app until
+              a real photo is uploaded (see components/TitleAvatar.tsx). */}
+          <Text style={S.label}>Title *</Text>
+          <View style={S.row}>
+            {TITLES.map((t) => (
               <TouchableOpacity
-                style={[S.otpBtn, sendingOtp && { opacity: 0.6 }]}
-                onPress={handleSendOtp}
-                disabled={sendingOtp}
+                key={t} style={[S.chip, title === t && S.active]}
+                onPress={() => setTitle(t)}
               >
-                {sendingOtp
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={S.otpBtnText}>{otpSent ? "Resend" : "Send OTP"}</Text>
-                }
+                <Text style={S.chipText}>{t}</Text>
               </TouchableOpacity>
-            )}
+            ))}
           </View>
-
-          {otpSent && !parentPhoneVerified && (
-            <View style={S.otpSection}>
-              <Text style={S.otpHint}>Enter the 6-digit OTP sent to +91 {phone}</Text>
-              <View style={S.otpRow}>
-                <TextInput
-                  style={[S.input, S.otpInput]}
-                  placeholder="6-digit OTP"
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  placeholderTextColor="#aaa"
-                  value={otp}
-                  onChangeText={setOtp}
-                />
-                <TouchableOpacity
-                  style={[S.otpBtn, S.verifyBtn, verifyingOtp && { opacity: 0.6 }]}
-                  onPress={handleVerifyOtp}
-                  disabled={verifyingOtp}
-                >
-                  {verifyingOtp
-                    ? <ActivityIndicator size="small" color="#fff" />
-                    : <Text style={S.otpBtnText}>Verify</Text>
-                  }
-                </TouchableOpacity>
-              </View>
-              {otpError ? <Text style={S.otpError}>{otpError}</Text> : null}
-            </View>
-          )}
-          {otpError && !otpSent ? <Text style={S.otpError}>{otpError}</Text> : null}
 
           {/* Pincode */}
           <TextInput
@@ -630,12 +590,34 @@ export default function StudentRegister() {
             {classOptions.map((c) => (
               <TouchableOpacity
                 key={c} style={[S.chip, studentClass === c && S.active]}
-                onPress={() => setStudentClass(c)}
+                onPress={() => {
+                  setStudentClass(c);
+                  // Stream only ever applies to Class 11/12 — moving away
+                  // from those must never leave a stale stream attached.
+                  if (!streamClasses.includes(c)) setStream("");
+                }}
               >
                 <Text style={S.chipText}>{c}</Text>
               </TouchableOpacity>
             ))}
           </View>
+
+          {/* Stream — Class 11/12 only */}
+          {isStreamClass && (
+            <>
+              <Text style={S.label}>Select Stream *</Text>
+              <View style={S.row}>
+                {STUDENT_STREAMS.map((s) => (
+                  <TouchableOpacity
+                    key={s} style={[S.chip, stream === s && S.active]}
+                    onPress={() => setStream(s)}
+                  >
+                    <Text style={S.chipText}>{s}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
 
           {/* Language */}
           <Text style={S.label}>Preferred Language *</Text>
@@ -710,11 +692,6 @@ export default function StudentRegister() {
             </LinearGradient>
           </TouchableOpacity>
 
-          {!parentPhoneVerified && (
-            <Text style={S.verifyNote}>
-              * Verify parent phone to enable registration
-            </Text>
-          )}
         </ScrollView>
       </LinearGradient>
     </SafeAreaView>
@@ -727,7 +704,10 @@ const S = StyleSheet.create({
   container:    { flex: 1 },
   scrollContent:{ padding: 20, maxWidth: 600, width: "100%", alignSelf: "center", paddingBottom: 40 },
   brand:        { fontSize: 34, fontWeight: "900", color: "#fff", textAlign: "center" },
-  gold:         { color: "#FFD700" },
+  brandGl:      { color: "#A5B4FC" },
+  brandOows:    { color: "#F1F5F9" },
+  brand365:     { color: "#818CF8" },
+  brandE:       { color: "#FBBF24" },
   title:        { fontSize: 20, color: "#c7d2fe", textAlign: "center", marginBottom: 20 },
   profilePicContainer:  { marginBottom: 20, borderRadius: 14, overflow: "hidden", height: 140 },
   profilePicPreview:    { width: "100%", height: "100%", borderRadius: 14 },
@@ -735,19 +715,6 @@ const S = StyleSheet.create({
   profilePicText:       { fontSize: 48, marginBottom: 8 },
   profilePicLabel:      { color: "#aaa", fontSize: 12 },
   input:         { backgroundColor: "rgba(255,255,255,0.06)", padding: 14, borderRadius: 14, marginBottom: 12, color: "#fff" },
-  inputVerified: { borderWidth: 1, borderColor: "#34D399" },
-  phoneRow:      { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
-  phoneInput:    { flex: 1, marginBottom: 0 },
-  otpBtn:        { backgroundColor: "#6366F1", paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12 },
-  verifyBtn:     { backgroundColor: "#059669" },
-  otpBtnText:    { color: "#fff", fontWeight: "700", fontSize: 13 },
-  verifiedBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
-  verifiedText:  { color: "#34D399", fontWeight: "700", fontSize: 13 },
-  otpSection:    { marginBottom: 12 },
-  otpHint:       { color: "#94a3b8", fontSize: 12, marginBottom: 8 },
-  otpRow:        { flexDirection: "row", alignItems: "center", gap: 8 },
-  otpInput:      { flex: 1, marginBottom: 0 },
-  otpError:      { color: "#F87171", fontSize: 12, marginBottom: 8 },
   auto:          { color: "#34D399", marginBottom: 10 },
   label:         { color: "#c7d2fe", marginTop: 10, marginBottom: 6 },
   row:           { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
@@ -762,7 +729,6 @@ const S = StyleSheet.create({
   referralHint:  { color: "#94a3b8", fontSize: 11, marginBottom: 8 },
   referralValid: { color: "#34D399", fontSize: 11, marginBottom: 8 },
   error:         { color: "#F87171", marginTop: 10, textAlign: "center" },
-  verifyNote:    { color: "#64748b", fontSize: 11, textAlign: "center", marginTop: 8 },
   button:        { marginTop: 20, borderRadius: 30, overflow: "hidden" },
   buttonInner:   { paddingVertical: 16, alignItems: "center" },
   buttonText:    { color: "#fff", fontWeight: "700", fontSize: 16 },

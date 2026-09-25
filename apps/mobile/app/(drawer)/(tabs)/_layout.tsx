@@ -1,46 +1,68 @@
+// PATH: apps/mobile/app/(drawer)/(tabs)/_layout.tsx
+// Navigation restructure — fixed 5-tab bar: Home · Dashboard · Learn ·
+// Challenge · Menu. No longer driven by AppConfigContext/appModules
+// (that Firestore-configurable module list drove the old Reels/AI Guru/
+// ShikshaHub/Skill Battle/VidyaStar tab set); this new tab set is fixed
+// by the nav spec, not admin-toggleable, so this screen stops consuming
+// useAppConfig() entirely. The admin AppModules page is left untouched —
+// it's simply unused for bottom-nav purposes now.
+//
+// Reels became the post-login landing screen (see app/index.tsx) instead
+// of a tab — still registered here with href:null so it stays reachable
+// by direct link (SkillShortPreview, EarnMoreVCoinsModal, etc. all push
+// to "/reels" directly, not via this tab bar).
+//
+// ai-guru, shikshahub, skillbattle, vidyastar, seekho, skillboost,
+// learnFun are folded into the Learn/Challenge hub screens — still
+// registered here with href:null (same pattern already used for home
+// before this change) so their screens/routes keep working unchanged.
+//
+// Menu opens the existing Drawer (app/(drawer)/_layout.tsx) instead of
+// navigating — see the "menu" Tabs.Screen's tabBarButton below, using the
+// exact same parent-drawer-lookup already proven in components/header.tsx.
+
 import { useTheme } from "@/context/ThemeContext";
-import { useAppConfig } from "@/context/AppConfigContext";
+import { DrawerActions, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import type { AppModule } from "@/services/appConfigService";
+import { TouchableOpacity } from "react-native";
 
-// All screen files that exist in this directory.
-// Any screen not returned by Firestore (or fallback) is hidden via href: null.
-const ALL_SCREENS = [
-  "home",
-  "learnFun",
-  "skillboost",
-  "seekho",
-  "skillbattle",
-  "vidyastar",
+const NAV_TABS: { name: string; title: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { name: "home",      title: "Home",      icon: "home-outline" },
+  { name: "dashboard", title: "Dashboard", icon: "stats-chart-outline" },
+  { name: "learn",     title: "Learn",     icon: "book-outline" },
+  { name: "challenge", title: "Challenge", icon: "flag-outline" },
 ];
 
-// Used on first launch before Firestore data arrives (no cache yet).
-const DEFAULT_MODULES: AppModule[] = [
-  { id: "home",       name: "Home",        icon: "home",          order: 1, isEnabled: true },
-  { id: "skillboost", name: "SkillBoost",  icon: "flash",         order: 2, isEnabled: true },
-  { id: "seekho",     name: "Seekho",      icon: "school-outline",order: 3, isEnabled: true },
-  { id: "skillbattle",name: "Skill-Battle",icon: "trophy",        order: 4, isEnabled: true },
-  { id: "vidyastar",  name: "VidyaStar",   icon: "star",          order: 5, isEnabled: true },
+// Screens folded into Learn/Challenge (or, for reels, replaced by the
+// post-login landing flow) — kept registered so their routes still
+// resolve, just hidden from the tab bar.
+const HIDDEN_SCREENS = [
+  "reels", "ai-guru", "shikshahub", "skillbattle", "vidyastar",
+  "seekho", "skillboost", "learnFun",
 ];
+
+function MenuTabButton(props: any) {
+  const navigation = useNavigation();
+  const handlePress = () => {
+    let nav: any = navigation;
+    while (nav) {
+      if (nav.getState?.()?.type === "drawer") {
+        nav.dispatch(DrawerActions.openDrawer());
+        return;
+      }
+      nav = nav.getParent?.();
+    }
+    navigation?.dispatch(DrawerActions.openDrawer());
+  };
+  return <TouchableOpacity {...props} onPress={handlePress} />;
+}
 
 export default function TabsLayout() {
   const { colors } = useTheme();
-  const { modules, configLoading } = useAppConfig();
-
-  // Use Firestore modules once available; fall back to defaults while loading
-  const activeModules = modules.length > 0 ? modules : DEFAULT_MODULES;
-
-  const enabledIds = new Set(activeModules.map((m) => m.id));
-  const moduleMap  = Object.fromEntries(activeModules.map((m) => [m.id, m]));
-
-  // Key changes whenever enabled module set changes → forces Tabs to remount
-  // so href:null is correctly applied to newly-disabled tabs.
-  const tabsKey = [...enabledIds].sort().join(",");
 
   return (
     <Tabs
-      key={tabsKey}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.accent,
@@ -51,37 +73,29 @@ export default function TabsLayout() {
         },
       }}
     >
-      {ALL_SCREENS.map((screenName) => {
-        const mod = moduleMap[screenName];
-        const isEnabled = enabledIds.has(screenName);
+      {NAV_TABS.map(({ name, title, icon }) => (
+        <Tabs.Screen
+          key={name}
+          name={name}
+          options={{
+            title,
+            tabBarIcon: ({ color, size }) => <Ionicons name={icon} size={size} color={color} />,
+          }}
+        />
+      ))}
 
-        if (!isEnabled || !mod) {
-          return (
-            <Tabs.Screen
-              key={screenName}
-              name={screenName}
-              options={{ href: null }}
-            />
-          );
-        }
+      <Tabs.Screen
+        name="menu"
+        options={{
+          title: "Menu",
+          tabBarIcon: ({ color, size }) => <Ionicons name="menu-outline" size={size} color={color} />,
+          tabBarButton: (props) => <MenuTabButton {...props} />,
+        }}
+      />
 
-        return (
-          <Tabs.Screen
-            key={screenName}
-            name={screenName}
-            options={{
-              title: mod.name,
-              tabBarIcon: ({ color, size }) => (
-                <Ionicons
-                  name={mod.icon as React.ComponentProps<typeof Ionicons>["name"]}
-                  size={size}
-                  color={color}
-                />
-              ),
-            }}
-          />
-        );
-      })}
+      {HIDDEN_SCREENS.map((name) => (
+        <Tabs.Screen key={name} name={name} options={{ href: null }} />
+      ))}
     </Tabs>
   );
 }

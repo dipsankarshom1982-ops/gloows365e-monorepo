@@ -5,6 +5,7 @@ import axios from "axios";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
 import { getSubscription } from "./usageCheck";
 import { getRedis, RK, TTL, todayIST, ttlUntilMidnightIST } from "./redish";
+import { classLevelBand, resolveStudentClassLevel } from "./aiStudentContext";
 
 // Minimal type for cached result blobs — full type lives in lib/discover/types.ts (frontend)
 type DiscoverResult = Record<string, unknown> & {
@@ -134,7 +135,7 @@ function formatSnippetsForPrompt(
 function buildDiscoverPrompt(
   query: string,
   studentName: string,
-  classLevel: string | number,
+  classLevel: number | null,
   interests: string[],
   language: string,
   collegeSnippets: string,
@@ -147,7 +148,7 @@ function buildDiscoverPrompt(
       : "Write all text fields in clear, friendly English.";
 
   return `You are Discover AI — India's smartest career and education advisor for students.
-Student: ${studentName}, Class ${classLevel}, Interests: ${interestStr}
+Student: ${studentName}${classLevel === null ? "" : `, Class ${classLevel}`}, Interests: ${interestStr}
 Query: "${query}"
 ${langInstruction}
 
@@ -191,10 +192,10 @@ Return exactly this JSON structure with ALL fields populated:
   "scholarshipSuggestions": [
     { "name": "Scholarship name", "amount": "₹X,000 per year", "eligibility": "Who can apply", "lastDate": "Month Year", "applyUrl": "https://...", "snippet": "Brief description" }
   ],
-  "mentorAdvice": "Warm, personal paragraph addressing ${studentName} directly. Mention their Class ${classLevel} level. Give specific, actionable advice for Indian students pursuing ${query}. Include one motivational line.",
+  "mentorAdvice": "Warm, personal paragraph addressing ${studentName} directly. ${classLevel === null ? "Keep it suited to a school student." : `Mention their Class ${classLevel} level.`} Give specific, actionable advice for Indian students pursuing ${query}. Include one motivational line.",
   "futureDemandScore": 75,
   "nextActionSteps": [
-    "Step 1: Specific action for Class ${classLevel} student",
+    "Step 1: Specific action for ${classLevel === null ? "a school" : `Class ${classLevel}`} student",
     "Step 2: Next concrete step",
     "Step 3: Medium-term goal",
     "Step 4: Long-term direction"
@@ -203,12 +204,12 @@ Return exactly this JSON structure with ALL fields populated:
 
 Constraints:
 - salaryBars: Use realistic Indian market LPA values
-- learningPath: Minimum 4 steps tailored for Class ${classLevel} student starting from scratch
+- learningPath: Minimum 4 steps tailored for ${classLevel === null ? "a school" : `Class ${classLevel}`} student starting from scratch
 - requiredSkills: Minimum 6 skills (mix of technical and soft)
 - collegeSuggestions: 4-6 colleges. Populate name/snippet from COLLEGES DATA snippets above
 - scholarshipSuggestions: 3-5 scholarships. Populate from SCHOLARSHIPS DATA snippets above
 - futureDemandScore: integer 0-100. 80+ for AI/tech, 60-79 for emerging, 40-59 for stable, <40 for declining
-- nextActionSteps: Exactly 4 steps, actionable and specific to Class ${classLevel}
+- nextActionSteps: Exactly 4 steps, actionable and specific to ${classLevel === null ? "a school student" : `Class ${classLevel}`}
 - mentorAdvice: Emotionally warm. Reference the specific query and student's situation.`;
 }
 
@@ -266,6 +267,17 @@ export const discoverSearch = onRequest(
       return;
     }
 
+    // Class comes from the student's own profile, never the body — see aiStudentContext.ts.
+    const classLevel = await resolveStudentClassLevel(uid, db);
+
+    // Discover is a college/career/scholarship advisor and its cached results
+    // are class-agnostic, so it isn't offered to Class 3–5. Checked before the
+    // quota so nothing is counted or charged.
+    if (classLevelBand(classLevel) === "PRIMARY_FOUNDATION") {
+      res.status(403).json({ error: "Discover isn't available for your class yet.", code: "NOT_AVAILABLE_FOR_CLASS" });
+      return;
+    }
+
     try {
       const remaining = await checkDiscoverLimit(uid);
 
@@ -273,13 +285,11 @@ export const discoverSearch = onRequest(
         query,
         language = "English",
         studentName = "Student",
-        classLevel = "10",
         interests = [],
       } = req.body as {
         query: string;
         language?: string;
         studentName?: string;
-        classLevel?: string | number;
         interests?: string[];
       };
 

@@ -1,0 +1,455 @@
+// PATH: functions/src/tutorAccounts.ts
+// Gloows Tutor — Phase 1a account/profile/verification backend.
+//
+// Follows this codebase's dominant convention (30 onCall vs 2 legacy
+// onRequest — see functions/src/submitVidyastarContestQuiz.ts,
+// contestLesson.ts) rather than a REST API: v1 functionsV1.https.onCall,
+// context.auth populated automatically, no manual bearer-token parsing.
+//
+// Plain profile field reads/writes (qualification, subjects, etc.) are
+// NOT callables here — same as student profiles, they're direct Firestore
+// reads/writes from the client, gated by firestore.rules'
+// owner-reads/writes-own-doc rule for tutors/{uid}. Callables in this file
+// are reserved for the operations that need real server-side authority:
+// granting a role claim, and the verification review workflow.
+//
+// Role/admin authorization follows functions/src/adminManagement.ts's
+// createAdmin pattern exactly: Firebase custom claims
+// (auth.setCustomUserClaims), never a Firestore field — a Firestore
+// users/{uid}.role field exists elsewhere in this codebase but is only
+// ever used for a quota bypass (usageCheck.ts), never for authorization,
+// and that distinction matters: don't copy that field for anything
+// privilege-gated.
+
+import * as admin from "firebase-admin";
+import * as functionsV1 from "firebase-functions/v1";
+import { notifyTutor } from "./shikshahubNotify";
+
+const db = admin.firestore();
+
+export type TutorRole = "TUTOR" | "TEACHER" | "COACHING_CENTER";
+const TUTOR_ROLES: TutorRole[] = ["TUTOR", "TEACHER", "COACHING_CENTER"];
+
+interface TutorDocumentRef {
+  name: string;
+  storagePath: string;
+}
+
+// ─── registerTutorAccount ──────────────────────────────────────────────────
+// Called right after the client creates the Firebase Auth user itself
+// (createUserWithEmailAndPassword / Google sign-in — same split
+// responsibility as apps/web's signup.tsx). This callable provisions the
+// Firestore side (users/{uid} + tutors/{uid}) and grants the role claim.
+//
+// Both the Firestore writes (merge:true) and setCustomUserClaims are
+// idempotent, so unlike signup.tsx's create-then-rollback-on-failure
+// pattern (which owns the Auth user's whole lifecycle), a client that
+// retries this callable after a partial failure just re-applies the same
+// state rather than needing to delete anything.
+export const registerTutorAccount = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (
+    data: { tutorRole: TutorRole; name: string; phone?: string },
+    context
+  ) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const email = context.auth.token.email ?? "";
+
+    const { tutorRole, name, phone } = data ?? ({} as typeof data);
+    if (!tutorRole || !TUTOR_ROLES.includes(tutorRole)) {
+      throw new functionsV1.https.HttpsError(
+        "invalid-argument",
+        `tutorRole must be one of: ${TUTOR_ROLES.join(", ")}`
+      );
+    }
+    if (!name || !name.trim()) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "name is required");
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const batch = db.batch();
+
+    batch.set(db.doc(`users/${uid}`), {
+      role: "tutor",
+      email,
+      createdAt: now,
+      updatedAt: now,
+    }, { merge: true });
+
+    batch.set(db.doc(`tutors/${uid}`), {
+      uid,
+      name: name.trim(),
+      email,
+      phone: phone ?? "",
+      tutorRole,
+      verified: false,
+      createdAt: now,
+      updatedAt: now,
+    }, { merge: true });
+
+    await batch.commit();
+    await admin.auth().setCustomUserClaims(uid, { role: tutorRole });
+
+    console.log(`✅ Tutor account registered: uid=${uid} role=${tutorRole}`);
+    // Custom claims only take effect on the client's NEXT ID token —
+    // caller must force a refresh (getIdToken(true)) after this resolves,
+    // same requirement setCustomUserClaims always carries.
+    return { uid, tutorRole };
+  });
+
+// ─── submitTutorVerification ───────────────────────────────────────────────
+// Documents are uploaded to Storage (tutorDocuments/{uid}/{fileName},
+// private — see storage.rules) directly from the client BEFORE calling
+// this; this callable only records the resulting refs and flips the
+// review-workflow status. Validates each storagePath is actually under
+// this caller's own tutorDocuments/{uid}/ prefix — storage.rules
+// separately stops a tutor from ever writing outside that prefix, but
+// this stops a tutor from getting an arbitrary path metadata-referenced
+// into their own verification doc for admin to open.
+export const submitTutorVerification = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (
+    data: { documents: TutorDocumentRef[] },
+    context
+  ) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const documents = Array.isArray(data?.documents) ? data.documents : null;
+
+    if (!documents || documents.length === 0) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "At least one document is required");
+    }
+    const expectedPrefix = `tutorDocuments/${uid}/`;
+    for (const doc of documents) {
+      if (!doc?.name || !doc?.storagePath) {
+        throw new functionsV1.https.HttpsError("invalid-argument", "Each document needs a name and storagePath");
+      }
+      if (!doc.storagePath.startsWith(expectedPrefix)) {
+        throw new functionsV1.https.HttpsError(
+          "invalid-argument",
+          "storagePath must be under this account's own tutorDocuments folder"
+        );
+      }
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await db.doc(`tutorVerifications/${uid}`).set({
+      uid,
+      status: "Submitted",
+      documents,
+      submittedAt: now,
+      updatedAt: now,
+    }, { merge: true });
+
+    console.log(`✅ Tutor verification submitted: uid=${uid} (${documents.length} document(s))`);
+    return { status: "Submitted" as const };
+  });
+
+// ─── submitTutorOnboarding ──────────────────────────────────────────────────
+// Final step (Step 5 "Submit Profile for Review") of the post-signup
+// onboarding wizard (apps/tutor's /onboarding, apps/tutor-mobile's
+// equivalent once built). Steps 2-4 write their fields directly to
+// tutors/{uid} from the client as they go (plain setDoc/merge, gated by
+// firestore.rules' allowlist — same trust level as Phase 1a's
+// qualification/subjects/bio fields already have) so progress autosaves
+// and survives a refresh/app-restart without needing a callable per step.
+//
+// This callable exists ONLY for the one thing a plain client write can't
+// safely do: flip profileStatus/onboardingVerificationStatus into the
+// review workflow. Those two fields are deliberately OFF
+// firestore.rules' tutors/{uid} allowlist (same protection `verified`
+// already has) so this is the only path that can ever set them — a
+// tutor can't self-declare "submitted"/"under_review" any more than they
+// could self-declare "verified" before this feature existed.
+//
+// Deliberately a SEPARATE status model from TutorVerification/
+// TutorVerificationStatus above (Draft/Submitted/Under Review/Verified/
+// Rejected/Suspended, already consumed by admin's Tutor Verifications
+// review queue) rather than reusing it — this onboarding flow's
+// profileStatus/onboardingVerificationStatus track the ONBOARDING
+// wizard's own review workflow (spec'd with snake_case values), and
+// wiring them into admin's existing queue is separate follow-up work,
+// not done here.
+//
+// Re-validates every required field server-side (never trust that a
+// tutor who reached Step 5 in the UI actually satisfied every earlier
+// step's client-side checks) and is idempotent-safe against
+// double-submission: once profileStatus is already submitted/
+// under_review/verified, a second call is rejected outright rather than
+// silently re-processing.
+const TUTOR_TYPES = [
+  "SCHOOL_TEACHER", "PRIVATE_TUTOR", "COLLEGE_FACULTY",
+  "SUBJECT_EXPERT", "EXAM_PREP_TUTOR", "SKILL_INSTRUCTOR",
+] as const;
+const STUDENT_LEVELS = [
+  "PRIMARY", "MIDDLE", "SECONDARY", "HIGHER_SECONDARY",
+  "COLLEGE", "COMPETITIVE_EXAMS", "PROFESSIONAL_SKILL",
+] as const;
+const TEACHING_MODES = ["ONLINE", "OFFLINE", "BOTH"] as const;
+const EXPERIENCE_RANGES = [
+  "FRESHER", "LESS_THAN_1", "ONE_TO_2", "THREE_TO_5", "FIVE_TO_10", "TEN_PLUS",
+] as const;
+const HIGHEST_QUALIFICATIONS = [
+  "HIGHER_SECONDARY", "DIPLOMA", "GRADUATE", "POSTGRADUATE",
+  "B_ED", "M_ED", "PHD", "PROFESSIONAL_CERTIFICATION", "OTHER",
+] as const;
+// Student levels that make an education board a real, applicable field
+// — mirrors Step3TeachingProfile.tsx's SCHOOL_STUDENT_LEVELS exactly, so
+// server-side "was a board required" agrees with what the client showed.
+const SCHOOL_STUDENT_LEVELS = ["PRIMARY", "MIDDLE", "SECONDARY", "HIGHER_SECONDARY"];
+// "rejected" is deliberately NOT in this list — a rejected tutor must be
+// able to fix their profile and resubmit.
+const NON_RESUBMITTABLE_STATUSES = ["submitted", "under_review", "verified"];
+
+export const submitTutorOnboarding = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (_data: unknown, context) => {
+    if (!context.auth) {
+      throw new functionsV1.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+
+    const tutorRef = db.doc(`tutors/${uid}`);
+    const snap = await tutorRef.get();
+    if (!snap.exists) {
+      throw new functionsV1.https.HttpsError(
+        "failed-precondition",
+        "Complete the earlier onboarding steps before submitting."
+      );
+    }
+    const t = snap.data() as Record<string, unknown>;
+
+    if (NON_RESUBMITTABLE_STATUSES.includes(t.profileStatus as string)) {
+      throw new functionsV1.https.HttpsError(
+        "already-exists",
+        "This profile has already been submitted for review."
+      );
+    }
+
+    // ── Re-validate every required field (mirrors each step's client
+    // checks) — a single collected list of human-readable problems, not
+    // a throw-on-first-error, so the client can surface all of them at
+    // once if it ever needs to.
+    const problems: string[] = [];
+    const name = typeof t.name === "string" ? t.name.trim() : "";
+    if (name.length < 2 || name.length > 100) problems.push("Full name must be 2-100 characters");
+    if (!t.phoneVerified) problems.push("Mobile number must be verified");
+    // Every field in this flow is mandatory (see Step2/3/4's file
+    // headers) — re-validated here in full, not just the subset the
+    // original Phase 1a callable checked.
+    if (!t.profilePic || typeof t.profilePic !== "string" || !t.profilePic.trim()) problems.push("Profile photo is required");
+    if (!t.pinCode || typeof t.pinCode !== "string" || !/^\d{6}$/.test(t.pinCode)) problems.push("A valid 6-digit PIN code is required");
+    if (!t.city || typeof t.city !== "string" || !t.city.trim()) problems.push("City is required");
+    if (!t.state || typeof t.state !== "string" || !t.state.trim()) problems.push("State is required");
+    if (!t.gender || typeof t.gender !== "string" || !t.gender.trim()) problems.push("Gender is required");
+    if (!TUTOR_TYPES.includes(t.tutorType as any)) problems.push("Tutor type is required");
+    if (!Array.isArray(t.subjects) || t.subjects.length === 0) problems.push("At least one subject is required");
+    const studentLevels = Array.isArray(t.studentLevels) ? (t.studentLevels as unknown[]) : [];
+    if (studentLevels.length === 0 || !studentLevels.every((l) => STUDENT_LEVELS.includes(l as any))) {
+      problems.push("At least one student level is required");
+    }
+    if (studentLevels.includes("HIGHER_SECONDARY") && (!Array.isArray(t.streams) || t.streams.length === 0)) {
+      problems.push("At least one stream is required for Classes 11-12");
+    }
+    if (studentLevels.some((l) => SCHOOL_STUDENT_LEVELS.includes(l as string)) && (!Array.isArray(t.curriculumBoards) || t.curriculumBoards.length === 0)) {
+      problems.push("At least one education board is required");
+    }
+    if (!TEACHING_MODES.includes(t.teachingMode as any)) problems.push("Teaching mode is required");
+    if (
+      (t.teachingMode === "OFFLINE" || t.teachingMode === "BOTH") &&
+      (!Array.isArray(t.offlineServiceAreas) || t.offlineServiceAreas.length === 0 || !String(t.offlineServiceAreas[0] ?? "").trim())
+    ) {
+      problems.push("Service city / area is required for offline teaching");
+    }
+    if (!EXPERIENCE_RANGES.includes(t.experience as any)) problems.push("Teaching experience is required");
+    if (!HIGHEST_QUALIFICATIONS.includes(t.highestQualification as any)) problems.push("Highest qualification is required");
+    if (!t.degreeName || typeof t.degreeName !== "string" || !t.degreeName.trim()) problems.push("Degree / course name is required");
+    if (!t.institutionName || typeof t.institutionName !== "string" || !t.institutionName.trim()) problems.push("Institution name is required");
+    if (typeof t.completionYear !== "number") problems.push("Year of completion is required");
+    if (!t.specialization || typeof t.specialization !== "string" || !t.specialization.trim()) problems.push("Specialization is required");
+    const bio = typeof t.bio === "string" ? t.bio.trim() : "";
+    if (bio.length < 100 || bio.length > 500) problems.push("About section must be 100-500 characters");
+    if (!Array.isArray(t.qualificationDocuments) || t.qualificationDocuments.length === 0) problems.push("Qualification certificate upload is required");
+    if (!Array.isArray(t.experienceDocuments) || t.experienceDocuments.length === 0) problems.push("Experience certificate upload is required");
+    if (!Array.isArray(t.additionalCertificates) || t.additionalCertificates.length === 0) problems.push("At least one additional certificate upload is required");
+
+    if (problems.length > 0) {
+      throw new functionsV1.https.HttpsError("invalid-argument", problems.join("; "));
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await tutorRef.set({
+      profileStatus: "under_review",
+      onboardingVerificationStatus: "pending",
+      onboardingCompleted: true,
+      onboardingStep: 5,
+      submittedAt: now,
+      updatedAt: now,
+    }, { merge: true });
+
+    await notifyTutor(uid, {
+      title: "Profile submitted for review",
+      body: "Your tutor profile has been submitted. We'll notify you once it's been reviewed.",
+      type: "tutor_verification",
+    });
+
+    console.log(`✅ Tutor onboarding submitted for review: uid=${uid}`);
+    return { profileStatus: "under_review" as const };
+  });
+
+// ─── reviewTutorOnboarding ──────────────────────────────────────────────────
+// Admin-only. Closes the loop submitTutorOnboarding opens: the only path
+// that can move profileStatus/onboardingVerificationStatus out of
+// "under_review" into "verified"/"rejected" — without this, every
+// onboarding submission sits at under_review forever. Deliberately its
+// own callable rather than extending reviewTutorVerification above:
+// that one drives the OLDER TutorVerification/tutorVerifications system
+// (admin's original review queue, Draft/Submitted/Under Review/Verified/
+// Rejected/Suspended) which this feature intentionally leaves untouched
+// — see this file's header note on the two parallel status models.
+//
+// Reviews the whole profile at once (not per-document) — matches
+// reviewTutorVerification's existing scope/complexity; per-document
+// approve/reject is a natural follow-up, not built here.
+//
+// Deliberately does NOT persist a reviewedBy field onto tutors/{uid}
+// (which the tutor can read) — the reviewing admin's uid is only ever
+// logged server-side (console.log below), never exposed to the tutor
+// interface, per this feature's own "never expose reviewer identity"
+// requirement.
+export const reviewTutorOnboarding = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (
+    data: { uid: string; action: "approve" | "reject"; reason?: string },
+    context
+  ) => {
+    if (!context.auth?.token?.admin) {
+      throw new functionsV1.https.HttpsError("permission-denied", "Admins only");
+    }
+    const { uid, action, reason } = data ?? ({} as typeof data);
+    if (!uid || !["approve", "reject"].includes(action)) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "uid and action (approve|reject) are required");
+    }
+    // QA fix — spec's "admin must provide a rejection reason" requirement
+    // wasn't enforced server-side; the tutor dashboard always shows the
+    // reason for a rejected profile (StatusCard.tsx), so a reject without
+    // one would silently leave that box empty.
+    if (action === "reject" && (!reason || !reason.trim())) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "A rejection reason is required");
+    }
+
+    const tutorRef = db.doc(`tutors/${uid}`);
+    const snap = await tutorRef.get();
+    if (!snap.exists) {
+      throw new functionsV1.https.HttpsError("not-found", "No tutor profile found for this uid");
+    }
+    // QA fix — only a profile actually awaiting review can be
+    // approved/rejected. Without this, calling the callable directly
+    // (bypassing the admin UI's under_review-filtered queue) could flip
+    // verified:true on a tutor who never submitted (still "draft"), or
+    // re-decide one already verified/rejected outside the resubmission
+    // flow submitTutorOnboarding's NON_RESUBMITTABLE_STATUSES enforces.
+    const current = snap.data() as Record<string, unknown>;
+    if (current.profileStatus !== "under_review") {
+      throw new functionsV1.https.HttpsError(
+        "failed-precondition",
+        "This profile is not currently awaiting review."
+      );
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    if (action === "approve") {
+      await tutorRef.set({
+        profileStatus: "verified",
+        onboardingVerificationStatus: "verified",
+        // Flipping this (the pre-existing marketplace-visibility flag) is
+        // what already drives functions/src/tutorMarketplace.ts's
+        // syncTutorMarketplaceProfile trigger — no separate "publish"
+        // mechanism needed for this profile to become publicly listed.
+        verified: true,
+        reviewedAt: now,
+        rejectionReason: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+      }, { merge: true });
+
+      await notifyTutor(uid, {
+        title: "Your tutor profile is verified! 🎉",
+        body: "Congratulations — your Gloows Tutor profile has been verified and is now visible to students.",
+        type: "tutor_verification",
+      });
+    } else {
+      await tutorRef.set({
+        profileStatus: "rejected",
+        onboardingVerificationStatus: "rejected",
+        verified: false,
+        reviewedAt: now,
+        rejectionReason: reason ?? "",
+        updatedAt: now,
+      }, { merge: true });
+
+      await notifyTutor(uid, {
+        title: "Action needed on your tutor profile",
+        body: reason?.trim()
+          ? `Your profile needs a correction: ${reason.trim()}`
+          : "Some information on your profile needs to be corrected before it can be verified.",
+        type: "tutor_verification",
+      });
+    }
+
+    console.log(`✅ Tutor onboarding ${action}d: uid=${uid} by admin ${context.auth.uid}`);
+    const resultStatus: "verified" | "rejected" = action === "approve" ? "verified" : "rejected";
+    return { profileStatus: resultStatus };
+  });
+
+// ─── reviewTutorVerification ───────────────────────────────────────────────
+// Admin-only (apps/admin's Tutor Verifications review queue). Deliberately
+// its own callable rather than reusing adminManagement.ts's generic
+// approveContent — approval here also has to flip tutors/{uid}.verified
+// (the marketplace-visibility eligibility flag), which approveContent's
+// generic "flip one status field" shape doesn't cover.
+export const reviewTutorVerification = functionsV1
+  .runWith({ timeoutSeconds: 30, memory: "256MB" })
+  .https.onCall(async (
+    data: { uid: string; action: "approve" | "reject"; reason?: string },
+    context
+  ) => {
+    if (!context.auth?.token?.admin) {
+      throw new functionsV1.https.HttpsError("permission-denied", "Admins only");
+    }
+    const { uid, action, reason } = data ?? ({} as typeof data);
+    if (!uid || !["approve", "reject"].includes(action)) {
+      throw new functionsV1.https.HttpsError("invalid-argument", "uid and action (approve|reject) are required");
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const batch = db.batch();
+
+    if (action === "approve") {
+      batch.set(db.doc(`tutorVerifications/${uid}`), {
+        status: "Verified",
+        reviewedBy: context.auth.uid,
+        reviewedAt: now,
+        updatedAt: now,
+      }, { merge: true });
+      batch.set(db.doc(`tutors/${uid}`), { verified: true, updatedAt: now }, { merge: true });
+    } else {
+      batch.set(db.doc(`tutorVerifications/${uid}`), {
+        status: "Rejected",
+        rejectionReason: reason ?? "",
+        reviewedBy: context.auth.uid,
+        reviewedAt: now,
+        updatedAt: now,
+      }, { merge: true });
+      batch.set(db.doc(`tutors/${uid}`), { verified: false, updatedAt: now }, { merge: true });
+    }
+
+    await batch.commit();
+    console.log(`✅ Tutor verification ${action}d: uid=${uid} by ${context.auth.uid}`);
+    return { status: action === "approve" ? "Verified" as const : "Rejected" as const };
+  });

@@ -6,6 +6,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
 import { useEffect, useRef, useState } from "react";
+import { isPrimaryClassLevel, isTargetedAtClass, useStudentProfile } from "@gloows/shared-logic";
 import {
   Animated,
   FlatList,
@@ -38,6 +39,7 @@ interface KBVideo {
   likesCount?: number;
   isFeatured?: boolean;
   isActive: boolean;
+  targetClass?: string[];
   order?: number;
   createdAt?: any;
 }
@@ -136,6 +138,7 @@ function KBCard({ item }: { item: KBVideo }) {
 export default function KnowledgeHubSection() {
   const { colors } = useTheme();
   const { t } = useAppTranslation();
+  const { studentProfile } = useStudentProfile();
   const [videos,    setVideos]    = useState<KBVideo[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(false);
@@ -144,10 +147,12 @@ export default function KnowledgeHubSection() {
   useEffect(() => {
     (async () => {
       try {
+        // isActive is the one visibility field (the admin form now writes it).
+        // Fetch a wider page than is shown, since class targeting filters it down below.
         const snap = await getDocs(query(
           collection(db, "knowledgeVideos"),
           where("isActive", "==", true),
-          limit(10)
+          limit(30)
         ));
         setVideos(
           snap.docs
@@ -166,9 +171,16 @@ export default function KnowledgeHubSection() {
     })();
   }, []);
 
+  const classVideos = videos
+    .filter((v) => isTargetedAtClass(v.targetClass, studentProfile?.class))
+    .slice(0, 10);
   const filtered = activecat === "All"
-    ? videos
-    : videos.filter((v) => v.category === activecat);
+    ? classVideos
+    : classVideos.filter((v) => v.category === activecat);
+
+  // Class 3–5 only see videos explicitly targeted at their class (or "all").
+  // Until some exist, show one clear card instead of category chips over an empty row.
+  const showPrimaryEmpty = isPrimaryClassLevel(studentProfile?.class) && !loading && !error && classVideos.length === 0;
 
   return (
     <View style={S.section}>
@@ -186,7 +198,7 @@ export default function KnowledgeHubSection() {
       </View>
 
       {/* Category chips */}
-      <ScrollView
+      {!showPrimaryEmpty && <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 10 }}
@@ -208,7 +220,7 @@ export default function KnowledgeHubSection() {
             </Text>
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </ScrollView>}
 
       {/* Content */}
       {loading ? (
@@ -219,6 +231,13 @@ export default function KnowledgeHubSection() {
         <View style={S.empty}>
           <Text style={S.emptyIcon}>⚠️</Text>
           <Text style={[S.emptyText, { color: colors.textSecondary }]}>{t("couldNotLoadVideos")}</Text>
+        </View>
+      ) : showPrimaryEmpty ? (
+        <View style={S.empty} accessibilityRole="summary">
+          <Text style={S.emptyIcon}>🌱</Text>
+          <Text style={[S.emptyText, { color: colors.textSecondary }]}>
+            Videos picked for your class are coming soon. We're adding them now!
+          </Text>
         </View>
       ) : filtered.length === 0 ? (
         <View style={S.empty}>
