@@ -32,6 +32,10 @@ interface FeatureFlagsContextType {
   drawerFlags: FlagMap;
   loading:     boolean;
   isTester:    boolean;
+  /** False until auth has resolved and the users/{uid}.role snapshot has
+   *  arrived — route gates must not redirect before this is true, or a
+   *  tester on a hard page load is treated as a normal user for a moment. */
+  roleResolved: boolean;
   homeSection: (key: string) => boolean;
   aiGuru:      (key: string) => boolean;
   drawerItem:  (key: string) => boolean;
@@ -40,14 +44,15 @@ interface FeatureFlagsContextType {
 const alwaysOn = () => true;
 
 const FeatureFlagsContext = createContext<FeatureFlagsContextType>({
-  homeFlags: {}, aiFlags: {}, drawerFlags: {}, loading: true, isTester: false,
+  homeFlags: {}, aiFlags: {}, drawerFlags: {}, loading: true, isTester: false, roleResolved: true,
   homeSection: alwaysOn, aiGuru: alwaysOn, drawerItem: alwaysOn,
 });
 
 export const useFeatureFlags = () => useContext(FeatureFlagsContext);
 
 export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
-  const { user, studentProfile } = useStudentProfile();
+  const { user, studentProfile, authLoading } = useStudentProfile();
+  const [roleLoadedFor, setRoleLoadedFor] = useState<string | null>(null);
   const [homeFlags, setHomeFlags]     = useState<FlagMap>({});
   const [aiFlags, setAiFlags]         = useState<FlagMap>({});
   const [drawerFlags, setDrawerFlags] = useState<FlagMap>({});
@@ -64,11 +69,14 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
       (snap) => {
         const role = snap.exists() ? (snap.data()?.role as string | undefined) : undefined;
         setIsTester(role === "tester" || role === "admin");
+        setRoleLoadedFor(uid);
       },
-      () => setIsTester(false)
+      () => { setIsTester(false); setRoleLoadedFor(uid); }
     );
     return unsub;
   }, [user?.uid]);
+
+  const roleResolved = !authLoading && (!user?.uid || roleLoadedFor === user.uid);
 
   // ── Flag docs — skipped for testers/admins, who bypass every check below ──
   useEffect(() => {
@@ -82,7 +90,10 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
     const u3 = onSnapshot(doc(db, "featureFlags", "drawerItems"),  (s) => { if (s.exists()) setDrawerFlags(s.data() as FlagMap); check(); }, check);
 
     return () => { u1(); u2(); u3(); };
-  }, [isTester]);
+    // user?.uid: featureFlags/* need an authenticated read. A listener opened while signed out
+    // (this provider mounts above the login screens) is rejected with permission-denied and is
+    // never retried, so re-subscribe whenever the signed-in user changes.
+  }, [isTester, user?.uid]);
 
   // Class 3–5 never see Discover (a college/career advisor whose server route
   // returns 403 for them). Applied before the tester bypass so a Class 3–5 test
@@ -93,7 +104,7 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
   const drawerItem  = (key: string) => key === "home" ? true : isTester ? true : (drawerFlags[key] ?? true);
 
   return (
-    <FeatureFlagsContext.Provider value={{ homeFlags, aiFlags, drawerFlags, loading, isTester, homeSection, aiGuru, drawerItem }}>
+    <FeatureFlagsContext.Provider value={{ homeFlags, aiFlags, drawerFlags, loading, isTester, roleResolved, homeSection, aiGuru, drawerItem }}>
       {children}
     </FeatureFlagsContext.Provider>
   );

@@ -21,7 +21,7 @@
  * Also fixes any other useAppConfig() consumers (drawer, etc).
  */
 
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { db } from "@/lib/firebase";
 import type { AppModule, CreditPack, SubscriptionPlan } from "@/services/appConfigService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -50,6 +50,23 @@ const AppConfigContext = createContext<AppConfigContextType>({
 });
 
 export const useAppConfig = () => useContext(AppConfigContext);
+
+// Firestore's orderBy() silently DROPS documents that lack the ordered
+// field, and Admin > App Structure creates a module's doc as just
+// { name, isEnabled } (no `order`) — so an ordered query made those modules
+// invisible here, their OFF state was ignored, and the route gates defaulted
+// open. Fetch every appModules doc and sort client-side instead (same as
+// apps/web's AppConfigContext). Docs without a numeric `order` sort after
+// ordered ones; ties break on id so the list is stable.
+function sortModules(list: AppModule[]): AppModule[] {
+  const rank = (m: AppModule) => (typeof m.order === "number" ? m.order : Number.POSITIVE_INFINITY);
+  return [...list].sort((a, b) => {
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra < rb ? -1 : 1;
+    return a.id.localeCompare(b.id);
+  });
+}
 
 export function AppConfigProvider({ children }: { children: React.ReactNode }) {
   const { user } = useStudentProfile();
@@ -99,24 +116,24 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
     if (isTester) {
       // Tester: fetch ALL modules (no isEnabled filter), force all enabled
       unsubModules = onSnapshot(
-        query(collection(db, "appModules"), orderBy("order", "asc")),
+        collection(db, "appModules"),
         (snap) => {
-          const fresh = snap.docs.map((d) => ({
+          const fresh = sortModules(snap.docs.map((d) => ({
             id: d.id,
             ...d.data(),
             isEnabled: true,   // force all ON for tester
-          } as AppModule));
+          } as AppModule)));
           setModules(fresh);
           setModulesReady(true);
           AsyncStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(fresh)).catch(() => {});
         },
         async () => {
-          // Fallback: getDocs without orderBy
+          // Fallback: one-shot getDocs (e.g. transient listener error)
           try {
             const snap = await getDocs(collection(db, "appModules"));
-            const fresh = snap.docs
-              .map((d) => ({ id: d.id, ...d.data(), isEnabled: true } as AppModule))
-              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            const fresh = sortModules(
+              snap.docs.map((d) => ({ id: d.id, ...d.data(), isEnabled: true } as AppModule))
+            );
             setModules(fresh);
             AsyncStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(fresh)).catch(() => {});
           } catch {}
@@ -143,20 +160,18 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
       // intact — never forced, unlike the tester branch above — lets
       // consumers see the real disabled state and correctly hide it.
       unsubModules = onSnapshot(
-        query(collection(db, "appModules"), orderBy("order", "asc")),
+        collection(db, "appModules"),
         (snap) => {
-          const fresh = snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppModule));
+          const fresh = sortModules(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppModule)));
           setModules(fresh);
           setModulesReady(true);
           AsyncStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(fresh)).catch(() => {});
         },
         async () => {
-          // Fallback: getDocs without orderBy (e.g. transient listener error)
+          // Fallback: one-shot getDocs (e.g. transient listener error)
           try {
             const snap = await getDocs(collection(db, "appModules"));
-            const fresh = snap.docs
-              .map((d) => ({ id: d.id, ...d.data() } as AppModule))
-              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+            const fresh = sortModules(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppModule)));
             setModules(fresh);
             AsyncStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(fresh)).catch(() => {});
           } catch {}
@@ -229,7 +244,12 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
       unsubPlans();
       unsubCreditPacks();
     };
-  }, [isTester]); // re-subscribe when tester status changes (login/logout)
+  // Re-subscribe when tester status changes AND when the signed-in user changes.
+  // appModules/subscriptionPlans/aiGuruCreditPacks require an authenticated read, and this
+  // provider mounts above the login screens: a listener opened while signed out is rejected
+  // (permission-denied) and Firestore never retries it, so without `user?.uid` here a login
+  // (or logout->login) in the same app session left modules unloaded/stale until app restart.
+  }, [isTester, user?.uid]);
 
   return (
     <AppConfigContext.Provider value={{ modules, plans, creditPacks, configLoading }}>
