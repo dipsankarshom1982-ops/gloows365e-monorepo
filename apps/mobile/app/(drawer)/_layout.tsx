@@ -31,7 +31,7 @@ import {
 
 import { useTheme } from "@/context/ThemeContext";
 import { useLanguage, useAppTranslation } from "@/context/LanguageContext";
-import { useStudentProfile, useFeatureFlags } from "@gloows/shared-logic";
+import { useStudentProfile, useFeatureFlags, currentYearIST, vCoinsYearField } from "@gloows/shared-logic";
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
 import { auth, db } from "@/lib/firebase";
 import { getLevelFromXP, XP_PER_LEVEL } from "@/lib/learnfun/constants";
@@ -85,7 +85,8 @@ export default function DrawerLayout() {
     ? Math.round(screenWidth * 0.78)
     : Math.min(340, Math.max(300, Math.round(screenWidth * 0.32)));
 
-  const { studentProfile, profileLoading: loading } = useStudentProfile();
+  const { studentProfile, user, profileLoading: loading } = useStudentProfile();
+  const uid = user?.uid;
 
   useEffect(() => {
     if (!studentProfile) return;
@@ -99,7 +100,14 @@ export default function DrawerLayout() {
   }, [studentProfile]);
 
   const [vCoins,        setVCoins]        = useState<number>(0);
-  const [vCoinRank,     setVCoinRank]     = useState<number | null>(null);
+  // Score and rank are tagged with the uid (and year) they belong to, and the
+  // displayed rank is derived below — so a previous user's rank can never be
+  // rendered for a new uid (logout → login as someone else), even if this
+  // layout does not remount.
+  const [yearScore, setYearScore] = useState<{ uid: string; score: number } | null>(null);
+  const [rankInfo, setRankInfo] = useState<{
+    uid: string; year: number; status: "ranked" | "unranked" | "error"; rank: number | null;
+  } | null>(null);
   const [giftAvailable, setGiftAvailable] = useState(false);
   const [giftClaimed,   setGiftClaimed]   = useState(false);
   const [studentIdCopied, setStudentIdCopied] = useState(false);
@@ -119,6 +127,9 @@ export default function DrawerLayout() {
   }, [loading, studentProfile]);
 
   const currentYear = new Date().getFullYear();
+  // V-Coins yearly rank/score use the IST year (matches functions/src/vcoins.ts),
+  // NOT the device year. The surprise-gift key keeps using currentYear.
+  const vCoinsYear = currentYearIST();
 
   // Listen to user doc for vCoins balance (gift is its own effect below —
   // it moved off users/{uid}.surpriseGift onto prizeClaims).
@@ -133,17 +144,23 @@ export default function DrawerLayout() {
   // VCoinsHeaderBadge (via services/vCoinsService.ts), and this drawer now
   // all sum both fields the same way.
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) return;
+    if (!uid) return;
 
-    const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
-      if (!snap.exists()) return;
+    const unsub = onSnapshot(doc(db, "users", uid), (snap) => {
+      if (!snap.exists()) {
+        // No users doc → no score → "Not ranked yet", not "Loading..." forever.
+        setYearScore({ uid, score: 0 });
+        return;
+      }
       const d = snap.data();
       setVCoins((d.vCoinsBalance ?? 0) + (d.vCoins ?? 0));
+      setYearScore({ uid, score: Number(d[vCoinsYearField(vCoinsYear)]) || 0 });
+    }, () => {
+      setRankInfo({ uid, year: vCoinsYear, status: "error", rank: null });
     });
 
     return () => unsub();
-  }, []);
+  }, [uid, vCoinsYear]);
 
   // Surprise Gift banner — prizeClaims/{id} docs (periodType
   // "surprise_gift"), same collection/workflow as VidyaStar Starboard
@@ -172,23 +189,41 @@ export default function DrawerLayout() {
     return () => unsub();
   }, [currentYear]);
 
-  // Compute annual VCoins rank
+  // Annual VCoins rank — competition ranking (1 + number of users with a
+  // strictly higher vCoinsYear_{IST year}; ties share a rank), same rule as
+  // the wallet leaderboard (see shared-logic vcoinsRank.ts).
+  // FIX (bug report — "drawer v-coins rank not showing proper rank"):
+  // vCoinsYear_* lives on users/{uid} (written by functions/src/vcoins.ts),
+  // NOT on students/{uid} where studentProfile comes from. This used to read
+  // the score off studentProfile, so it was always 0 and every user got
+  // "number of users with any coins + 1". Now uses the score from the
+  // users/{uid} listener above — same source as the wallet leaderboard.
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) return;
-
-    const yearField = `vCoinsYear_${currentYear}`;
-    const score = studentProfile?.[yearField] ?? 0;
-
+    const score = yearScore && yearScore.uid === uid ? yearScore.score : null;
+    if (!uid || score === null) return;
+    if (score <= 0) {
+      setRankInfo({ uid, year: vCoinsYear, status: "unranked", rank: null });
+      return;
+    }
+    // Cancelled on uid/score/year change or unmount, so a slow query for a
+    // previous user can never overwrite the current user's rank.
+    let cancelled = false;
     getCountFromServer(
-      query(
-        collection(db, "users"),
-        where(`vCoinsYear_${currentYear}`, ">", score)
-      )
+      query(collection(db, "users"), where(vCoinsYearField(vCoinsYear), ">", score))
     )
-      .then((r) => setVCoinRank(r.data().count + 1))
-      .catch(() => setVCoinRank(null));
-  }, [studentProfile]);
+      .then((r) => {
+        if (cancelled) return;
+        setRankInfo({ uid, year: vCoinsYear, status: "ranked", rank: r.data().count + 1 });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRankInfo({ uid, year: vCoinsYear, status: "error", rank: null });
+      });
+    return () => { cancelled = true; };
+  }, [uid, yearScore, vCoinsYear]);
+  const currentRank = rankInfo && rankInfo.uid === uid && rankInfo.year === vCoinsYear ? rankInfo : null;
+  const vCoinRankStatus = currentRank?.status ?? "loading";
+  const vCoinRank = currentRank?.rank ?? null;
 
   // Derive LearnFun XP stats
   const learnXP   = studentProfile?.LearnFunXP ?? 0;
@@ -330,9 +365,15 @@ export default function DrawerLayout() {
                   <View style={styles.rankBanner}>
                     <Text style={styles.rankTrophy}>🏆</Text>
                     <View>
-                      <Text style={styles.rankLabel}>{t("vCoinsRankLabel") ?? "V-Coins Rank"} {currentYear}</Text>
+                      <Text style={styles.rankLabel}>{t("vCoinsRankLabel") ?? "V-Coins Rank"} {vCoinsYear}</Text>
                       <Text style={styles.rankValue}>
-                        {vCoinRank !== null ? `#${vCoinRank}` : "—"}
+                        {vCoinRankStatus === "ranked" && vCoinRank !== null
+                          ? `#${vCoinRank}`
+                          : vCoinRankStatus === "unranked"
+                            ? "Not ranked yet"
+                            : vCoinRankStatus === "error"
+                              ? "Unavailable"
+                              : "Loading..."}
                       </Text>
                     </View>
                     <TouchableOpacity

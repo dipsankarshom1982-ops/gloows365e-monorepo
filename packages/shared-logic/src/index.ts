@@ -17,6 +17,7 @@ export * from "./context/TutorProfileContext";
 // ─── Firebase bootstrap ──────────────────────────────────────────────────
 export * from "./lib/firebaseConfig";
 export * from "./lib/tutorProfileCompletion";
+export * from "./lib/vcoinsRank";
 
 // ─── Hooks ───────────────────────────────────────────────────────────────
 export * from "./hooks/useVCoins";

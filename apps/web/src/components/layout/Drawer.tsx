@@ -37,7 +37,7 @@ import {
   getFirestore, doc, onSnapshot,
   collection, query, where, orderBy, getCountFromServer,
 } from "firebase/firestore";
-import { useStudentProfile, useFeatureFlags } from "@gloows/shared-logic";
+import { useStudentProfile, useFeatureFlags, currentYearIST, vCoinsYearField } from "@gloows/shared-logic";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { defaultAvatarForTitle } from "@/lib/avatars";
 
@@ -307,7 +307,13 @@ export default function Drawer({ open, onClose }: Props) {
     };
   }, [open, onClose]);
 
-  const [vCoinRank,     setVCoinRank]     = useState<number | null>(null);
+  // Score and rank are tagged with the uid (and year) they belong to, and the
+  // displayed rank is derived below — so a previous user's rank can never be
+  // rendered for a new uid, not even for a single frame.
+  const [yearScore, setYearScore] = useState<{ uid: string; score: number } | null>(null);
+  const [rankInfo, setRankInfo] = useState<{
+    uid: string; year: number; status: "ranked" | "unranked" | "error"; rank: number | null;
+  } | null>(null);
   const [giftAvailable, setGiftAvailable] = useState(false);
   const [giftClaimed,   setGiftClaimed]   = useState(false);
   // FIX (bug report — "all updated v-coins must be shown in drawer and
@@ -329,17 +335,29 @@ export default function Drawer({ open, onClose }: Props) {
   const [vCoinsReloadTick, setVCoinsReloadTick] = useState(0);
 
   const currentYear = new Date().getFullYear();
+  // V-Coins yearly rank/score use the IST year (matches functions/src/vcoins.ts),
+  // NOT the device year — see shared-logic vcoinsRank.ts. The surprise-gift key
+  // above keeps using currentYear (unrelated to V-Coins scoring).
+  const vCoinsYear = currentYearIST();
 
   useEffect(() => {
     if (!user) return;
     const db = getFirestore();
     return onSnapshot(doc(db, "users", user.uid), (snap) => {
-      if (!snap.exists()) return;
+      if (!snap.exists()) {
+        // No users doc → no score → resolves to "Not ranked yet" rather than
+        // leaving the rank on "Loading..." forever.
+        setYearScore({ uid: user.uid, score: 0 });
+        return;
+      }
       const data = snap.data();
       setVCoins((data.vCoinsBalance ?? 0) + (data.vCoins ?? 0));
+      setYearScore({ uid: user.uid, score: Number(data[vCoinsYearField(vCoinsYear)]) || 0 });
       setVCoinsLoaded(true);
+    }, () => {
+      setRankInfo({ uid: user.uid, year: vCoinsYear, status: "error", rank: null });
     });
-  }, [user, vCoinsReloadTick]);
+  }, [user, vCoinsReloadTick, vCoinsYear]);
 
   // Surprise Gift banner — prizeClaims/{id} docs (periodType
   // "surprise_gift"), same collection/workflow as VidyaStar Starboard
@@ -392,17 +410,42 @@ export default function Drawer({ open, onClose }: Props) {
     };
   }, [vCoinsLoaded]);
 
+  // Annual VCoins rank — same rule as the wallet leaderboard (users ordered by
+  // vCoinsYear_{IST year} desc, competition ranking: 1 + number of users with
+  // a strictly higher score, so ties share a rank; see shared-logic
+  // vcoinsRank.ts).
+  // FIX (bug report — "drawer v-coins rank not showing proper rank"): the
+  // score used to be read off studentProfile (students/{uid}), but
+  // vCoinsYear_* lives on users/{uid} (written by functions/src/vcoins.ts),
+  // so it was always 0 and everyone got "users with any coins + 1". Now uses
+  // the score from the users/{uid} listener above.
+  const uid = user?.uid;
   useEffect(() => {
-    if (!user || !studentProfile) return;
-    const db        = getFirestore();
-    const yearField = `vCoinsYear_${currentYear}`;
-    const score     = (studentProfile as Record<string, unknown>)[yearField] as number ?? 0;
+    const score = yearScore && yearScore.uid === uid ? yearScore.score : null;
+    if (!uid || score === null) return;
+    if (score <= 0) {
+      setRankInfo({ uid, year: vCoinsYear, status: "unranked", rank: null });
+      return;
+    }
+    // Cancelled on uid/score/year change or unmount, so a slow query for a
+    // previous user can never overwrite the current user's rank.
+    let cancelled = false;
     getCountFromServer(
-      query(collection(db, "users"), where(`vCoinsYear_${currentYear}`, ">", score))
+      query(collection(getFirestore(), "users"), where(vCoinsYearField(vCoinsYear), ">", score))
     )
-      .then((r) => setVCoinRank(r.data().count + 1))
-      .catch(() => setVCoinRank(null));
-  }, [studentProfile, user, currentYear]);
+      .then((r) => {
+        if (cancelled) return;
+        setRankInfo({ uid, year: vCoinsYear, status: "ranked", rank: r.data().count + 1 });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRankInfo({ uid, year: vCoinsYear, status: "error", rank: null });
+      });
+    return () => { cancelled = true; };
+  }, [uid, yearScore, vCoinsYear]);
+  const currentRank = rankInfo && rankInfo.uid === uid && rankInfo.year === vCoinsYear ? rankInfo : null;
+  const vCoinRankStatus = currentRank?.status ?? "loading";
+  const vCoinRank = currentRank?.rank ?? null;
 
   const name     = studentProfile?.name               || user?.email?.split("@")[0] || t("student");
   const school   = studentProfile?.school             || t("yourSchool");
@@ -501,9 +544,15 @@ export default function Drawer({ open, onClose }: Props) {
                 <div className="rank-banner">
                   <span style={{ fontSize: 24 }}>🏆</span>
                   <div>
-                    <div style={{ color: "#fde68a", fontSize: 11, fontWeight: 600 }}>{t("vCoinsRank")} {currentYear}</div>
-                    <div style={{ color: "#fff", fontSize: 20, fontWeight: 800 }}>
-                      {vCoinRank !== null ? `#${vCoinRank}` : "—"}
+                    <div style={{ color: "#fde68a", fontSize: 11, fontWeight: 600 }}>{t("vCoinsRank")} {vCoinsYear}</div>
+                    <div style={{ color: "#fff", fontSize: vCoinRankStatus === "ranked" ? 20 : 13, fontWeight: 800 }}>
+                      {vCoinRankStatus === "ranked" && vCoinRank !== null
+                        ? `#${vCoinRank}`
+                        : vCoinRankStatus === "unranked"
+                          ? "Not ranked yet"
+                          : vCoinRankStatus === "error"
+                            ? "Unavailable"
+                            : "Loading..."}
                     </div>
                   </div>
                   <button

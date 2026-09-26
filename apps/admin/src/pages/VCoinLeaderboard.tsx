@@ -57,7 +57,9 @@ interface RankEntry {
   gift?: Gift;
 }
 
-const CURRENT_YEAR = new Date().getFullYear();
+// IST calendar year — must match currentYearIST() in functions/src/vcoins.ts
+// (the year vCoinsYear_* is written under), not the admin's device timezone.
+const CURRENT_YEAR = new Date(Date.now() + 5.5 * 60 * 60 * 1000).getUTCFullYear();
 
 export default function VCoinLeaderboard() {
   const [year, setYear]           = useState(CURRENT_YEAR);
@@ -116,6 +118,11 @@ export default function VCoinLeaderboard() {
         rank:       i + 1,
         gift:       giftByUid.get(d.id),
       }));
+      // Competition ranking (1, 1, 3): equal scores share a rank — same
+      // definition as the student app's drawer and wallet.
+      list.forEach((e, i) => {
+        if (i > 0 && e.yearCoins === list[i - 1].yearCoins) e.rank = list[i - 1].rank;
+      });
       setEntries(list);
     } finally {
       setLoading(false);

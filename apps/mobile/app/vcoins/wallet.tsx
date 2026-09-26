@@ -43,6 +43,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { currentYearIST, vCoinsYearField, withCompetitionRanks } from "@gloows/shared-logic";
 
 type FilterTab = "ALL" | "EARNED" | "SPENT" | "PENDING";
 type TabView   = "wallet" | "leaderboard";
@@ -78,8 +79,9 @@ interface RankEntry {
 }
 
 const RANK_MEDALS: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
-const currentYear = new Date().getFullYear();
-const YEAR_FIELD  = `vCoinsYear_${currentYear}`;
+// IST year — same definition as the backend (functions/src/vcoins.ts).
+const currentYear = currentYearIST();
+const YEAR_FIELD  = vCoinsYearField(currentYear);
 
 // FIX (bug report — "v-coins leaderboard needs student name"): this
 // leaderboard ranks by users/{uid}'s vCoinsYear_* field (that's the only
@@ -146,7 +148,7 @@ export default function VCoinsWalletScreen() {
         yearCoins: d.data()[YEAR_FIELD] ?? 0,
         rank:      i + 1,
       }));
-      const entries = await hydrateWithStudentProfiles(rawEntries, "Student");
+      const entries = await hydrateWithStudentProfiles(withCompetitionRanks(rawEntries), "Student");
       setTopEntries(entries);
 
       // Check if current user appears in top 10
@@ -169,6 +171,9 @@ export default function VCoinsWalletScreen() {
       const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) return;
       const myCoins = snap.data()[YEAR_FIELD] ?? 0;
+      // No score yet → unranked (same as the drawer's "Not ranked yet"),
+      // rather than a misleading "#N with 0 coins" card.
+      if (myCoins <= 0) return;
       // Count users with more coins
       const countSnap = await getCountFromServer(
         query(collection(db, "users"), where(YEAR_FIELD, ">", myCoins))
@@ -202,7 +207,7 @@ export default function VCoinsWalletScreen() {
         yearCoins: d.data()[YEAR_FIELD] ?? 0,
         rank:      i + 1,
       }));
-      const all = await hydrateWithStudentProfiles(rawAll, "Student");
+      const all = await hydrateWithStudentProfiles(withCompetitionRanks(rawAll), "Student");
       setExtEntries(all);
       const inList = all.find((e) => e.uid === uid);
       if (inList) setMyEntry(inList);
