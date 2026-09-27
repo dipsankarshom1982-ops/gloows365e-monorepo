@@ -69,6 +69,31 @@ export const registerTutorAccount = functionsV1
       throw new functionsV1.https.HttpsError("invalid-argument", "name is required");
     }
 
+    // This callable is self-service tutor onboarding — same authorization
+    // model as student registration (any signed-in user, acting on their
+    // own uid only), NOT an admin-driven role migration. It must never be
+    // usable, accidentally or otherwise, to move a privileged account into
+    // "tutor": users/{uid}.role "tester"/"admin" drives the tester bypass
+    // (FeatureFlagsContext, usageCheck.ts) and admin/superAdmin custom
+    // claims (functions/src/adminManagement.ts) gate the admin panel —
+    // there is no product-defined tester→tutor or admin→tutor migration,
+    // so a privileged account is rejected outright rather than partially
+    // registered (which used to leave a tutors/{uid} doc + a TUTOR/TEACHER/
+    // COACHING_CENTER claim on an admin/tester account, even though
+    // users/{uid}.role itself was left alone).
+    const [existingUserSnap, existingAuthUser] = await Promise.all([
+      db.doc(`users/${uid}`).get(),
+      admin.auth().getUser(uid),
+    ]);
+    const existingRole = existingUserSnap.exists ? existingUserSnap.data()?.role : undefined;
+    const existingClaims = existingAuthUser.customClaims ?? {};
+    if (existingRole === "tester" || existingRole === "admin" || existingClaims.admin || existingClaims.superAdmin) {
+      throw new functionsV1.https.HttpsError(
+        "failed-precondition",
+        "This account already has a privileged role and cannot be registered as a tutor."
+      );
+    }
+
     const now = admin.firestore.FieldValue.serverTimestamp();
     const batch = db.batch();
 
@@ -91,7 +116,17 @@ export const registerTutorAccount = functionsV1
     }, { merge: true });
 
     await batch.commit();
-    await admin.auth().setCustomUserClaims(uid, { role: tutorRole });
+    // setCustomUserClaims REPLACES the whole claims object — merge with the
+    // caller's existing claims (the privileged-account guard above already
+    // ruled out admin/superAdmin being among them) so this can't silently
+    // strip any other claim the account happens to carry. Known gap: this
+    // Firestore batch and this Auth claims write aren't atomic with each
+    // other — if setCustomUserClaims throws after the batch commits,
+    // users/{uid}.role and tutors/{uid} are already "tutor" but the claim
+    // isn't, and a retry of this same idempotent callable is the recovery
+    // path (no compensating transaction here; cross-service atomicity
+    // isn't available and isn't attempted elsewhere in this codebase either).
+    await admin.auth().setCustomUserClaims(uid, { ...existingClaims, role: tutorRole });
 
     console.log(`✅ Tutor account registered: uid=${uid} role=${tutorRole}`);
     // Custom claims only take effect on the client's NEXT ID token —
