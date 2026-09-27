@@ -1,3 +1,4 @@
+import { auth } from "@/lib/firebase";
 import { useTheme } from "@/context/ThemeContext";
 import { useStudentProfile } from "@/context/StudentProfileContext";
 import { useDiscoverStore } from "@/store/discoverStore";
@@ -149,6 +150,13 @@ export default function DiscoverResultScreen() {
       return;
     }
 
+    // Discover per-user data isolation: this uid is captured before the
+    // request goes out. If the signed-in user changes while it's in
+    // flight (logout, or logout→login as someone else), the response
+    // belongs to whoever asked for it, not to whoever is signed in when
+    // it happens to land — writing it into the (now different) current
+    // user's Discover state/UI would be a stale cross-user write.
+    const requestUid = auth.currentUser?.uid;
     const fetch = async () => {
       setLoading(true);
       setError(null);
@@ -160,6 +168,7 @@ export default function DiscoverResultScreen() {
           classLevel: studentProfile?.class ?? "10",
           interests: studentProfile?.interests ?? [],
         });
+        if (auth.currentUser?.uid !== requestUid) return;
         setResult(r);
         setSaved(isCareerSaved(r.queryHash));
         addResult(r);
@@ -167,6 +176,7 @@ export default function DiscoverResultScreen() {
         setRemaining(remainingSearches);
         animateDemand(r.futureDemandScore);
       } catch (err: any) {
+        if (auth.currentUser?.uid !== requestUid) return;
         setError({ message: err?.message ?? "Search failed", code: err?.code });
       } finally {
         setLoading(false);

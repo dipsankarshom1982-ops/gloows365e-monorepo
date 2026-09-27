@@ -4,6 +4,7 @@ import { FeatureFlagsProvider, parseClassLevel, StudentProfileProvider } from "@
 import { LanguageProvider } from "@/context/LanguageContext";
 import { ThemeProvider, useTheme } from "@/context/ThemeContext";
 import { useSeekhoStore } from "@/store/seekhoStore";
+import { useDiscoverStore, resetDiscoverStateInMemory } from "@/store/discoverStore";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { setupGlobalErrorHandlers } from "@/services/crashReporter";
 import { silentlyRegisterForPushNotifications } from "@/hooks/usePushNotifications";
@@ -61,6 +62,32 @@ export default function RootLayout() {
   // meant a second user logging in on the same device, in the same app
   // session, never got their own push token registered.
   const pushRegisteredForUidRef = useRef<string | null>(null);
+
+  // Discover per-user data isolation — useDiscoverStore persists under a
+  // key suffixed with the CURRENT uid (store/discoverStore.ts), computed at
+  // storage-access time. That alone only fixes FUTURE reads/writes; without
+  // this listener, a store already hydrated for User A stays hydrated with
+  // A's arrays in memory after A logs out and B logs in, since nothing
+  // would ever re-trigger a load for B's key on a live app (no restart).
+  //
+  // On every real uid change: reset the in-memory state to empty FIRST,
+  // synchronously, then rehydrate (async) from the new uid's key. The
+  // reset closes the "flash" window completely — the previous user's data
+  // is gone from memory before the new user's data has even started
+  // loading, so it can never render, not even for one frame.
+  useEffect(() => {
+    let lastUid: string | null | undefined; // undefined = not yet seen a callback
+    const unsub = auth.onAuthStateChanged((user) => {
+      const uid = user?.uid ?? null;
+      if (lastUid !== undefined) {
+        if (uid === lastUid) return;
+        resetDiscoverStateInMemory();
+      }
+      lastUid = uid;
+      useDiscoverStore.persist.rehydrate();
+    });
+    return unsub;
+  }, []);
 
   if (!fontsLoaded) return null;
 

@@ -83,7 +83,7 @@ function DiscoverResultContent() {
   const router = useRouter();
   const params = useSearchParams();
   const query = params.get("query") ?? "";
-  const { studentProfile } = useStudentProfile();
+  const { studentProfile, user } = useStudentProfile();
   const { addSearch, addResult, saveCareer, unsaveCareer, isCareerSaved, getCachedResult, setRemaining } = useDiscoverStore();
   // FIX (launch audit, Task 3) — the paywall CTA used to hardcode "₹199/month",
   // a value sourced from nowhere (not subscriptionPlans, not AppConfigContext),
@@ -110,6 +110,13 @@ function DiscoverResultContent() {
       return;
     }
 
+    // Discover per-user data isolation: this uid is captured before the
+    // request goes out. If the signed-in user changes while it's in
+    // flight (logout, or logout→login as someone else), the response
+    // belongs to whoever asked for it, not to whoever is signed in when
+    // it happens to land — writing it into the (now different) current
+    // user's Discover state/UI would be a stale cross-user write.
+    const requestUid = user?.uid ?? null;
     (async () => {
       setLoading(true);
       setError(null);
@@ -121,18 +128,20 @@ function DiscoverResultContent() {
           classLevel: studentProfile?.class ?? "10",
           interests: studentProfile?.interests ?? [],
         });
+        if ((user?.uid ?? null) !== requestUid) return;
         setResult(r);
         setSaved(isCareerSaved(r.queryHash));
         addResult(r);
         addSearch(query, r.queryHash);
         setRemaining(remainingSearches);
       } catch (err: any) {
+        if ((user?.uid ?? null) !== requestUid) return;
         setError({ message: err?.message ?? "Search failed", code: err?.code });
       } finally {
         setLoading(false);
       }
     })();
-  }, [query]);
+  }, [query, user?.uid]);
 
   function toggleSave() {
     if (!result) return;
