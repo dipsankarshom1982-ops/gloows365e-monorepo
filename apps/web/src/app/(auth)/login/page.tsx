@@ -214,16 +214,28 @@ export default function LoginPage() {
 
   const routeAfterAuth = async (uid: string) => {
     let settled = false;
+    // FIX (legacy-safe onboarding routing audit) — this used to fall back to
+    // router.replace("/reels") on timeout AND on error, i.e. it treated
+    // "we don't know this user's onboarding state" as "onboarding is
+    // complete". An incomplete student whose routing read happened to hang
+    // (or fail) landed straight in the protected app instead of wherever
+    // they actually belonged. Auth itself already succeeded at this point,
+    // so there's no need to guess — stay on the login screen with a message
+    // the user can act on (retry by submitting again; the Firebase session
+    // is already established, so a retry just re-runs this same cheap
+    // routing read) instead of picking a destination blind. The new
+    // onboarding guard in (app)/layout.tsx is a second boundary for this
+    // same class of problem, not a reason to keep guessing here too.
     const timeout = setTimeout(() => {
       if (settled) return;
       settled = true;
       console.error(
-        "[login] routeAfterAuth timed out after 8s — falling back to /home. " +
-        "Auth itself succeeded; this means a Firestore read in the routing " +
-        "chain never resolved. Check the network tab for a stuck request."
+        "[login] routeAfterAuthCore timed out after 8s — Firestore read in " +
+        "the routing chain never resolved. Not guessing a destination."
       );
-      setMessage("Login successful! Redirecting...");
-      router.replace("/reels");
+      setMessage("");
+      setError("This is taking longer than expected. Please try logging in again.");
+      setLoading(false);
     }, 8000);
 
     try {
@@ -232,11 +244,9 @@ export default function LoginPage() {
       console.error("[login] routeAfterAuth failed:", err);
       if (!settled) {
         settled = true;
-        // Auth already succeeded at this point — don't strand the user on
-        // the login screen over a routing-check failure. Send them
-        // somewhere real and let AuthGuard/onboarding checks downstream
-        // sort out where they actually belong.
-        router.replace("/reels");
+        setMessage("");
+        setError("Couldn't finish signing you in. Please try again.");
+        setLoading(false);
       }
     } finally {
       settled = true;

@@ -31,7 +31,10 @@ import {
 
 import { useTheme } from "@/context/ThemeContext";
 import { useLanguage, useAppTranslation } from "@/context/LanguageContext";
-import { useStudentProfile, useFeatureFlags, currentYearIST, vCoinsYearField } from "@gloows/shared-logic";
+import {
+  useStudentProfile, useFeatureFlags, currentYearIST, vCoinsYearField,
+  resolveOnboardingRoute, type OnboardingRoute,
+} from "@gloows/shared-logic";
 import { INDIAN_LANGUAGES } from "@/app/language-settings";
 import { auth, db } from "@/lib/firebase";
 import { getLevelFromXP, XP_PER_LEVEL } from "@/lib/learnfun/constants";
@@ -61,12 +64,24 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 // guard, not the primary routing mechanism: index.tsx already sends
 // restart-education users straight to /restart-education/home and never
 // into this (drawer) stack in the first place. This exists so that if a
-// restart-education profile's studentProfile resolves while this layout
-// is somehow already mounted (stale nav state, a deep link, app-state
-// restore after being killed, etc.), they still can't end up looking at
-// the main student app — they get bounced back out immediately.
+// restart-education profile resolves while this layout is somehow already
+// mounted (stale nav state, a deep link, app-state restore after being
+// killed, etc.), they still can't end up looking at the main student app
+// — they get bounced back out immediately.
 const RESTART_TYPES = ["restartEducation", "restart_education", "restart"];
 const RESTART_INDICATOR_FIELDS = ["lastClassPassed", "educationGapReason", "currentOccupation"];
+
+// Mirrors apps/mobile/app/(auth)/login.tsx's pathForOnboardingRoute —
+// duplicated (not shared), same convention as RESTART_TYPES above.
+function pathForOnboardingRoute(route: OnboardingRoute): string {
+  switch (route) {
+    case "parent-profile":       return "/(auth)/parent-profile";
+    case "phone-verification":   return "/(auth)/phone-verification";
+    case "parent-permissions":   return "/(auth)/parent-permissions";
+    case "student-registration": return "/(auth)/register";
+    case "home":                 return "/(drawer)/(tabs)/reels";
+  }
+}
 
 export default function DrawerLayout() {
   const router = useRouter();
@@ -89,16 +104,68 @@ export default function DrawerLayout() {
   const { studentProfile, user, profileLoading: loading } = useStudentProfile();
   const uid = user?.uid;
 
+  // FIX (legacy-safe onboarding routing audit) — this used to check
+  // studentProfile (students/{uid}) for restart-education indicators, but
+  // the restart-education flow (app/restart-education/onboarding.tsx)
+  // writes those indicators to users/{uid}, never to students/{uid} — a
+  // genuine restart-education account typically has no students/{uid} doc
+  // at all, so this returned early on `!studentProfile` and could never
+  // actually detect one. Now reads users/{uid} directly (live, uid-keyed
+  // so a stale read for a previous user can never gate the current one).
+  // Destination/precedence is otherwise unchanged: restart-education still
+  // always wins over normal onboarding, decided below.
+  const [restartState, setRestartState] = useState<{
+    uid: string; checked: boolean; isRestart: boolean; onboardingComplete: boolean;
+  } | null>(null);
+
   useEffect(() => {
-    if (!studentProfile) return;
-    const profile = studentProfile as Record<string, any>;
-    const isRestartUser =
-      (profile.profileType && RESTART_TYPES.includes(profile.profileType)) ||
-      RESTART_INDICATOR_FIELDS.some((f) => f in profile);
-    if (isRestartUser) {
-      router.replace("/restart-education/home" as any);
-    }
-  }, [studentProfile]);
+    if (!uid) { setRestartState(null); return; }
+    const unsub = onSnapshot(
+      doc(db, "users", uid),
+      (snap) => {
+        const d = snap.exists() ? snap.data() : undefined;
+        // A missing users/{uid} doc must never be read as "restart required".
+        const isRestartUser = !!d && (
+          (d.profileType && RESTART_TYPES.includes(d.profileType)) ||
+          RESTART_INDICATOR_FIELDS.some((f) => f in d)
+        );
+        setRestartState({ uid, checked: true, isRestart: isRestartUser, onboardingComplete: d?.onboardingComplete === true });
+      },
+      () => {
+        // A read error is treated as "not restart", not as "unknown" — the
+        // normal onboarding check below is itself safe for every account
+        // state, including a missing students/{uid} doc.
+        setRestartState({ uid, checked: true, isRestart: false, onboardingComplete: false });
+      }
+    );
+    return () => unsub();
+  }, [uid]);
+
+  // Only trust restartState once it was written for the CURRENT uid — a
+  // slow snapshot for a previous user (logout → login as someone else)
+  // can never gate this user's routing.
+  const restartReady  = !!uid && restartState?.uid === uid && restartState.checked;
+  const isRestartUser = restartReady && restartState!.isRestart;
+
+  useEffect(() => {
+    if (!uid || !restartReady || !isRestartUser) return;
+    router.replace("/restart-education/home" as any);
+  }, [uid, restartReady, isRestartUser]);
+
+  // Protected-route onboarding guard — only once restart is confirmed NOT
+  // required, hand off to the same resolveOnboardingRoute()/students/{uid}
+  // predicate every other entry point uses. Closes the deep-link gap the
+  // audit found: previously an authenticated but incomplete student could
+  // open this drawer (and its tabs) directly, since nothing here checked
+  // onboarding completeness — only whether a restart redirect applied.
+  const onboardingRoute: OnboardingRoute | null =
+    !loading ? resolveOnboardingRoute(studentProfile ?? undefined) : null;
+
+  useEffect(() => {
+    if (!uid || !restartReady || isRestartUser) return; // restart takes precedence
+    if (onboardingRoute === null || onboardingRoute === "home") return;
+    router.replace(pathForOnboardingRoute(onboardingRoute) as any);
+  }, [uid, restartReady, isRestartUser, onboardingRoute]);
 
   const [vCoins,        setVCoins]        = useState<number>(0);
   // Score and rank are tagged with the uid (and year) they belong to, and the
@@ -270,6 +337,20 @@ export default function DrawerLayout() {
     });
     router.replace("/login");
   };
+
+  // Render gate — never show the drawer/tabs (protected content) while
+  // restart status or onboarding completeness is still being resolved, or
+  // while a redirect triggered above hasn't landed yet. Doesn't apply when
+  // `!uid` — this file never gated on authentication before this change,
+  // and adding that is out of scope here (app/index.tsx's boot routing is
+  // still the primary defense for a signed-out deep link).
+  if (uid && (!restartReady || isRestartUser || onboardingRoute === null || onboardingRoute !== "home")) {
+    return (
+      <View style={[styles.guardLoading, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.accent} />
+      </View>
+    );
+  }
 
   return (
     <Drawer
@@ -590,6 +671,7 @@ function DrawerItem({ icon, label, onPress, active, colors }: any) {
 }
 
 const styles = StyleSheet.create({
+  guardLoading: { flex: 1, alignItems: "center", justifyContent: "center" },
   safeArea: { flex: 1 },
   scrollContent: { paddingHorizontal: 28, paddingTop: 20, paddingBottom: 12 },
   profileCard: {
