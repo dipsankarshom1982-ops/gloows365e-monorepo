@@ -397,9 +397,20 @@ export default function StudentRegister() {
       // client writes to vCoinsBalance. Idempotent server-side (fixed
       // referenceId "signup_bonus" per uid), so it can only ever credit
       // once even if handleRegister somehow runs twice for the same uid.
+      // Bounded retry (RELIABILITY): creditSignupBonus is fully idempotent
+      // server-side (fixed referenceId "signup_bonus" — see functions/src/
+      // vcoins.ts), so retrying it is always safe. Without this, a single
+      // transient network failure right here silently lost the one-time
+      // bonus forever (registration never revisits this step). One retry
+      // after a short delay; still non-fatal if both attempts fail.
       try {
         await httpsCallable(functions, "creditSignupBonus")();
-      } catch { /* non-fatal — a coin-credit hiccup must never block registration */ }
+      } catch {
+        try {
+          await new Promise((r) => setTimeout(r, 1500));
+          await httpsCallable(functions, "creditSignupBonus")();
+        } catch { /* non-fatal — a coin-credit hiccup must never block registration */ }
+      }
 
       // Non-fatal — an ID-assignment hiccup must never block registration.
       // The drawer lazily retries this for any account that still lacks

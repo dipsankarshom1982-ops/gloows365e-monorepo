@@ -333,9 +333,20 @@ export default function RegisterPage() {
       // (fixed referenceId "signup_bonus" per uid), so it can only ever
       // credit once even if handleRegister somehow runs twice for the same
       // uid — same guarantee the old client-side call relied on.
+      // Bounded retry (RELIABILITY): creditSignupBonus is fully idempotent
+      // server-side (fixed referenceId "signup_bonus" — see functions/src/
+      // vcoins.ts), so retrying it is always safe. Without this, a single
+      // transient network failure right here silently lost the one-time
+      // bonus forever (registration never revisits this step). One retry
+      // after a short delay; still non-fatal if both attempts fail.
       try {
         await httpsCallable(functions, "creditSignupBonus")();
-      } catch { /* non-fatal — a coin-credit hiccup must never block registration */ }
+      } catch {
+        try {
+          await new Promise((r) => setTimeout(r, 1500));
+          await httpsCallable(functions, "creditSignupBonus")();
+        } catch { /* non-fatal — a coin-credit hiccup must never block registration */ }
+      }
 
       // Apply referral code if provided — calls the applyReferral Cloud Function
       // directly via httpsCallable (the previous fetch("/api/apply-referral") was
