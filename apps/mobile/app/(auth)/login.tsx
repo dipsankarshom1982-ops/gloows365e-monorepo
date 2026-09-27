@@ -49,6 +49,22 @@ function pathForOnboardingRoute(route: OnboardingRoute): string {
   }
 }
 
+// Restart-education accounts finish onboarding on users/{uid} only — their
+// students/{uid} stub stays incomplete forever — so login must check users/{uid}
+// FIRST (same as web login, app/index.tsx and signup.tsx), or a returning
+// restart user gets pushed back into student onboarding instead of their home.
+// Same detection constants as index.tsx/signup.tsx (duplicated by convention).
+const RESTART_TYPES = ["restartEducation", "restart_education", "restart"];
+const RESTART_INDICATOR_FIELDS = ["lastClassPassed", "educationGapReason", "currentOccupation"];
+function restartRouteForUserDoc(d: Record<string, any> | undefined): string | null {
+  if (!d) return null;
+  const isRestart =
+    (d.profileType && RESTART_TYPES.includes(d.profileType)) ||
+    RESTART_INDICATOR_FIELDS.some((f) => f in d);
+  if (!isRestart) return null;
+  return d.onboardingComplete === true ? "/restart-education/home" : "/restart-education/onboarding";
+}
+
 // Required once per app for the OAuth redirect to close the in-app browser
 // correctly after Google hands control back. Expo's own docs put this at
 // module scope (not inside the component) — safe to call multiple times.
@@ -217,6 +233,13 @@ export default function LoginScreen() {
         }, { merge: true });
       }
 
+      const restartRoute = restartRouteForUserDoc(userSnap.exists() ? userSnap.data() : undefined);
+      if (restartRoute) {
+        setMessage("Welcome back! Redirecting...");
+        setTimeout(() => router.replace(restartRoute as any), 500);
+        return;
+      }
+
       const studentSnap = await getDoc(doc(db, "students", user.uid));
       const nextRoute = resolveOnboardingRoute(studentSnap.exists() ? (studentSnap.data() as any) : undefined);
       if (nextRoute !== "home") {
@@ -283,8 +306,15 @@ export default function LoginScreen() {
 
       const userCred = await signInWithEmailAndPassword(auth, trimmedEmail, password.trim());
       await AsyncStorage.setItem("lastEmail", trimmedEmail);
-      const nextRoute = resolveOnboardingRoute(snap.exists() ? (snap.data() as any) : undefined);
+      const userDocSnap = await getDoc(doc(db, "users", userCred.user.uid));
+      const restartRoute = restartRouteForUserDoc(userDocSnap.exists() ? userDocSnap.data() : undefined);
+      if (restartRoute) {
+        setMessage("Welcome back! Redirecting...");
+        setTimeout(() => router.replace(restartRoute as any), 500);
+        return;
+      }
       const snap = await getDoc(doc(db, "students", userCred.user.uid));
+      const nextRoute = resolveOnboardingRoute(snap.exists() ? (snap.data() as any) : undefined);
 
       if (nextRoute !== "home") {
         setMessage("Redirecting to complete your profile...");

@@ -1,4 +1,4 @@
-import "@/lib/firebase";
+import { auth } from "@/lib/firebase";
 import { AppConfigProvider } from "@/context/AppConfigContext";
 import { FeatureFlagsProvider, parseClassLevel, StudentProfileProvider } from "@gloows/shared-logic";
 import { LanguageProvider } from "@/context/LanguageContext";
@@ -57,7 +57,10 @@ export default function RootLayout() {
   // existing sessions resumed on app start. Silent (no permission-denied
   // Alert) and skipped if the user previously opted out via Settings — see
   // silentlyRegisterForPushNotifications in hooks/usePushNotifications.ts.
-  const pushRegisteredRef = useRef(false);
+  // Tracks the uid it last registered FOR (not a plain boolean): a boolean
+  // meant a second user logging in on the same device, in the same app
+  // session, never got their own push token registered.
+  const pushRegisteredForUidRef = useRef<string | null>(null);
 
   if (!fontsLoaded) return null;
 
@@ -73,8 +76,9 @@ export default function RootLayout() {
                   // 0 = no supported class on record; never falls back to another class.
                   useSeekhoStore.getState().setClassBoard(parseClassLevel(profile.class) ?? 0, profile.board as any);
                 }
-                if (!pushRegisteredRef.current) {
-                  pushRegisteredRef.current = true;
+                const pushUid = auth.currentUser?.uid ?? null;
+                if (pushUid && pushRegisteredForUidRef.current !== pushUid) {
+                  pushRegisteredForUidRef.current = pushUid;
                   silentlyRegisterForPushNotifications();
                 }
               }}

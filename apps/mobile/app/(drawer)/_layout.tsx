@@ -36,6 +36,8 @@ import { INDIAN_LANGUAGES } from "@/app/language-settings";
 import { auth, db } from "@/lib/firebase";
 import { getLevelFromXP, XP_PER_LEVEL } from "@/lib/learnfun/constants";
 import { ensureStudentId } from "@/services/studentIdService";
+import { useSeekhoStore } from "@/store/seekhoStore";
+import { useDiscoverStore } from "@/store/discoverStore";
 import TitleAvatar from "@/components/TitleAvatar";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -253,6 +255,15 @@ export default function DrawerLayout() {
       await AsyncStorage.setItem("lastEmail", auth.currentUser.email);
     }
     await signOut(auth);
+    // Server-derived, non-persisted store state is module-level and would
+    // otherwise still hold the previous user's subscription/progress/quota
+    // when the next user logs in on this device. (Persisted local-only data —
+    // discover saved careers/search history — is deliberately left alone.)
+    useSeekhoStore.setState({
+      selectedClass: 0, selectedBoard: "CBSE",
+      currentSubscription: null, courseProgress: {}, revisionQueue: [], dailyPlan: [],
+    });
+    useDiscoverStore.setState({ recentResults: [], remainingSearches: null });
     router.replace("/login");
   };
 

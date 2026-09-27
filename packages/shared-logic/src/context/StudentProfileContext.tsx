@@ -42,6 +42,7 @@ export function StudentProfileProvider({ children, onProfileLoaded }: Props) {
     const auth = getSharedAuth();
     const db   = getSharedDb();
     let unsubSnap: (() => void) | null = null;
+    let lastUid: string | null = null;
 
     const unsubAuth = auth.onAuthStateChanged((firebaseUser) => {
       unsubSnap?.(); unsubSnap = null;
@@ -49,10 +50,17 @@ export function StudentProfileProvider({ children, onProfileLoaded }: Props) {
       setAuthLoading(false);
 
       if (!firebaseUser) {
+        lastUid = null;
         setStudentProfile(null);
         setProfileLoading(false);
         return;
       }
+
+      // Direct user→user switch (signed-in A, then sign-in as B without an
+      // intervening sign-out, e.g. via the login screen): don't leave A's
+      // profile in state while B's snapshot is in flight.
+      if (lastUid !== null && lastUid !== firebaseUser.uid) setStudentProfile(null);
+      lastUid = firebaseUser.uid;
 
       setProfileLoading(true);
       unsubSnap = onSnapshot(

@@ -64,6 +64,10 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
     const uid = user?.uid;
     if (!uid) { setIsTester(false); return; }
     const db = getSharedDb();
+    // New uid → never carry the previous user's tester bypass over while this
+    // user's role snapshot is in flight (roleResolved is already false in
+    // that window; this keeps the feature helpers from bypassing too).
+    setIsTester(false);
     const unsub = onSnapshot(
       doc(db, "users", uid),
       (snap) => {
