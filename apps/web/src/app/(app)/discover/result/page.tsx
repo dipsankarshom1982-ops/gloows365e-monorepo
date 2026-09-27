@@ -8,6 +8,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useStudentProfile } from "@gloows/shared-logic";
 import { useAppConfig } from "@/context/AppConfigContext";
+import { auth } from "@/lib/firebase";
 import { useDiscoverStore } from "@/store/discoverStore";
 import { searchDiscover } from "@/services/discoverApi";
 import type { DiscoverResult, SalaryBar } from "@/lib/discover/types";
@@ -111,12 +112,19 @@ function DiscoverResultContent() {
     }
 
     // Discover per-user data isolation: this uid is captured before the
-    // request goes out. If the signed-in user changes while it's in
-    // flight (logout, or logout→login as someone else), the response
-    // belongs to whoever asked for it, not to whoever is signed in when
-    // it happens to land — writing it into the (now different) current
-    // user's Discover state/UI would be a stale cross-user write.
-    const requestUid = user?.uid ?? null;
+    // request goes out, read from the LIVE Firebase Auth singleton
+    // (auth.currentUser), not from the `user` context value above — that
+    // context value is captured by this closure at the render that started
+    // this effect and stays frozen even after the component unmounts, so
+    // comparing it against itself post-await can never detect a uid change
+    // (it was still doing exactly that here; caught during QA and fixed to
+    // match mobile's app/discover/result.tsx, which already read
+    // auth.currentUser?.uid live). If the signed-in user changes while the
+    // request is in flight (logout, or logout→login as someone else), the
+    // response belongs to whoever asked for it, not to whoever is signed
+    // in when it happens to land — writing it into the (now different)
+    // current user's Discover state/UI would be a stale cross-user write.
+    const requestUid = auth.currentUser?.uid ?? null;
     (async () => {
       setLoading(true);
       setError(null);
@@ -128,14 +136,14 @@ function DiscoverResultContent() {
           classLevel: studentProfile?.class ?? "10",
           interests: studentProfile?.interests ?? [],
         });
-        if ((user?.uid ?? null) !== requestUid) return;
+        if ((auth.currentUser?.uid ?? null) !== requestUid) return;
         setResult(r);
         setSaved(isCareerSaved(r.queryHash));
         addResult(r);
         addSearch(query, r.queryHash);
         setRemaining(remainingSearches);
       } catch (err: any) {
-        if ((user?.uid ?? null) !== requestUid) return;
+        if ((auth.currentUser?.uid ?? null) !== requestUid) return;
         setError({ message: err?.message ?? "Search failed", code: err?.code });
       } finally {
         setLoading(false);
