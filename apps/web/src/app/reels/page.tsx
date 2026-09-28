@@ -41,6 +41,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/layout/AuthGuard";
+import OnboardingGuard from "@/components/layout/OnboardingGuard";
 import BottomNav from "@/components/layout/BottomNav";
 import Drawer from "@/components/layout/Drawer";
 import { useTheme } from "@/context/ThemeContext";
@@ -1154,13 +1155,23 @@ function ReelsContent() {
 }
 
 export default function ReelsPage() {
+  // FIX (fix: protect reels with onboarding guard) — /reels lives outside
+  // the (app) route group (see this file's header comment for why), so
+  // (app)/layout.tsx's OnboardingGuard never ran for it — only AuthGuard
+  // did, which checks sign-in but not onboarding completeness or
+  // restart-education status. An incomplete, or restart-education, user
+  // could open /reels directly and see the real feed. Same shared guard
+  // (app)/layout.tsx uses, same precedence (restart education first, then
+  // normal onboarding), no new state machine.
   return (
     <AuthGuard>
-      <Suspense fallback={
-        <div style={{ height: "100dvh", background: "#000" }}/>
-      }>
-        <ReelsContent />
-      </Suspense>
+      <OnboardingGuard>
+        <Suspense fallback={
+          <div style={{ height: "100dvh", background: "#000" }}/>
+        }>
+          <ReelsContent />
+        </Suspense>
+      </OnboardingGuard>
     </AuthGuard>
   );
 }
