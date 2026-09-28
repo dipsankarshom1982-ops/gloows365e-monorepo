@@ -25,6 +25,7 @@
  */
 
 import { useTheme } from "@/context/ThemeContext";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import { streamPlaybackUrl } from "@/lib/cloudflareStream";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
@@ -544,7 +545,14 @@ function VideoItem({
 // ─────────────────────────────────────────────────────────────
 // Main Screen
 // ─────────────────────────────────────────────────────────────
-export default function Reels() {
+// FIX (Mobile route coverage audit): this file sits at app root, a sibling
+// of (drawer)/_layout.tsx, so (drawer)'s onboarding/restart guard never
+// applied to it — and it's a real, actively-used bypass: SkillShortPreview
+// and ShortLearnPreview both router.push("/reels", ...) directly from
+// Home/Learn, reaching this exact screen regardless of onboarding/restart
+// state. Wrapped below with the same shared guard the other newly-
+// protected routes use; playback/UI logic itself is unchanged.
+function Reels() {
   const { colors }      = useTheme();
   const navigation      = useNavigation();
   // FIX 1: read "tab" and "startIndex" params that SkillShortPreview sends
@@ -861,6 +869,14 @@ export default function Reels() {
         </TouchableOpacity>
       )}
     </View>
+  );
+}
+
+export default function ReelsRoute() {
+  return (
+    <OnboardingGuard>
+      <Reels />
+    </OnboardingGuard>
   );
 }
 

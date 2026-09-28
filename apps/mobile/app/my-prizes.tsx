@@ -36,6 +36,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import Header from "@/components/header";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import { useTheme } from "@/context/ThemeContext";
 import { useStudentProfile } from "@gloows/shared-logic";
 import { auth, db } from "@/lib/firebase";
@@ -163,7 +164,17 @@ function useCurrentStandings(uid: string, userClass: string | null): CurrentStan
   return standings;
 }
 
-export default function MyPrizesScreen() {
+// FIX (Mobile route coverage audit): my-prizes had no onboarding/restart
+// protection — wrapped below with the shared guard; screen unchanged.
+export default function MyPrizesRoute() {
+  return (
+    <OnboardingGuard>
+      <MyPrizesScreen />
+    </OnboardingGuard>
+  );
+}
+
+function MyPrizesScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const { studentProfile } = useStudentProfile();

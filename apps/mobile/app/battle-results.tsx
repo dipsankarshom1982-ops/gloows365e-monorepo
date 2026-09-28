@@ -24,6 +24,7 @@
 // anything is presented as a locked result.
 
 import Header from "@/components/header";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import EmptyState from "@/components/battle/EmptyState";
 import { BattleDetailsSkeleton } from "@/components/battle/SkeletonBlock";
 import Podium, { type PodiumEntry } from "@/components/battle/Podium";
@@ -66,7 +67,17 @@ const RESULT_STATE_BADGE: Record<string, { label: string; bg: string }> = {
 
 type ScreenPhase = "loading" | "not_ready" | "cancelled" | "ready" | "error" | "unavailable";
 
-export default function BattleResultsScreen() {
+// FIX (Mobile route coverage audit): battle-results had no onboarding/
+// restart protection — wrapped below with the shared guard; screen unchanged.
+export default function BattleResultsRoute() {
+  return (
+    <OnboardingGuard>
+      <BattleResultsScreen />
+    </OnboardingGuard>
+  );
+}
+
+function BattleResultsScreen() {
   const { colors } = useTheme();
   const params = useLocalSearchParams<{ battleId?: string }>();
   const battleId = params.battleId;

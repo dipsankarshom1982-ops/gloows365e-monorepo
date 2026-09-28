@@ -1,3 +1,4 @@
+import OnboardingGuard from "@/components/OnboardingGuard";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
@@ -81,7 +82,17 @@ function usePeriodPrizes(tab: string): PrizeRow[] | null {
 
 const TABS = ["daily", "weekly", "monthly", "yearly"] as const;
 
-export default function StarboardScreen() {
+// FIX (Mobile route coverage audit): starboard had no onboarding/restart
+// protection — wrapped below with the shared guard; screen unchanged.
+export default function StarboardRoute() {
+  return (
+    <OnboardingGuard>
+      <StarboardScreen />
+    </OnboardingGuard>
+  );
+}
+
+function StarboardScreen() {
   const { colors } = useTheme();
   const { t } = useAppTranslation();
   const router = useRouter();

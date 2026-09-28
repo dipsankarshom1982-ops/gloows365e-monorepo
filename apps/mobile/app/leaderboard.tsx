@@ -1,3 +1,4 @@
+import OnboardingGuard from "@/components/OnboardingGuard";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import { auth } from "@/lib/firebase";
@@ -49,7 +50,17 @@ const PRIZES: Record<string, { rank: string; reward: string; emoji: string; colo
 
 const TABS = ["daily", "weekly", "monthly", "yearly"] as const;
 
-export default function LeaderboardScreen() {
+// FIX (Mobile route coverage audit): leaderboard had no onboarding/restart
+// protection — wrapped below with the shared guard; screen unchanged.
+export default function LeaderboardRoute() {
+  return (
+    <OnboardingGuard>
+      <LeaderboardScreen />
+    </OnboardingGuard>
+  );
+}
+
+function LeaderboardScreen() {
   const { colors } = useTheme();
   const { t } = useAppTranslation();
   const router = useRouter();

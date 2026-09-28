@@ -18,6 +18,7 @@
 // those screens, not from here — see handleCTAPress().
 
 import Header from "@/components/header";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import { BattleDetailsSkeleton } from "@/components/battle/SkeletonBlock";
 import EmptyState from "@/components/battle/EmptyState";
 import BattleStatusBadge from "@/components/battle/BattleStatusBadge";
@@ -42,7 +43,17 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 const ACCENT = "#ff9f43";
 
-export default function BattleDetailsScreen() {
+// FIX (Mobile route coverage audit): battle-details had no onboarding/
+// restart protection — wrapped below with the shared guard; screen unchanged.
+export default function BattleDetailsRoute() {
+  return (
+    <OnboardingGuard>
+      <BattleDetailsScreen />
+    </OnboardingGuard>
+  );
+}
+
+function BattleDetailsScreen() {
   const { colors } = useTheme();
   const params = useLocalSearchParams<{ battleId?: string }>();
   const battleId = params.battleId;

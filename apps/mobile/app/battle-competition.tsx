@@ -25,6 +25,7 @@
 // badge (only FINAL entries carry a server-computed `rank`).
 
 import Header from "@/components/header";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import EmptyState from "@/components/battle/EmptyState";
 import BattleStatusBadge from "@/components/battle/BattleStatusBadge";
 import Countdown from "@/components/battle/Countdown";
@@ -58,7 +59,17 @@ const MAX_REFRESH_PAGE_SIZE = 50; // matches getBattleLeaderboardPage's own serv
 
 type ScreenPhase = "loading" | "ready" | "error" | "unavailable";
 
-export default function BattleCompetitionScreen() {
+// FIX (Mobile route coverage audit): battle-competition had no onboarding/
+// restart protection — wrapped below with the shared guard; screen unchanged.
+export default function BattleCompetitionRoute() {
+  return (
+    <OnboardingGuard>
+      <BattleCompetitionScreen />
+    </OnboardingGuard>
+  );
+}
+
+function BattleCompetitionScreen() {
   const { colors } = useTheme();
   const params = useLocalSearchParams<{ battleId?: string }>();
   const battleId = params.battleId;

@@ -1,4 +1,5 @@
 import Header from "@/components/header";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import { useTheme } from "@/context/ThemeContext";
 import { auth, db, functions } from "@/lib/firebase";
 import { getVCoinForRank, VCOIN_DIST_PCT } from "@/utils/formatVCoins";
@@ -199,7 +200,17 @@ const getCashPrize = (prizes: CashPrizeRow[], rank: number): string => {
 };
 
 // ─── Component ────────────────────────────────────────────────
-export default function SkillboardScreen() {
+// FIX (Mobile route coverage audit): skillboard had no onboarding/restart
+// protection — wrapped below with the shared guard; screen unchanged.
+export default function SkillboardRoute() {
+  return (
+    <OnboardingGuard>
+      <SkillboardScreen />
+    </OnboardingGuard>
+  );
+}
+
+function SkillboardScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   // battleId is passed from skillbattle.tsx's "View Full Skillboard" button

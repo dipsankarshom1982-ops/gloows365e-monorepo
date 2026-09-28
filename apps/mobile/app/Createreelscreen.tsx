@@ -1,5 +1,6 @@
 import { useTheme } from "@/context/ThemeContext";
 import { useAppTranslation } from "@/context/LanguageContext";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import { getStreamUploadUrl, uploadToStream } from "@/lib/cloudflareStream";
 import { auth, db, functions, storage } from "@/lib/firebase";
 import { detectPostLanguage } from "@/lib/detectPostLanguage";
@@ -192,7 +193,17 @@ type UploadPhase =
   | "saving";        // Step 4: writing Firestore doc
 
 // ─── Component ────────────────────────────────────────────────
-export default function CreateReelScreen() {
+// FIX (Mobile route coverage audit): create-reel had no onboarding/restart
+// protection — wrapped below with the shared guard; screen unchanged.
+export default function CreateReelRoute() {
+  return (
+    <OnboardingGuard>
+      <CreateReelScreen />
+    </OnboardingGuard>
+  );
+}
+
+function CreateReelScreen() {
   const { colors } = useTheme();
   const { t } = useAppTranslation();
   const router     = useRouter();

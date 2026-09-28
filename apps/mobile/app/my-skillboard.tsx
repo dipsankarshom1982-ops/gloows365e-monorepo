@@ -23,6 +23,7 @@
 // exist for these collections) that shaped every query in this screen.
 
 import Header from "@/components/header";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import EmptyState from "@/components/battle/EmptyState";
 import { BattleCardSkeleton } from "@/components/battle/SkeletonBlock";
 import { ACHIEVEMENT_LABELS, type AchievementRuleId } from "@/components/battle/battleResultsApi";
@@ -47,7 +48,17 @@ import { SafeAreaView } from "react-native-safe-area-context";
 const ACCENT = "#ff9f43";
 const TROPHY_ORDER: AchievementRuleId[] = ["winner", "top3", "top10", "participated"];
 
-export default function MySkillBoardScreen() {
+// FIX (Mobile route coverage audit): my-skillboard had no onboarding/
+// restart protection — wrapped below with the shared guard; screen unchanged.
+export default function MySkillBoardRoute() {
+  return (
+    <OnboardingGuard>
+      <MySkillBoardScreen />
+    </OnboardingGuard>
+  );
+}
+
+function MySkillBoardScreen() {
   const { colors } = useTheme();
 
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
