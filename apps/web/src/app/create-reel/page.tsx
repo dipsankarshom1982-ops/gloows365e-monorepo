@@ -41,6 +41,7 @@ import {
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import { useStudentProfile } from "@gloows/shared-logic";
 import AuthGuard from "@/components/layout/AuthGuard";
+import OnboardingGuard from "@/components/layout/OnboardingGuard";
 import { useTheme } from "@/context/ThemeContext";
 import { auth, db, storage } from "@/lib/firebase";
 import { uploadToStream } from "@/lib/cloudflareStream";
@@ -634,11 +635,17 @@ function CreateReelContent() {
 }
 
 export default function CreateReelPage() {
+  // FIX (production readiness audit — Web onboarding route coverage): lives
+  // outside (app) for the same reason as reels/page.tsx, so
+  // (app)/layout.tsx's OnboardingGuard never ran for it — only AuthGuard
+  // did. Same shared guard reels/page.tsx uses, same precedence.
   return (
     <AuthGuard>
-      <Suspense fallback={<div style={{ minHeight: "100dvh" }} />}>
-        <CreateReelContent />
-      </Suspense>
+      <OnboardingGuard>
+        <Suspense fallback={<div style={{ minHeight: "100dvh" }} />}>
+          <CreateReelContent />
+        </Suspense>
+      </OnboardingGuard>
     </AuthGuard>
   );
 }

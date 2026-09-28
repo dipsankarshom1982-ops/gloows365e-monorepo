@@ -10,6 +10,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/layout/AuthGuard";
+import OnboardingGuard from "@/components/layout/OnboardingGuard";
 import { auth, db } from "@/lib/firebase";
 import { joinContest } from "@/services/joinContest";
 import { getContestLesson } from "@/services/getContestLesson";
@@ -365,11 +366,17 @@ function ContestLessonContent() {
 }
 
 export default function ContestLessonPage() {
+  // FIX (production readiness audit — Web onboarding route coverage): lives
+  // outside (app) for the same reason as reels/page.tsx, so
+  // (app)/layout.tsx's OnboardingGuard never ran for it — only AuthGuard
+  // did. Same shared guard reels/page.tsx uses, same precedence.
   return (
     <AuthGuard>
-      <Suspense fallback={<div style={{ minHeight: "100dvh", background: "#0f172a" }} />}>
-        <ContestLessonContent />
-      </Suspense>
+      <OnboardingGuard>
+        <Suspense fallback={<div style={{ minHeight: "100dvh", background: "#0f172a" }} />}>
+          <ContestLessonContent />
+        </Suspense>
+      </OnboardingGuard>
     </AuthGuard>
   );
 }

@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/layout/AuthGuard";
+import OnboardingGuard from "@/components/layout/OnboardingGuard";
 import { useTheme } from "@/context/ThemeContext";
 import { auth, db } from "@/lib/firebase";
 import { resolveStreamUrl } from "@/lib/cloudflareStream";
@@ -252,9 +253,15 @@ function MyPostContent() {
 }
 
 export default function MyPostPage() {
+  // FIX (production readiness audit — Web onboarding route coverage): lives
+  // outside (app) for the same reason as reels/page.tsx (no drawer/tab bar),
+  // so (app)/layout.tsx's OnboardingGuard never ran for it — only AuthGuard
+  // did. Same shared guard reels/page.tsx uses, same precedence.
   return (
     <AuthGuard>
-      <MyPostContent />
+      <OnboardingGuard>
+        <MyPostContent />
+      </OnboardingGuard>
     </AuthGuard>
   );
 }

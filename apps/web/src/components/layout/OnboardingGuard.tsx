@@ -30,8 +30,29 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { doc, getFirestore, onSnapshot } from "firebase/firestore";
-import { resolveOnboardingRoute, useStudentProfile } from "@gloows/shared-logic";
+import { resolveOnboardingRoute, useStudentProfile, type OnboardingStudentDoc, type StudentProfile } from "@gloows/shared-logic";
 import { ONBOARDING_PATHS } from "@/lib/onboardingPaths";
+
+// resolveOnboardingRoute() takes an OnboardingStudentDoc — an interface with
+// only the 3 named fields it actually reads, all optional. StudentProfile
+// (useStudentProfile()'s type) doesn't declare those 3 as named properties;
+// it only has them via its own catch-all `[key: string]: any` index
+// signature. Both types end up "weak" (every member optional) with no
+// property names in common that TypeScript can see statically, which trips
+// TS2559 ("has no properties in common") — a known TS limitation where an
+// index signature doesn't satisfy the weak-type check, even though the
+// values are structurally fine at runtime. Extracting exactly the fields
+// resolveOnboardingRoute() cares about into a real, explicitly-typed object
+// literal (rather than passing studentProfile through as-is, or reaching
+// for `as any`) gives TypeScript actual named properties to match against.
+function toOnboardingStudentDoc(profile: StudentProfile | null): OnboardingStudentDoc | undefined {
+  if (!profile) return undefined;
+  return {
+    onboardingStep: profile.onboardingStep,
+    parentPhoneVerified: profile.parentPhoneVerified,
+    onboardingComplete: profile.onboardingComplete,
+  };
+}
 
 const RESTART_TYPES = ["restartEducation", "restart_education", "restart"];
 const RESTART_INDICATOR_FIELDS = ["lastClassPassed", "educationGapReason", "currentOccupation"];
@@ -97,7 +118,7 @@ export default function OnboardingGuard({ children }: { children: React.ReactNod
   // can never gate this user's routing.
   const restartReady   = !!uid && restartState?.uid === uid && restartState.checked;
   const isRestartUser  = restartReady && restartState!.isRestart;
-  const onboardingRoute = !profileLoading ? resolveOnboardingRoute(studentProfile ?? undefined) : null;
+  const onboardingRoute = !profileLoading ? resolveOnboardingRoute(toOnboardingStudentDoc(studentProfile)) : null;
 
   useEffect(() => {
     if (!uid || !restartReady) return; // wait for the restart check first
