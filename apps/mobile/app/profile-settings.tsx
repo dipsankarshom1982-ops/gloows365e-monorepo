@@ -8,6 +8,7 @@ import {
   SUPPORTED_CLASS_LEVEL_STRINGS,
 } from "@gloows/shared-logic";
 import Header from "@/components/header";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import RecaptchaModal, { type RecaptchaVerifierHandle } from "@/components/auth/RecaptchaModal";
 import TitleAvatar from "@/components/TitleAvatar";
 import { TITLES } from "@/lib/avatars";
@@ -135,7 +136,21 @@ const ChipRow = ({ label, options, selected, onToggle, isEditing, colors }: Chip
 );
 
 // ─── Main Component ─────────────────────────────────────────
-export default function ProfileSettingsScreen() {
+// FIX (7-route product decision audit): profile-settings requires an
+// existing students/{uid} doc (fetchProfile below hard-fails with
+// "Profile not found" if it's missing) and edits fields that overlap with
+// onboarding itself — the audit's evidence for REQUIRE COMPLETED
+// ONBOARDING. Wrapped below with the existing shared guard; screen
+// unchanged.
+export default function ProfileSettingsRoute() {
+  return (
+    <OnboardingGuard>
+      <ProfileSettingsScreen />
+    </OnboardingGuard>
+  );
+}
+
+function ProfileSettingsScreen() {
   const { colors } = useTheme();
   const { t } = useAppTranslation();
   const router = useRouter();
