@@ -1,6 +1,10 @@
 import { auth } from "@/lib/firebase";
 import { AppConfigProvider } from "@/context/AppConfigContext";
-import { FeatureFlagsProvider, parseClassLevel, StudentProfileProvider } from "@gloows/shared-logic";
+import {
+  ENTRY_POINT_GATES, FeatureFlagsProvider, MODULE_GATES, parseClassLevel, StudentProfileProvider,
+  type RouteGateSpec,
+} from "@gloows/shared-logic";
+import RouteGate from "@/components/RouteGate";
 import { LanguageProvider } from "@/context/LanguageContext";
 import { ThemeProvider, useTheme } from "@/context/ThemeContext";
 import { useSeekhoStore } from "@/store/seekhoStore";
@@ -27,6 +31,22 @@ SplashScreen.preventAutoHideAsync();
 
 // Set up global JS error handler once
 setupGlobalErrorHandlers();
+
+// Access gates for module screens that live directly under this root Stack
+// (route groups with their own _layout.tsx — ai-guru, seekho, shikshahub,
+// contest, learnfun, daily-streak-quiz, glostore, discover — gate there).
+// Each screen is not mounted until access is decided; see
+// components/RouteGate.tsx and shared-logic access/routeGates.ts.
+const ROOT_SCREEN_GATES: Record<string, RouteGateSpec> = {
+  "knowledge-hub":      MODULE_GATES.knowledgehub,
+  skillboard:           MODULE_GATES.skillboard,
+  starboard:            MODULE_GATES.starboard,
+  "battle-details":     MODULE_GATES.skillbattle,
+  "battle-competition": MODULE_GATES.skillbattle,
+  "battle-results":     MODULE_GATES.skillbattle,
+  "my-skillboard":      MODULE_GATES.skillbattle,
+  "referral/index":     ENTRY_POINT_GATES.referral,
+};
 
 function ThemeStatusBar() {
   const { isDarkMode } = useTheme();
@@ -113,7 +133,13 @@ export default function RootLayout() {
               <AppConfigProvider>
                 <FeatureFlagsProvider>
                   <View style={{ flex: 1 }}>
-                    <Stack screenOptions={{ headerShown: false }} />
+                    <Stack
+                      screenOptions={{ headerShown: false }}
+                      screenLayout={({ children, route }) => {
+                        const spec = ROOT_SCREEN_GATES[route.name];
+                        return spec ? <RouteGate spec={spec}>{children}</RouteGate> : children;
+                      }}
+                    />
                     {/* ShikshaHub Phase 4 — global, not per-screen: see
                        components/InstantHelpBar.tsx's header comment.
                        Safe pre-login too — its hooks no-op without a uid. */}

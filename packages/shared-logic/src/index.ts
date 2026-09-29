@@ -12,6 +12,10 @@
 // ─── Context / Providers ────────────────────────────────────────────────
 export * from "./context/StudentProfileContext";
 export * from "./context/FeatureFlagsContext";
+
+// ─── Access control ──────────────────────────────────────────────────────
+export * from "./access/featureGate";
+export * from "./access/routeGates";
 export * from "./context/TutorProfileContext";
 
 // ─── Firebase bootstrap ──────────────────────────────────────────────────

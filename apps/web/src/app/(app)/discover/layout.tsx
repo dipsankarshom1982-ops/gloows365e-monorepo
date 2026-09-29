@@ -7,12 +7,35 @@
 // direct link or bookmark, so they see a friendly message here instead of the
 // Discover screens or a raw 403. Every other class gets the page unchanged.
 
-import { useRouter } from "next/navigation";
-import { isPrimaryClassLevel, useStudentProfile } from "@gloows/shared-logic";
+import { useRouter, usePathname } from "next/navigation";
+import { isPrimaryClassLevel, useFeatureFlags, useStudentProfile } from "@gloows/shared-logic";
+import { useAiGuruFeatureGate } from "@/hooks/useAiGuruFeatureGate";
+import { GateLoading } from "@/components/layout/RouteGate";
 
 export default function DiscoverLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { studentProfile } = useStudentProfile();
+  const pathname = usePathname();
+  const { studentProfile, profileLoading } = useStudentProfile();
+
+  // Admin control (Phase 2B): Discover follows featureFlags/aiGuru.discover,
+  // OR homeSection.discover_preview while that Home entry point is ON. Raw
+  // flags + disabled for Class 3–5 so the class rule below is unchanged, and
+  // disabled on /discover/subscription — whether the purchase page should
+  // stay reachable when Discover is OFF is an open product decision, so it
+  // keeps today's behavior. Hook-only (no early return): same pattern as the
+  // Phase 1 gates, and it runs before the class check below.
+  const allowed = useAiGuruFeatureGate("discover", {
+    homeSectionKey: "discover_preview",
+    ignoreClassRules: true,
+    enabled: !profileLoading && !isPrimaryClassLevel(studentProfile?.class) && !/\/subscription\/?$/.test(pathname ?? ""),
+  });
+
+  // Don't mount a Discover page (its search/trending calls run on mount)
+  // until the class and the admin flags are actually known — the hook
+  // above reports "allowed" while they're still loading, and a Class 3–5
+  // profile still loading would otherwise fall through to the pages below.
+  const { isTester, roleResolved, flagsResolved } = useFeatureFlags();
+  if (profileLoading || !roleResolved || (!isTester && !flagsResolved) || !allowed) return <GateLoading />;
 
   if (!isPrimaryClassLevel(studentProfile?.class)) return <>{children}</>;
 

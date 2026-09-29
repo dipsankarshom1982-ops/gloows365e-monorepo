@@ -1,7 +1,8 @@
 import { useTheme } from "@/context/ThemeContext";
-import { isPrimaryClassLevel, useStudentProfile } from "@gloows/shared-logic";
-import { Stack, useRouter } from "expo-router";
-import { Text, TouchableOpacity, View } from "react-native";
+import { isPrimaryClassLevel, useFeatureFlags, useStudentProfile } from "@gloows/shared-logic";
+import { useAiGuruFeatureGate } from "@/hooks/useAiGuruFeatureGate";
+import { Stack, useRouter, usePathname } from "expo-router";
+import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 // Discover is a college/career/scholarship advisor and isn't offered to
@@ -12,7 +13,34 @@ import { SafeAreaView } from "react-native-safe-area-context";
 export default function DiscoverLayout() {
   const { colors } = useTheme();
   const router = useRouter();
-  const { studentProfile } = useStudentProfile();
+  const pathname = usePathname();
+  const { studentProfile, profileLoading } = useStudentProfile();
+
+  // Admin control (Phase 2B): Discover follows featureFlags/aiGuru.discover,
+  // OR homeSection.discover_preview while that Home entry point is ON. Raw
+  // flags + disabled for Class 3–5 so the class rule below is unchanged, and
+  // disabled on /discover/subscription — whether the purchase page should
+  // stay reachable when Discover is OFF is an open product decision, so it
+  // keeps today's behavior. Hook-only (no early return): same pattern as the
+  // Phase 1 gates, and it runs before the class check below.
+  const allowed = useAiGuruFeatureGate("discover", {
+    homeSectionKey: "discover_preview",
+    ignoreClassRules: true,
+    enabled: !profileLoading && !isPrimaryClassLevel(studentProfile?.class) && !/\/subscription\/?$/.test(pathname ?? ""),
+  });
+
+  // Don't mount a Discover screen (its search/trending calls run on mount)
+  // until the class and the admin flags are actually known — the hook
+  // above reports "allowed" while they're still loading, and a Class 3–5
+  // profile still loading would otherwise fall through to the Stack below.
+  const { isTester, roleResolved, flagsResolved } = useFeatureFlags();
+  if (profileLoading || !roleResolved || (!isTester && !flagsResolved) || !allowed) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.accent} />
+      </View>
+    );
+  }
 
   if (!isPrimaryClassLevel(studentProfile?.class)) {
     return <Stack screenOptions={{ headerShown: false }} />;

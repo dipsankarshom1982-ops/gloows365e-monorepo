@@ -6,12 +6,14 @@
 // protection. Wrapping the existing Stack in the shared guard protects
 // [uid], bookings, credits, messages, and messages/thread at once.
 import { Stack } from "expo-router";
+import { MODULE_GATES } from "@gloows/shared-logic";
+import { routeGateLayout } from "@/components/RouteGate";
 import OnboardingGuard from "@/components/OnboardingGuard";
 
 export default function ShikshaHubLayout() {
   return (
     <OnboardingGuard>
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack screenOptions={{ headerShown: false }} screenLayout={routeGateLayout(MODULE_GATES.shikshahub)} />
     </OnboardingGuard>
   );
 }

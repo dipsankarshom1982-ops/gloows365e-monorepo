@@ -26,6 +26,21 @@ import { DrawerActions, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import { TouchableOpacity } from "react-native";
+import { MODULE_GATES, getAiGuruScreenSpec, type RouteGateSpec } from "@gloows/shared-logic";
+import RouteGate from "@/components/RouteGate";
+
+// Access gate per folded module screen — not mounted until allowed (see
+// components/RouteGate.tsx). reels is deliberately not gated: it is the
+// post-login landing screen (see routeGates.ts' "Deliberately NOT gated").
+const TAB_GATES: Record<string, RouteGateSpec> = {
+  "ai-guru":   MODULE_GATES.aiGuru,
+  shikshahub:  MODULE_GATES.shikshahub,
+  skillbattle: MODULE_GATES.skillbattle,
+  vidyastar:   MODULE_GATES.vidyastar,
+  seekho:      MODULE_GATES.seekho,
+  skillboost:  MODULE_GATES.skillboost,
+  learnFun:    MODULE_GATES.learnfun,
+};
 
 const NAV_TABS: { name: string; title: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { name: "home",      title: "Home",      icon: "home-outline" },
@@ -71,6 +86,15 @@ export default function TabsLayout() {
           backgroundColor: colors.background,
           borderTopColor: colors.border,
         },
+      }}
+      screenLayout={({ children, route }) => {
+        const spec = TAB_GATES[route.name];
+        if (!spec) return children;
+        return (
+          <RouteGate spec={spec} aiGuruScreen={route.name === "ai-guru" ? getAiGuruScreenSpec("index") : undefined}>
+            {children}
+          </RouteGate>
+        );
       }}
     >
       {NAV_TABS.map(({ name, title, icon }) => (

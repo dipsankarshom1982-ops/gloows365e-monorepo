@@ -40,6 +40,10 @@ type AppConfigContextType = {
   plans:         SubscriptionPlan[];
   creditPacks:   CreditPack[];
   configLoading: boolean;
+  /** True once appModules has delivered a live snapshot (or its fallback)
+   *  for the CURRENT uid. The AsyncStorage seed and a previous user's data
+   *  never count — route gates wait on this. */
+  modulesResolved: boolean;
 };
 
 const AppConfigContext = createContext<AppConfigContextType>({
@@ -47,6 +51,7 @@ const AppConfigContext = createContext<AppConfigContextType>({
   plans:         [],
   creditPacks:   [],
   configLoading: true,
+  modulesResolved: true,
 });
 
 export const useAppConfig = () => useContext(AppConfigContext);
@@ -69,9 +74,10 @@ function sortModules(list: AppModule[]): AppModule[] {
 }
 
 export function AppConfigProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useStudentProfile();
+  const { user, authLoading } = useStudentProfile();
 
   const [modules,       setModules]       = useState<AppModule[]>([]);
+  const [modulesLoadedFor, setModulesLoadedFor] = useState<string | null>(null);
   const [plans,         setPlans]         = useState<SubscriptionPlan[]>([]);
   const [creditPacks,   setCreditPacks]   = useState<CreditPack[]>([]);
   const [modulesReady,  setModulesReady]  = useState(false);
@@ -99,13 +105,21 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
   }, [user?.uid]);
 
   useEffect(() => {
+    const uid = user?.uid ?? null;
+    // Set once a live appModules result lands in this run, so the async
+    // cache read below can't finish late and overwrite live data with a
+    // stale (possibly another user's) module list.
+    let liveModules = false;
+    let cancelled = false; // this run was superseded (user switch / tester flip)
+    const markModulesLive = () => { if (cancelled) return; liveModules = true; setModulesLoadedFor(uid); };
+
     // Seed UI from versioned cache
     Promise.all([
       AsyncStorage.getItem(CACHE_KEY_MODULES),
       AsyncStorage.getItem(CACHE_KEY_PLANS),
       AsyncStorage.getItem(CACHE_KEY_CREDIT_PACKS),
     ]).then(([cachedMods, cachedPlans, cachedPacks]) => {
-      if (cachedMods)  setModules(JSON.parse(cachedMods));
+      if (cachedMods && !liveModules) setModules(JSON.parse(cachedMods));
       if (cachedPlans) setPlans(JSON.parse(cachedPlans));
       if (cachedPacks) setCreditPacks(JSON.parse(cachedPacks));
     }).catch(() => {});
@@ -125,19 +139,22 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
           } as AppModule)));
           setModules(fresh);
           setModulesReady(true);
-          AsyncStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(fresh)).catch(() => {});
+          markModulesLive();
+          // Not cached: the cache is device-wide, and this forced all-ON
+          // list would seed the next (normal) user who signs in here.
         },
         async () => {
           // Fallback: one-shot getDocs (e.g. transient listener error)
           try {
             const snap = await getDocs(collection(db, "appModules"));
+            if (cancelled) return;
             const fresh = sortModules(
               snap.docs.map((d) => ({ id: d.id, ...d.data(), isEnabled: true } as AppModule))
             );
             setModules(fresh);
-            AsyncStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(fresh)).catch(() => {});
           } catch {}
           setModulesReady(true);
+          markModulesLive();
         }
       );
     } else {
@@ -165,17 +182,20 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
           const fresh = sortModules(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppModule)));
           setModules(fresh);
           setModulesReady(true);
+          markModulesLive();
           AsyncStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(fresh)).catch(() => {});
         },
         async () => {
           // Fallback: one-shot getDocs (e.g. transient listener error)
           try {
             const snap = await getDocs(collection(db, "appModules"));
+            if (cancelled) return;
             const fresh = sortModules(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AppModule)));
             setModules(fresh);
             AsyncStorage.setItem(CACHE_KEY_MODULES, JSON.stringify(fresh)).catch(() => {});
           } catch {}
           setModulesReady(true);
+          markModulesLive();
         }
       );
     }
@@ -240,6 +260,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
     );
 
     return () => {
+      cancelled = true;
       unsubModules();
       unsubPlans();
       unsubCreditPacks();
@@ -251,8 +272,10 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
   // (or logout->login) in the same app session left modules unloaded/stale until app restart.
   }, [isTester, user?.uid]);
 
+  const modulesResolved = !authLoading && (!user?.uid || modulesLoadedFor === user.uid);
+
   return (
-    <AppConfigContext.Provider value={{ modules, plans, creditPacks, configLoading }}>
+    <AppConfigContext.Provider value={{ modules, plans, creditPacks, configLoading, modulesResolved }}>
       {children}
     </AppConfigContext.Provider>
   );

@@ -5,7 +5,7 @@
 import * as React from "react";
 import {
   getFirestore,
-  collection, getDocs, onSnapshot, orderBy, query, where,
+  collection, doc, getDocs, onSnapshot, orderBy, query, where,
 } from "firebase/firestore";
 import { useStudentProfile } from "@gloows/shared-logic";
 
@@ -54,6 +54,10 @@ interface CtxType {
   plans: SubscriptionPlan[];
   creditPacks: CreditPack[];
   configLoading: boolean;
+  /** True once appModules has delivered a snapshot (or its fail-open
+   *  fallback) for the CURRENT uid — route gates wait on this instead of
+   *  judging the DEFAULT_MODULES placeholder (all enabled). */
+  modulesResolved: boolean;
 }
 
 const DEFAULT_MODULES: AppModule[] = [
@@ -69,20 +73,44 @@ const AppConfigContext = React.createContext<CtxType>({
   plans: [],
   creditPacks: [],
   configLoading: false,
+  modulesResolved: true,
 });
 
 export const useAppConfig = () => React.useContext(AppConfigContext);
 
 export function AppConfigProvider({ children }: { children: React.ReactNode }) {
-  const { studentProfile, user, authLoading } = useStudentProfile();
+  const { user, authLoading } = useStudentProfile();
   const [modules,       setModules]       = React.useState<AppModule[]>(DEFAULT_MODULES);
   const [plans,         setPlans]         = React.useState<SubscriptionPlan[]>([]);
   const [creditPacks,   setCreditPacks]   = React.useState<CreditPack[]>([]);
   const [configLoading, setConfigLoading] = React.useState(false);
+  const [modulesLoadedFor, setModulesLoadedFor] = React.useState<string | null>(null);
 
-  const isTester =
-    studentProfile?.role === "tester" ||
-    studentProfile?.role === "admin";
+  // Tester/admin bypass — role lives on users/{uid}.role, NOT on the
+  // students/{uid} profile doc useStudentProfile() reads (that doc is
+  // always written role:"student" at signup and never updated — see
+  // packages/shared-logic/src/context/FeatureFlagsContext.tsx and
+  // apps/mobile/context/AppConfigContext.tsx, which already read
+  // users/{uid} for exactly this reason). This used to read
+  // studentProfile?.role here, which meant isTester was always false and
+  // Learn/Challenge module visibility + subscriptionPlans/aiGuruCreditPacks
+  // gating never actually bypassed for testers on web.
+  const [isTester, setIsTester] = React.useState(false);
+
+  React.useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) { setIsTester(false); return; }
+    const db = getFirestore();
+    const unsub = onSnapshot(
+      doc(db, "users", uid),
+      (snap) => {
+        const role = snap.exists() ? (snap.data()?.role as string | undefined) : undefined;
+        setIsTester(role === "tester" || role === "admin");
+      },
+      () => setIsTester(false)
+    );
+    return unsub;
+  }, [user?.uid]);
 
   React.useEffect(() => {
     // ⚠️ Don't fire Firestore queries until Firebase Auth has actually
@@ -100,6 +128,10 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
 
     const db = getFirestore();
     setConfigLoading(true);
+    const uid = user.uid;
+    // No-op once this run is superseded (user switch / tester flip), so a
+    // late fallback can't mark the previous uid's modules as current.
+    const markModulesLoaded = () => { if (cancelled) return; setConfigLoading(false); setModulesLoadedFor(uid); };
 
     let cancelled = false;
     let unsub: (() => void) | null = null;
@@ -120,7 +152,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
           query(collection(db, "appModules"), orderBy("order", "asc")),
           (snap) => {
             setModules(snap.docs.map((d) => ({ id: d.id, ...d.data(), isEnabled: true } as AppModule)));
-            setConfigLoading(false);
+            markModulesLoaded();
           },
           async () => {
             if (retriesLeft > 0) {
@@ -134,7 +166,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
                 .map((d) => ({ id: d.id, ...d.data(), isEnabled: true } as AppModule))
                 .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
             } catch { setModules(DEFAULT_MODULES); }
-            setConfigLoading(false);
+            markModulesLoaded();
           }
         );
       } else {
@@ -160,7 +192,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
               .map((d) => ({ id: d.id, ...d.data() } as AppModule))
               .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
             setModules(fresh.length > 0 ? fresh : DEFAULT_MODULES);
-            setConfigLoading(false);
+            markModulesLoaded();
           },
           async () => {
             if (retriesLeft > 0) {
@@ -175,7 +207,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
                 .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
               setModules(fresh.length > 0 ? fresh : DEFAULT_MODULES);
             } catch { setModules(DEFAULT_MODULES); }
-            setConfigLoading(false);
+            markModulesLoaded();
           }
         );
       }
@@ -185,6 +217,8 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
 
     return () => { cancelled = true; unsub?.(); };
   }, [isTester, user, authLoading]);
+
+  const modulesResolved = !authLoading && (!user || modulesLoadedFor === user.uid);
 
   // ── subscriptionPlans listener — same collection/shape as mobile,
   // admin-managed, filtered to isActive==true and ordered for display.
@@ -233,7 +267,7 @@ export function AppConfigProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AppConfigContext.Provider value={{ modules, plans, creditPacks, configLoading }}>
+    <AppConfigContext.Provider value={{ modules, plans, creditPacks, configLoading, modulesResolved }}>
       {children}
     </AppConfigContext.Provider>
   );

@@ -10,12 +10,14 @@
 // are all protected at once — no changes to any LearnFun screen itself.
 
 import { Stack } from "expo-router";
+import { MODULE_GATES } from "@gloows/shared-logic";
+import { routeGateLayout } from "@/components/RouteGate";
 import OnboardingGuard from "@/components/OnboardingGuard";
 
 export default function LearnFunLayout() {
   return (
     <OnboardingGuard>
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack screenOptions={{ headerShown: false }} screenLayout={routeGateLayout(MODULE_GATES.learnfun)} />
     </OnboardingGuard>
   );
 }

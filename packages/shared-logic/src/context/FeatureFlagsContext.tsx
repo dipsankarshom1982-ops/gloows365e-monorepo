@@ -36,6 +36,14 @@ interface FeatureFlagsContextType {
    *  arrived — route gates must not redirect before this is true, or a
    *  tester on a hard page load is treated as a normal user for a moment. */
   roleResolved: boolean;
+  /** False until the three featureFlags docs have each delivered a first
+   *  snapshot (or error) on a listener opened for the CURRENT uid. `loading`
+   *  can't be used for this: it goes false once for the signed-out
+   *  (permission-denied) listener at mount and never resets on login, so
+   *  gates reading it would decide on flags that never loaded. Testers
+   *  don't load flags (they bypass them), so this is only meaningful for
+   *  normal users — route gates check isTester first. */
+  flagsResolved: boolean;
   homeSection: (key: string) => boolean;
   aiGuru:      (key: string) => boolean;
   drawerItem:  (key: string) => boolean;
@@ -44,7 +52,7 @@ interface FeatureFlagsContextType {
 const alwaysOn = () => true;
 
 const FeatureFlagsContext = createContext<FeatureFlagsContextType>({
-  homeFlags: {}, aiFlags: {}, drawerFlags: {}, loading: true, isTester: false, roleResolved: true,
+  homeFlags: {}, aiFlags: {}, drawerFlags: {}, loading: true, isTester: false, roleResolved: true, flagsResolved: true,
   homeSection: alwaysOn, aiGuru: alwaysOn, drawerItem: alwaysOn,
 });
 
@@ -53,6 +61,7 @@ export const useFeatureFlags = () => useContext(FeatureFlagsContext);
 export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
   const { user, studentProfile, authLoading } = useStudentProfile();
   const [roleLoadedFor, setRoleLoadedFor] = useState<string | null>(null);
+  const [flagsLoadedFor, setFlagsLoadedFor] = useState<string | null>(null);
   const [homeFlags, setHomeFlags]     = useState<FlagMap>({});
   const [aiFlags, setAiFlags]         = useState<FlagMap>({});
   const [drawerFlags, setDrawerFlags] = useState<FlagMap>({});
@@ -81,17 +90,29 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
   }, [user?.uid]);
 
   const roleResolved = !authLoading && (!user?.uid || roleLoadedFor === user.uid);
+  const flagsResolved = !authLoading && (!user?.uid || flagsLoadedFor === user.uid);
 
   // ── Flag docs — skipped for testers/admins, who bypass every check below ──
   useEffect(() => {
     if (isTester) { setLoading(false); return; }
     const db = getSharedDb();
-    let loaded = 0;
-    const check = () => { if (++loaded === 3) setLoading(false); };
+    const uid = user?.uid ?? null;
+    // Count each doc once — later live snapshots of one doc must not stand
+    // in for another doc's first snapshot.
+    const arrived = new Set<string>();
+    const check = (id: string) => () => {
+      arrived.add(id);
+      if (arrived.size === 3) { setLoading(false); setFlagsLoadedFor(uid); }
+    };
+    const onHome   = check("homeSection");
+    const onAi     = check("aiGuru");
+    const onDrawer = check("drawerItems");
 
-    const u1 = onSnapshot(doc(db, "featureFlags", "homeSection"),  (s) => { if (s.exists()) setHomeFlags(s.data() as FlagMap);   check(); }, check);
-    const u2 = onSnapshot(doc(db, "featureFlags", "aiGuru"),       (s) => { if (s.exists()) setAiFlags(s.data() as FlagMap);     check(); }, check);
-    const u3 = onSnapshot(doc(db, "featureFlags", "drawerItems"),  (s) => { if (s.exists()) setDrawerFlags(s.data() as FlagMap); check(); }, check);
+    // A missing doc means "all defaults" — reset rather than keep whatever
+    // an earlier listener left in state.
+    const u1 = onSnapshot(doc(db, "featureFlags", "homeSection"),  (s) => { setHomeFlags(s.exists() ? s.data() as FlagMap : {});   onHome(); },   onHome);
+    const u2 = onSnapshot(doc(db, "featureFlags", "aiGuru"),       (s) => { setAiFlags(s.exists() ? s.data() as FlagMap : {});     onAi(); },     onAi);
+    const u3 = onSnapshot(doc(db, "featureFlags", "drawerItems"),  (s) => { setDrawerFlags(s.exists() ? s.data() as FlagMap : {}); onDrawer(); }, onDrawer);
 
     return () => { u1(); u2(); u3(); };
     // user?.uid: featureFlags/* need an authenticated read. A listener opened while signed out
@@ -108,7 +129,7 @@ export function FeatureFlagsProvider({ children }: { children: ReactNode }) {
   const drawerItem  = (key: string) => key === "home" ? true : isTester ? true : (drawerFlags[key] ?? true);
 
   return (
-    <FeatureFlagsContext.Provider value={{ homeFlags, aiFlags, drawerFlags, loading, isTester, roleResolved, homeSection, aiGuru, drawerItem }}>
+    <FeatureFlagsContext.Provider value={{ homeFlags, aiFlags, drawerFlags, loading, isTester, roleResolved, flagsResolved, homeSection, aiGuru, drawerItem }}>
       {children}
     </FeatureFlagsContext.Provider>
   );
