@@ -15,7 +15,8 @@ const IS_EXPO_GO = Constants.appOwnership === "expo";
 // Show alerts and play sound for foreground notifications
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
@@ -31,7 +32,10 @@ async function savePushTokenToFirestore(token: string | null) {
   }
 }
 
-async function registerForPushNotifications(): Promise<boolean> {
+// Shared by both the manual Settings toggle and the silent auto-register
+// path below. Never shows UI itself — callers decide how to react to a
+// denied/blocked permission.
+async function requestPermissionAndRegisterToken(): Promise<"granted" | "denied"> {
   // Create default notification channel on Android
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("default", {
@@ -51,23 +55,13 @@ async function registerForPushNotifications(): Promise<boolean> {
     finalStatus = status;
   }
 
-  if (finalStatus !== "granted") {
-    Alert.alert(
-      "Notifications Blocked",
-      "To receive updates, please enable notifications for Vidya in your device Settings.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Open Settings", onPress: () => Linking.openSettings() },
-      ]
-    );
-    return false;
-  }
+  if (finalStatus !== "granted") return "denied";
 
   // Remote push token registration is not available in Expo Go (SDK 53+).
   // In a development build or production app this registers the device token.
   if (IS_EXPO_GO) {
     console.log("expo-notifications: running in Expo Go — skipping remote push token registration.");
-    return true; // local permission granted; toggle treated as enabled
+    return "granted";
   }
 
   try {
@@ -84,7 +78,41 @@ async function registerForPushNotifications(): Promise<boolean> {
     console.log("expo-notifications: could not get push token:", e);
   }
 
+  return "granted";
+}
+
+async function registerForPushNotifications(): Promise<boolean> {
+  const result = await requestPermissionAndRegisterToken();
+
+  if (result === "denied") {
+    Alert.alert(
+      "Notifications Blocked",
+      "To receive updates, please enable notifications for Vidya in your device Settings.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Open Settings", onPress: () => Linking.openSettings() },
+      ]
+    );
+    return false;
+  }
+
   return true;
+}
+
+// Called automatically once per app session after login (see app/_layout.tsx)
+// — silent by design (no Alert) so an already-denied user isn't nagged on
+// every launch; the OS itself only shows its permission prompt once per
+// install regardless of how many times we call requestPermissionsAsync.
+// Skipped entirely if the user has explicitly turned notifications off via
+// the Settings toggle, so this never overrides an explicit opt-out.
+export async function silentlyRegisterForPushNotifications(): Promise<void> {
+  const pref = await AsyncStorage.getItem(PREF_KEY);
+  if (pref === "false") return;
+  try {
+    await requestPermissionAndRegisterToken();
+  } catch (e) {
+    console.log("expo-notifications: silent registration failed:", e);
+  }
 }
 
 export function usePushNotifications() {

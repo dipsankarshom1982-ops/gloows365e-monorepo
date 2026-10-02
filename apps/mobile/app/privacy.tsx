@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,9 +10,11 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { doc, getDoc } from "firebase/firestore";
 
 import Header from "@/components/header";
 import { useTheme } from "@/context/ThemeContext";
+import { db } from "@/lib/firebase";
 
 type Section = {
   id: string;
@@ -19,6 +22,13 @@ type Section = {
   title: string;
   body: string;
 };
+
+// Bumped whenever policy content materially changes. Recorded into
+// users/{uid}.consent.policyVersion and students/{uid}.parentalConsent.policyVersion
+// at signup/registration — see app/(auth)/signup.tsx and app/(auth)/register.tsx —
+// so a future policy change can be told apart from consent captured under an
+// older version.
+export const PRIVACY_POLICY_VERSION = "2026-07-17";
 
 const SECTIONS: Section[] = [
   {
@@ -33,35 +43,45 @@ const SECTIONS: Section[] = [
     icon: "⚙️",
     title: "How We Use Your Data",
     body:
-      "Your data is used to deliver and improve the GLOOWS365E learning experience, including personalised content recommendations, progress tracking, leaderboards, and notifications. We do not sell your personal data to third parties.",
+      "Your data is used to deliver and improve the Gloows365 learning experience, including personalised content recommendations, progress tracking, leaderboards, and notifications. We do not sell your personal data to third parties.",
   },
   {
     id: "storage",
     icon: "🗄️",
     title: "Data Storage & Security",
     body:
-      "All data is stored securely on Google Firebase servers. We apply industry-standard encryption in transit (TLS) and at rest. Access to your data is restricted to authorised GLOOWS365E systems and personnel.",
+      "All data is stored securely on Google Firebase servers. We apply industry-standard encryption in transit (TLS) and at rest. Access to your data is restricted to authorised Gloows365 systems and personnel.",
   },
   {
     id: "third",
     icon: "🔗",
     title: "Third-Party Services",
     body:
-      "GLOOWS365E integrates with trusted third-party services including Google Firebase (auth, database, storage), Cloudflare Stream (video delivery), and Razorpay (payments). Each service operates under its own privacy policy.",
+      "Gloows365 integrates with trusted third-party services including Google Firebase (auth, database, storage), Cloudflare Stream (video delivery), and Razorpay (payments). Each service operates under its own privacy policy.",
   },
   {
     id: "rights",
     icon: "✅",
     title: "Your Rights",
     body:
-      "You may request access to, correction of, or deletion of your personal data at any time through Profile Settings → Delete Account, or by contacting us at support@nextvidya.in. We will process your request within 30 days.",
+      "Under the Digital Personal Data Protection Act, 2023, you have the right to access, correct, and erase your personal data. Go to Profile Settings → \"Export My Data\" to download everything we hold about you, or Profile Settings → \"Delete My Account\" to permanently erase your account and associated data. You can also reach us at support@gloows365.in. We process data-rights requests within 30 days. Some records (e.g. payment/financial records) may be retained beyond account deletion where Indian law requires it.",
   },
   {
     id: "children",
     icon: "👧",
     title: "Children's Privacy",
     body:
-      "GLOOWS365E is designed for students and may be used by children under 13 with parental consent. We encourage parents to review their child's account activity. We do not knowingly collect sensitive data from children without verifiable parental consent.",
+      "Gloows365 is built for school students in Class 6–12, most of whom are under 18. Registration requires an OTP-verified parent/guardian phone number and explicit parental consent, captured at signup, before any student account is created. We do not run behavioral tracking or targeted advertising on any account — ads shown in the app are selected only by subject/class relevance, never by inferred interests or browsing behavior. Parents may review or request deletion of their child's data at any time via support@gloows365.in.",
+  },
+  {
+    id: "grievance",
+    icon: "📮",
+    title: "Grievance Redressal",
+    // Fallback shown until publicConfig/grievanceOfficer loads (or if it's
+    // never been set by an admin) — see the officer-details form in the
+    // admin panel's Grievances page. Overridden below once loaded.
+    body:
+      "For any complaint or concern about how your personal data is handled, write to support@gloows365.in with the subject line \"Grievance\". We aim to acknowledge grievances within 7 days and resolve them within 30 days.",
   },
   {
     id: "updates",
@@ -72,13 +92,40 @@ const SECTIONS: Section[] = [
   },
 ];
 
+type GrievanceOfficer = { name?: string; designation?: string; email?: string; phone?: string };
+
 export default function PrivacyScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [officer, setOfficer] = useState<GrievanceOfficer | null>(null);
+
+  useEffect(() => {
+    getDoc(doc(db, "publicConfig", "grievanceOfficer"))
+      .then((snap) => { if (snap.exists()) setOfficer(snap.data() as GrievanceOfficer); })
+      .catch(() => { /* fall back to the generic contact-us copy below */ });
+  }, []);
 
   const toggle = (id: string) =>
     setExpanded((prev) => (prev === id ? null : id));
+
+  // Set by an admin in the admin panel's Grievances page — see
+  // publicConfig/grievanceOfficer in firestore.rules. Never fabricate a
+  // name here; the generic fallback in SECTIONS stays until it's set.
+  const sections = officer?.name
+    ? SECTIONS.map((sec) =>
+        sec.id === "grievance"
+          ? {
+              ...sec,
+              body:
+                `Grievance Officer: ${officer.name}${officer.designation ? `, ${officer.designation}` : ""}. ` +
+                `For any complaint or concern about how your personal data is handled, write to ${officer.email || "support@gloows365.in"}` +
+                `${officer.phone ? ` or call ${officer.phone}` : ""} with the subject line "Grievance". ` +
+                `We aim to acknowledge grievances within 7 days and resolve them within 30 days.`,
+            }
+          : sec
+      )
+    : SECTIONS;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -89,7 +136,7 @@ export default function PrivacyScreen() {
         <View style={styles.pageHeader}>
           <Text style={[styles.title, { color: colors.accent }]}>🔒 Privacy Policy</Text>
           <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-            Last updated: May 2026
+            Last updated: 17 July 2026
           </Text>
           <View style={[styles.heroBadge, { backgroundColor: `${colors.accent}15`, borderColor: `${colors.accent}30` }]}>
             <Text style={[styles.heroText, { color: colors.accent }]}>
@@ -100,7 +147,7 @@ export default function PrivacyScreen() {
 
         {/* Accordion Sections */}
         <View style={styles.sections}>
-          {SECTIONS.map((sec) => {
+          {sections.map((sec) => {
             const open = expanded === sec.id;
             return (
               <View
@@ -133,15 +180,23 @@ export default function PrivacyScreen() {
         </View>
 
         {/* Contact CTA */}
-        <View style={[styles.contactBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        {/* FIX (leftover rebrand): this said support@nextvidya.in — stale
+            from before the NextVidya → GLOOWS365E rebrand. Also made the
+            box a real mailto: link since it's meant as a CTA — mirrors
+            web's src/app/(app)/settings/privacy/page.tsx, already fixed there. */}
+        <TouchableOpacity
+          style={[styles.contactBox, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => Linking.openURL("mailto:support@gloows365.in")}
+          activeOpacity={0.75}
+        >
           <Ionicons name="mail-outline" size={22} color={colors.accent} />
           <View style={styles.contactText}>
             <Text style={[styles.contactTitle, { color: colors.text }]}>Questions about privacy?</Text>
             <Text style={[styles.contactSub, { color: colors.textSecondary }]}>
-              support@nextvidya.in
+              support@gloows365.in
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* Back */}
         <TouchableOpacity

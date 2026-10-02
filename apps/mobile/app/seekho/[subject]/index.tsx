@@ -1,4 +1,4 @@
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { SUBJECT_META } from "@/lib/seekho/constants";
 import type { SeekhoCourse, SeekhoSubject } from "@/lib/seekho/types";

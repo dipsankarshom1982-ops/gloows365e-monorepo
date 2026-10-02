@@ -1,6 +1,7 @@
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
+import { useModuleGate } from "@/hooks/useModuleGate";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
@@ -97,6 +98,7 @@ function ChallengeCard({ item, done, onPress }: { item: typeof DAILY_CHALLENGES[
 export default function SkillBoostScreen() {
   const { colors } = useTheme();
   const { studentProfile } = useStudentProfile();
+  useModuleGate("skillboost");
   const [completedIds, setCompletedIds] = useState<string[]>([]);
 
   const name       = studentProfile?.name?.split(" ")[0] || "Student";
@@ -227,7 +229,7 @@ export default function SkillBoostScreen() {
           ))}
           <TouchableOpacity
             style={[S.viewLbBtn, { borderColor: colors.border }]}
-            onPress={() => router.push("/leaderboard")}
+            onPress={() => router.push("/starboard")}
           >
             <Text style={[S.viewLbText, { color: colors.accent }]}>View Full Leaderboard →</Text>
           </TouchableOpacity>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { router } from "expo-router";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { getSubscription, loadAllProgressForUser } from "@/services/seekhoFirestore";
 import { useSeekhoStore } from "@/store/seekhoStore";
 import type { SeekhoCourse, SeekhoSubscription } from "@/lib/seekho/types";

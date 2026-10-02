@@ -1,7 +1,7 @@
 import ConceptNode from "@/components/seekho/ConceptNode";
 import LessonRow from "@/components/seekho/LessonRow";
 import SubscriptionBottomSheet from "@/components/seekho/SubscriptionBottomSheet";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { useSeekhoAccess } from "@/hooks/useSeekhoAccess";
 import { PRACTICE_UNLOCK_THRESHOLD } from "@/lib/seekho/constants";

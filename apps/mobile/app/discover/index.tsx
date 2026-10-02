@@ -1,5 +1,5 @@
-import { useStudentProfile } from "@/context/StudentProfileContext";
 import { useTheme } from "@/context/ThemeContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import type { TrendingTerm } from "@/lib/discover/types";
 import { getTrending } from "@/services/discoverApi";
 import { useDiscoverStore } from "@/store/discoverStore";

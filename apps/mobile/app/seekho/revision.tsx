@@ -1,5 +1,5 @@
 import { useTheme } from "@/context/ThemeContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import type { SeekhoPracticeQuestion, PracticeResultItem } from "@/lib/seekho/types";
 import { useSeekhoStore } from "@/store/seekhoStore";
 import { getPracticeByChapter } from "@/services/seekhoFirestore";

@@ -9,7 +9,7 @@
       "@gloows/shared-logic": ["../../packages/shared-logic/src/index.ts"],
       "@gloows/shared-logic/*": ["../../packages/shared-logic/src/*"]
     },
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "jsx": "react-jsx",
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,

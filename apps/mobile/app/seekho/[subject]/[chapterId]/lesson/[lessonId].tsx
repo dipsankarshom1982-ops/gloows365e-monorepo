@@ -1,5 +1,5 @@
 import { useTheme } from "@/context/ThemeContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { MODULE_GATES, getAiGuruScreenSpec } from "@gloows/shared-logic";
 import { useRouteGate } from "@/hooks/useRouteGate";
 import { LESSON_WATCH_THRESHOLD } from "@/lib/seekho/constants";
