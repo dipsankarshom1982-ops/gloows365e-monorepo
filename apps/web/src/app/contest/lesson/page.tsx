@@ -172,6 +172,10 @@ function ContestLessonContent() {
   const [lesson, setLesson] = useState<{ lessonJson: any; bannerMeta: any } | null>(null);
   const [generating, setGenerating] = useState(false);
   const [lessonError, setLessonError] = useState<string | null>(null);
+  // getContestLesson refuses (permission-denied) when the contest isn't for
+  // this student's class — retrying can never succeed, so this is shown as
+  // an access result with the server's reason, not as a retryable error.
+  const [lessonDenied, setLessonDenied] = useState<string | null>(null);
   const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
@@ -240,6 +244,12 @@ function ContestLessonContent() {
         .catch((err: any) => {
           if (cancelled) return;
           const code = String(err?.code ?? "");
+          if (code.endsWith("permission-denied")) {
+            setGenerating(false);
+            const msg = typeof err?.message === "string" ? err.message.trim() : "";
+            setLessonDenied(msg && !/^permission[- ]denied$/i.test(msg) ? msg : "This lesson isn't available for your class.");
+            return;
+          }
           if (code.endsWith("already-exists") && attempt < 10) {
             retryTimer = setTimeout(() => requestLesson(attempt + 1), 3000);
             return;
@@ -292,6 +302,19 @@ function ContestLessonContent() {
             ? `You can play this contest once it goes live${start ? ` on ${start.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}. Your spot is already reserved.`
             : "Contests can only be played while they're live."}
         </span>
+        <button onClick={() => router.replace("/vidyastar")} style={{ marginTop: 8, background: "#1e293b", borderRadius: 14, padding: "12px 24px", border: "none", color: "#6366f1", fontWeight: 800, cursor: "pointer" }}>
+          Back to VidyaStar
+        </button>
+      </div>
+    );
+  }
+
+  if (lessonDenied) {
+    return (
+      <div style={{ minHeight: "100dvh", background: "#0f172a", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: 24, textAlign: "center" }}>
+        <span style={{ fontSize: 56 }}>🔒</span>
+        <span style={{ color: "#f1f5f9", fontSize: 20, fontWeight: 800 }}>Lesson not available</span>
+        <span style={{ color: "#6b7280", fontSize: 14, lineHeight: 1.6 }}>{lessonDenied}</span>
         <button onClick={() => router.replace("/vidyastar")} style={{ marginTop: 8, background: "#1e293b", borderRadius: 14, padding: "12px 24px", border: "none", color: "#6366f1", fontWeight: 800, cursor: "pointer" }}>
           Back to VidyaStar
         </button>

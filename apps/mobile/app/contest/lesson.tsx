@@ -199,6 +199,10 @@ export default function ContestLessonScreen() {
   const [lesson, setLesson] = useState<{ lessonJson: any; bannerMeta: any } | null>(null);
   const [generating, setGenerating] = useState(false);
   const [lessonError, setLessonError] = useState<string | null>(null);
+  // getContestLesson refuses (permission-denied) when the contest isn't for
+  // this student's class — retrying can never succeed, so this is shown as
+  // an access result with the server's reason, not as a retryable error.
+  const [lessonDenied, setLessonDenied] = useState<string | null>(null);
   const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
@@ -268,6 +272,12 @@ export default function ContestLessonScreen() {
         .catch((err: any) => {
           if (cancelled) return;
           const code = String(err?.code ?? "");
+          if (code.endsWith("permission-denied")) {
+            setGenerating(false);
+            const msg = typeof err?.message === "string" ? err.message.trim() : "";
+            setLessonDenied(msg && !/^permission[- ]denied$/i.test(msg) ? msg : "This lesson isn't available for your class.");
+            return;
+          }
           if (code.endsWith("already-exists") && attempt < 10) {
             retryTimer = setTimeout(() => requestLesson(attempt + 1), 3000);
             return;
@@ -320,6 +330,19 @@ export default function ContestLessonScreen() {
             ? `You can play this contest once it goes live${start ? ` on ${start.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}. Your spot is already reserved.`
             : "Contests can only be played while they're live."}
         </Text>
+        <TouchableOpacity style={[S.backBtn, { backgroundColor: colors.card }]} onPress={() => router.replace("/(drawer)/(tabs)/vidyastar" as any)}>
+          <Text style={[S.backBtnText, { color: colors.accent }]}>Back to VidyaStar</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  if (lessonDenied) {
+    return (
+      <SafeAreaView style={[S.center, { backgroundColor: colors.background }]}>
+        <Ionicons name="lock-closed-outline" size={56} color={colors.textSecondary} />
+        <Text style={[S.emptyTitle, { color: colors.text }]}>Lesson not available</Text>
+        <Text style={[S.emptySub, { color: colors.textSecondary }]}>{lessonDenied}</Text>
         <TouchableOpacity style={[S.backBtn, { backgroundColor: colors.card }]} onPress={() => router.replace("/(drawer)/(tabs)/vidyastar" as any)}>
           <Text style={[S.backBtnText, { color: colors.accent }]}>Back to VidyaStar</Text>
         </TouchableOpacity>

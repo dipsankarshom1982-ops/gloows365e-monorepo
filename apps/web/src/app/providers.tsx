@@ -4,12 +4,17 @@
 
 import "@/lib/firebase";
 
+import { useEffect } from "react";
+import { installSignedOutFirestoreErrorFilter } from "@/lib/signedOutFirestoreErrors";
 import { ThemeProvider }          from "@/context/ThemeContext";
 import { StudentProfileProvider, FeatureFlagsProvider } from "@gloows/shared-logic";
 import { AppConfigProvider }      from "@/context/AppConfigContext";
 import { LanguageProvider }       from "@/components/LanguageProvider";
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  // See lib/signedOutFirestoreErrors.ts — post-logout permission-denied noise only.
+  useEffect(() => { installSignedOutFirestoreErrorFilter(); }, []);
+
   return (
     <ThemeProvider>
       <StudentProfileProvider>
