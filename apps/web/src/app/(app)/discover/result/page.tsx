@@ -12,6 +12,7 @@ import { auth } from "@/lib/firebase";
 import { useDiscoverStore } from "@/store/discoverStore";
 import { searchDiscover } from "@/services/discoverApi";
 import type { DiscoverResult, SalaryBar } from "@/lib/discover/types";
+import { safeHttpUrl } from "@/lib/safeUrl";
 
 function simpleHash(s: string): string {
   let h = 0;
@@ -364,11 +365,15 @@ function DiscoverResultContent() {
                       <div style={{ color: "#fff", fontSize: 13, fontWeight: 800, marginBottom: 6, lineHeight: 1.3 }}>{s.name}</div>
                       <div style={{ color: "rgba(255,255,255,0.55)", fontSize: 11, lineHeight: 1.4, marginBottom: 6 }}>{s.eligibility}</div>
                       {s.lastDate && <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, marginBottom: 8 }}>📅 {s.lastDate}</div>}
-                      {s.applyUrl && (
-                        <a href={s.applyUrl} target="_blank" rel="noopener noreferrer" style={{ display: "block", textAlign: "center", background: "rgba(99,102,241,0.25)", padding: "7px 0", borderRadius: 10, border: "1px solid rgba(99,102,241,0.4)", textDecoration: "none" }}>
-                          <span style={{ color: "#a5b4fc", fontSize: 12, fontWeight: 800 }}>Apply →</span>
-                        </a>
-                      )}
+                      {(() => {
+                        // applyUrl is AI-written from web snippets: only plain http(s) links are clickable.
+                        const applyHref = safeHttpUrl(s.applyUrl);
+                        return applyHref ? (
+                          <a href={applyHref} target="_blank" rel="noopener noreferrer" style={{ display: "block", textAlign: "center", background: "rgba(99,102,241,0.25)", padding: "7px 0", borderRadius: 10, border: "1px solid rgba(99,102,241,0.4)", textDecoration: "none" }}>
+                            <span style={{ color: "#a5b4fc", fontSize: 12, fontWeight: 800 }}>Apply →</span>
+                          </a>
+                        ) : null;
+                      })()}
                     </div>
                   ))}
                 </div>

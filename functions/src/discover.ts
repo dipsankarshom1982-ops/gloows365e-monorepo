@@ -6,6 +6,7 @@ import { callGeminiText, parseJsonFromResponse } from "./gemini";
 import { getSubscription } from "./usageCheck";
 import { getRedis, RK, TTL, todayIST, ttlUntilMidnightIST } from "./redish";
 import { classLevelBand, resolveStudentClassLevel } from "./aiStudentContext";
+import { sanitizeDiscoverResult } from "./discoverUrls";
 
 // Minimal type for cached result blobs — full type lives in lib/discover/types.ts (frontend)
 type DiscoverResult = Record<string, unknown> & {
@@ -311,7 +312,7 @@ export const discoverSearch = onRequest(
         saveSearchHistory(uid, query, hash).catch(() => {});
         updateTrending(query).catch(() => {});
         await incrementDiscoverUsage(uid);
-        res.status(200).json({ result: cachedResult, fromCache: true, remainingSearches: remaining });
+        res.status(200).json({ result: sanitizeDiscoverResult(cachedResult), fromCache: true, remainingSearches: remaining });
         return;
       }
 
@@ -323,7 +324,7 @@ export const discoverSearch = onRequest(
         saveSearchHistory(uid, query, hash).catch(() => {});
         updateTrending(query).catch(() => {});
         await incrementDiscoverUsage(uid);
-        res.status(200).json({ result: fsResult, fromCache: true, remainingSearches: remaining });
+        res.status(200).json({ result: sanitizeDiscoverResult(fsResult), fromCache: true, remainingSearches: remaining });
         return;
       }
 
@@ -352,7 +353,8 @@ export const discoverSearch = onRequest(
 
       // ── 5. Assemble final result ──────────────────────────────
       const result: DiscoverResult = {
-        ...parsed,
+        // applyUrl is AI-written from web snippets — keep only http(s) links.
+        ...sanitizeDiscoverResult(parsed),
         queryHash: hash,
         query,
         language,

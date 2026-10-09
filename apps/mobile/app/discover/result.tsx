@@ -19,6 +19,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { safeHttpUrl } from "@/lib/safeUrl";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -474,14 +475,18 @@ export default function DiscoverResultScreen() {
                   {s.lastDate && (
                     <Text style={SC.scholarshipDate}>📅 {s.lastDate}</Text>
                   )}
-                  {s.applyUrl ? (
-                    <TouchableOpacity
-                      onPress={() => Linking.openURL(s.applyUrl!).catch(() => {})}
-                      style={SC.applyBtn}
-                    >
-                      <Text style={SC.applyBtnText}>Apply →</Text>
-                    </TouchableOpacity>
-                  ) : null}
+                  {(() => {
+                    // applyUrl is AI-written from web snippets: open plain http(s) links only.
+                    const applyHref = safeHttpUrl(s.applyUrl);
+                    return applyHref ? (
+                      <TouchableOpacity
+                        onPress={() => Linking.openURL(applyHref).catch(() => {})}
+                        style={SC.applyBtn}
+                      >
+                        <Text style={SC.applyBtnText}>Apply →</Text>
+                      </TouchableOpacity>
+                    ) : null;
+                  })()}
                 </LinearGradient>
               ))}
             </ScrollView>
