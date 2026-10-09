@@ -72,20 +72,16 @@ function Pulse({ w, h, r = 10 }: { w: number; h: number; r?: number }) {
 }
 
 // ─── Video card ───────────────────────────────────────────────
+// Not tappable: cards used to navigate to a video-detail route, but no video
+// player screen exists in the app (the web Knowledge Hub is also still a
+// "Coming Soon" page), so every tap landed on expo-router's "Unmatched Route"
+// screen (physical-device QA, 2026-10-09). Cards stay as a browsable preview
+// with no play affordance until a real player screen ships.
 function KBCard({ item }: { item: KBVideo }) {
   const { colors } = useTheme();
 
   return (
-    <TouchableOpacity
-      style={[S.card, { backgroundColor: colors.card }]}
-      onPress={() =>
-        router.push({
-          pathname: "/video-detail" as any,
-          params: { id: item.id, videoUrl: item.videoUrl ?? "", title: item.title },
-        })
-      }
-      activeOpacity={0.85}
-    >
+    <View style={[S.card, { backgroundColor: colors.card }]} accessibilityLabel={item.title}>
       {/* Thumbnail */}
       <View style={S.thumbWrap}>
         {item.thumbnailUrl ? (
@@ -95,10 +91,6 @@ function KBCard({ item }: { item: KBVideo }) {
             <Ionicons name="tv-outline" size={28} color="#60a5fa" />
           </LinearGradient>
         )}
-        {/* Play overlay */}
-        <View style={S.playBtn}>
-          <Ionicons name="play" size={12} color="#fff" />
-        </View>
         {/* Duration */}
         {item.duration ? (
           <View style={S.durationBadge}>
@@ -130,7 +122,7 @@ function KBCard({ item }: { item: KBVideo }) {
           <Text style={[S.metaText, { color: colors.textSecondary }]}>❤️ {fmtViews(item.likesCount)}</Text>
         )}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -277,15 +269,6 @@ const S = StyleSheet.create({
   thumbWrap: { position: "relative", width: 160, height: 100 },
   thumb:     { width: 160, height: 100 },
   thumbPlaceholder: { width: 160, height: 100, justifyContent: "center", alignItems: "center" },
-
-  playBtn: {
-    position: "absolute", top: "50%", left: "50%",
-    marginLeft: -13, marginTop: -13,
-    width: 26, height: 26, borderRadius: 13,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    justifyContent: "center", alignItems: "center",
-    borderWidth: 1.5, borderColor: "#fff",
-  },
 
   durationBadge: { position: "absolute", bottom: 6, right: 6, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2 },
   durationText:  { color: "#fff", fontSize: 10, fontWeight: "700" },
