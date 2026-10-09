@@ -39,6 +39,14 @@ import {
 } from "@gloows/shared-logic";
 import { db } from "@/lib/firebase";
 import { useTheme } from "@/context/ThemeContext";
+import { useNavigateWhenReady } from "@/hooks/useNavigateWhenReady";
+
+// Both guards below wait for Firebase Auth to report (authLoading) before
+// treating `user === null` as signed out, and route every redirect through
+// useNavigateWhenReady: on a fresh MainActivity mount (deep link / relaunch)
+// they used to call router.replace() before the root navigator existed —
+// "Attempted to navigate before mounting the Root Layout component" — and
+// could bounce a still-restoring signed-in student to /login.
 
 // resolveOnboardingRoute() takes an OnboardingStudentDoc — an interface with
 // only the 3 fields it reads, all named+optional. StudentProfile only has
@@ -121,7 +129,8 @@ function useRestartState(uid: string | null): RestartState | null {
 export default function OnboardingGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, studentProfile, profileLoading } = useStudentProfile();
+  const navigateWhenReady = useNavigateWhenReady();
+  const { user, authLoading, studentProfile, profileLoading } = useStudentProfile();
   const uid = user?.uid ?? null;
 
   const restartState = useRestartState(uid);
@@ -135,28 +144,30 @@ export default function OnboardingGuard({ children }: { children: React.ReactNod
     !profileLoading ? resolveOnboardingRoute(toOnboardingStudentDoc(studentProfile)) : null;
 
   useEffect(() => {
+    if (authLoading) return; // session still restoring — not "signed out" yet
     if (!uid) {
-      if (pathname !== "/login") router.replace("/login" as any);
-      return;
+      if (pathname === "/login") return;
+      return navigateWhenReady(() => router.replace("/login" as any));
     }
     if (!restartReady) return; // wait for the restart check first
 
     if (isRestartUser) {
       const dest = restartState!.onboardingComplete ? "/restart-education/home" : "/restart-education/onboarding";
-      if (pathname !== dest) router.replace(dest as any);
-      return;
+      if (pathname === dest) return;
+      return navigateWhenReady(() => router.replace(dest as any));
     }
 
     if (onboardingRoute === null) return; // student profile still loading
     if (onboardingRoute === "home") return; // allowed — protected content renders normally
 
     const dest = pathForOnboardingRoute(onboardingRoute);
-    if (pathname !== dest) router.replace(dest as any);
-  }, [uid, restartReady, isRestartUser, restartState, onboardingRoute, pathname, router]);
+    if (pathname === dest) return;
+    return navigateWhenReady(() => router.replace(dest as any));
+  }, [authLoading, uid, restartReady, isRestartUser, restartState, onboardingRoute, pathname, router, navigateWhenReady]);
 
   // Render gate — never show protected content while any of this is still
   // being resolved, or while a redirect triggered above hasn't landed yet.
-  if (!uid) return <GuardLoading />;
+  if (authLoading || !uid) return <GuardLoading />;
   if (!restartReady) return <GuardLoading />;
   if (isRestartUser) return <GuardLoading />;
   if (onboardingRoute === null || onboardingRoute !== "home") return <GuardLoading />;
@@ -178,7 +189,8 @@ export default function OnboardingGuard({ children }: { children: React.ReactNod
 export function RestartEducationGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, studentProfile, profileLoading } = useStudentProfile();
+  const navigateWhenReady = useNavigateWhenReady();
+  const { user, authLoading, studentProfile, profileLoading } = useStudentProfile();
   const uid = user?.uid ?? null;
 
   const restartState = useRestartState(uid);
@@ -188,9 +200,10 @@ export function RestartEducationGuard({ children }: { children: React.ReactNode 
     !profileLoading ? resolveOnboardingRoute(toOnboardingStudentDoc(studentProfile)) : null;
 
   useEffect(() => {
+    if (authLoading) return; // session still restoring — not "signed out" yet
     if (!uid) {
-      if (pathname !== "/login") router.replace("/login" as any);
-      return;
+      if (pathname === "/login") return;
+      return navigateWhenReady(() => router.replace("/login" as any));
     }
     if (!restartReady) return; // don't guess — wait for the restart check
 
@@ -200,10 +213,11 @@ export function RestartEducationGuard({ children }: { children: React.ReactNode 
     // letting them see restart-education content.
     if (onboardingRoute === null) return; // student profile still loading
     const dest = onboardingRoute === "home" ? "/(drawer)/(tabs)/reels" : pathForOnboardingRoute(onboardingRoute);
-    if (pathname !== dest) router.replace(dest as any);
-  }, [uid, restartReady, isRestartUser, onboardingRoute, pathname, router]);
+    if (pathname === dest) return;
+    return navigateWhenReady(() => router.replace(dest as any));
+  }, [authLoading, uid, restartReady, isRestartUser, onboardingRoute, pathname, router, navigateWhenReady]);
 
-  if (!uid) return <GuardLoading />;
+  if (authLoading || !uid) return <GuardLoading />;
   if (!restartReady) return <GuardLoading />;
   if (!isRestartUser) return <GuardLoading />; // being redirected out, or still resolving onboardingRoute
 

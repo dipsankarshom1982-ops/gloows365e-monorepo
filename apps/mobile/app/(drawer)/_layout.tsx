@@ -46,6 +46,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import { useNavigateWhenReady } from "@/hooks/useNavigateWhenReady";
+import { authGate } from "@/lib/navGuard";
 import { signOut } from "firebase/auth";
 import {
   collection,
@@ -101,8 +103,18 @@ export default function DrawerLayout() {
     ? Math.round(screenWidth * 0.78)
     : Math.min(340, Math.max(300, Math.round(screenWidth * 0.32)));
 
-  const { studentProfile, user, profileLoading: loading } = useStudentProfile();
+  const { studentProfile, user, authLoading, profileLoading: loading } = useStudentProfile();
   const uid = user?.uid;
+  const navigateWhenReady = useNavigateWhenReady();
+  // Mobile has no separate auth guard, so this layout also owns "signed out":
+  // once Firebase Auth has reported no user, the drawer/tabs are never shown
+  // (they used to stay browsable after logout or via a deep link) and the
+  // visitor is sent to /login — after the root navigator is mounted.
+  const signedOut = authGate(authLoading, !!uid) === "signed-out";
+  useEffect(() => {
+    if (!signedOut) return;
+    return navigateWhenReady(() => router.replace("/login"));
+  }, [signedOut, navigateWhenReady]);
 
   // FIX (legacy-safe onboarding routing audit) — this used to check
   // studentProfile (students/{uid}) for restart-education indicators, but
@@ -149,8 +161,8 @@ export default function DrawerLayout() {
 
   useEffect(() => {
     if (!uid || !restartReady || !isRestartUser) return;
-    router.replace("/restart-education/home" as any);
-  }, [uid, restartReady, isRestartUser]);
+    return navigateWhenReady(() => router.replace("/restart-education/home" as any));
+  }, [uid, restartReady, isRestartUser, navigateWhenReady]);
 
   // Protected-route onboarding guard — only once restart is confirmed NOT
   // required, hand off to the same resolveOnboardingRoute()/students/{uid}
@@ -164,8 +176,8 @@ export default function DrawerLayout() {
   useEffect(() => {
     if (!uid || !restartReady || isRestartUser) return; // restart takes precedence
     if (onboardingRoute === null || onboardingRoute === "home") return;
-    router.replace(pathForOnboardingRoute(onboardingRoute) as any);
-  }, [uid, restartReady, isRestartUser, onboardingRoute]);
+    return navigateWhenReady(() => router.replace(pathForOnboardingRoute(onboardingRoute) as any));
+  }, [uid, restartReady, isRestartUser, onboardingRoute, navigateWhenReady]);
 
   const [vCoins,        setVCoins]        = useState<number>(0);
   // Score and rank are tagged with the uid (and year) they belong to, and the
@@ -338,13 +350,11 @@ export default function DrawerLayout() {
     router.replace("/login");
   };
 
-  // Render gate — never show the drawer/tabs (protected content) while
+  // Render gate — never show the drawer/tabs (protected content) while auth
+  // is restoring, while signed out (redirecting to /login above), while
   // restart status or onboarding completeness is still being resolved, or
-  // while a redirect triggered above hasn't landed yet. Doesn't apply when
-  // `!uid` — this file never gated on authentication before this change,
-  // and adding that is out of scope here (app/index.tsx's boot routing is
-  // still the primary defense for a signed-out deep link).
-  if (uid && (!restartReady || isRestartUser || onboardingRoute === null || onboardingRoute !== "home")) {
+  // while a redirect triggered above hasn't landed yet.
+  if (authLoading || !uid || !restartReady || isRestartUser || onboardingRoute === null || onboardingRoute !== "home") {
     return (
       <View style={[styles.guardLoading, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.accent} />

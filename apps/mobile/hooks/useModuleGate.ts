@@ -17,6 +17,7 @@ import { useEffect } from "react";
 import { router } from "expo-router";
 import { useFeatureFlags, isModuleRouteAllowed } from "@gloows/shared-logic";
 import { useAppConfig } from "@/context/AppConfigContext";
+import { useNavigateWhenReady } from "@/hooks/useNavigateWhenReady";
 
 interface ModuleGateOptions {
   /** Set when a Home preview card (featureFlags/homeSection) also links to
@@ -41,12 +42,15 @@ export function useModuleGate(moduleKey: string, options?: ModuleGateOptions): b
   // Hold off deciding until we know whether this user is a tester — otherwise
   // a tester on a cold start is redirected before their role arrives.
   const allowed = !roleResolved || isModuleRouteAllowed({ isTester, modules, moduleKey, extraAllowed });
+  const navigateWhenReady = useNavigateWhenReady();
 
   useEffect(() => {
     if (allowed) return;
-    if (router.canGoBack()) router.back();
-    else router.replace("/(drawer)/(tabs)/home");
-  }, [allowed]);
+    return navigateWhenReady(() => {
+      if (router.canGoBack()) router.back();
+      else router.replace("/(drawer)/(tabs)/home");
+    });
+  }, [allowed, navigateWhenReady]);
 
   return allowed;
 }

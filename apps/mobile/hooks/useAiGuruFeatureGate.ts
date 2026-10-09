@@ -16,6 +16,7 @@
 import { useEffect } from "react";
 import { router } from "expo-router";
 import { useFeatureFlags, isAiGuruRouteAllowed } from "@gloows/shared-logic";
+import { useNavigateWhenReady } from "@/hooks/useNavigateWhenReady";
 
 export interface AiGuruGateOptions {
   /** A featureFlags/homeSection key that is another entry point to this same
@@ -42,11 +43,15 @@ export function useAiGuruFeatureGate(featureKeys: string | string[], options?: A
     !roleResolved ||
     isAiGuruRouteAllowed({ isTester, aiGuru: flag, featureKeys, extraAllowed });
 
+  const navigateWhenReady = useNavigateWhenReady();
+
   useEffect(() => {
     if (allowed) return;
-    if (router.canGoBack()) router.back();
-    else router.replace("/ai-guru");
-  }, [allowed]);
+    return navigateWhenReady(() => {
+      if (router.canGoBack()) router.back();
+      else router.replace("/ai-guru");
+    });
+  }, [allowed, navigateWhenReady]);
 
   return allowed;
 }
