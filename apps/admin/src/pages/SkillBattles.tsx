@@ -63,7 +63,7 @@ interface Reel {
   month:           string;
   mediaUrl:        string;
   thumbnail:       string;
-  status:          "pending" | "in_review" | "approved" | "rejected";
+  status:          "pending" | "in_review" | "approved" | "rejected" | "removed";
   rejectionReason: string;
   createdAt:       any;
   likes:           number;
@@ -101,10 +101,21 @@ const currentMonth = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 
-const approveContentFn = httpsCallable<
-  { collection: string; docId: string; action: "approve" | "reject" | "in_review"; reason?: string },
-  { success: boolean }
->(functions, "approveContent");
+// Phase B §4 — SkillBattle posts route through the dedicated
+// reviewSkillBattlePost callable (functions/src/moderation/legacyPostReview.ts).
+// This tab used to call a generic approveContent callable (still used
+// elsewhere for stories/seekhoVideos/knowledgeVideos) — but that function
+// never touches the Phase A/B moderationStatus field or the
+// moderationAuditLog, has no isSkillBattle guard, and allows
+// re-approving/re-rejecting an already-decided post. Using it here would
+// silently desync this tab from the moderation queue (getModerationQueue.ts
+// filters on moderationStatus) and skip the audit trail entirely. This tab
+// is exclusively SkillBattle posts (see loadReels' isSkillBattle query
+// below), so it always uses the dedicated path now.
+const reviewSkillBattlePostFn = httpsCallable<
+  { postId: string; action: "APPROVE" | "REJECT" | "ESCALATE" | "REQUEST_CHANGES" | "REMOVE"; reason?: string },
+  { ok: boolean; status: string }
+>(functions, "reviewSkillBattlePost");
 
 const I  = "w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 transition-colors placeholder-slate-500";
 const LB = "text-slate-300 text-xs font-bold uppercase tracking-wide block mb-2";
@@ -447,7 +458,7 @@ function CreateBattle({ editBattle, onSaved, onCancel }: {
 
 // ─── Tab 3: Reel approval ─────────────────────────────────────────────────────
 function ReelApproval({ battles }: { battles: Battle[] }) {
-  type ReelFilter = "pending" | "in_review" | "approved" | "rejected" | "all";
+  type ReelFilter = "pending" | "in_review" | "approved" | "rejected" | "removed" | "all";
   const [reels,      setReels]      = useState<Reel[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [filter,     setFilter]     = useState<ReelFilter>("pending");
@@ -480,17 +491,28 @@ function ReelApproval({ battles }: { battles: Battle[] }) {
     in_review: reels.filter((r) => r.status === "in_review").length,
     approved:  reels.filter((r) => r.status === "approved").length,
     rejected:  reels.filter((r) => r.status === "rejected").length,
+    removed:   reels.filter((r) => r.status === "removed").length,
   };
 
-  const handleAction = async (id: string, action: "approve" | "reject" | "in_review", reason?: string) => {
+  // Phase B §3/§4 — routes through reviewSkillBattlePost, which enforces
+  // the same admin-only + isSkillBattle + valid-transition invariants
+  // server-side regardless of what this UI shows, and writes the full
+  // moderationAuditLog trail (see legacyPostReview.ts).
+  const handleAction = async (
+    id: string,
+    action: "APPROVE" | "REJECT" | "REQUEST_CHANGES" | "REMOVE",
+    reason?: string
+  ) => {
     setProcessing(id);
     try {
-      await approveContentFn({ collection: "posts", docId: id, action, reason });
+      const result = await reviewSkillBattlePostFn({ postId: id, action, reason });
       setReels((prev) => prev.map((r) => r.id === id
-        ? { ...r, status: action === "approve" ? "approved" : action === "in_review" ? "in_review" : "rejected", rejectionReason: reason ?? r.rejectionReason }
+        ? { ...r, status: result.data.status as Reel["status"], rejectionReason: reason ?? r.rejectionReason }
         : r
       ));
-      if (action === "reject") { setRejectingId(null); setRejReason(""); }
+      if (action === "REJECT" || action === "REMOVE") { setRejectingId(null); setRejReason(""); }
+    } catch (e: any) {
+      alert(e?.message ?? "Action failed. Please refresh and try again.");
     } finally { setProcessing(null); }
   };
 
@@ -499,6 +521,7 @@ function ReelApproval({ battles }: { battles: Battle[] }) {
     in_review: { label: "🔍 In Review", cls: "bg-blue-500/20 text-blue-400"  },
     approved:  { label: "✅ Approved",  cls: "bg-green-500/20 text-green-400" },
     rejected:  { label: "❌ Rejected",  cls: "bg-red-500/20 text-red-400"    },
+    removed:   { label: "🚫 Removed",   cls: "bg-slate-600/30 text-slate-400" },
   };
 
   return (
@@ -518,7 +541,7 @@ function ReelApproval({ battles }: { battles: Battle[] }) {
 
       {/* Status tabs */}
       <div className="flex flex-wrap gap-2">
-        {(["pending","in_review","approved","rejected","all"] as ReelFilter[]).map((f) => (
+        {(["pending","in_review","approved","rejected","removed","all"] as ReelFilter[]).map((f) => (
           <button key={f} onClick={() => setFilter(f)}
             className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors capitalize flex items-center gap-2 ${filter === f ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-400 hover:text-white"}`}>
             {f.replace("_", " ")}
@@ -580,26 +603,33 @@ function ReelApproval({ battles }: { battles: Battle[] }) {
                       <a href={reel.mediaUrl} target="_blank" rel="noreferrer"
                         className="bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold px-3 py-2 rounded-lg text-center transition-colors">▶ Play</a>
                     )}
-                    {reel.status !== "approved" && (
-                      <button disabled={isProcessing} onClick={() => handleAction(reel.id, "approve")}
+                    {/* Approve/Review/Reject are only valid from
+                        pending/in_review (REVIEWABLE_STATUSES, enforced
+                        server-side too — this is just matching UX to what
+                        the backend will actually accept). */}
+                    {(reel.status === "pending" || reel.status === "in_review") && (
+                      <button disabled={isProcessing} onClick={() => handleAction(reel.id, "APPROVE")}
                         className="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors">
                         {isProcessing ? "…" : "✓ Approve"}
                       </button>
                     )}
-                    {reel.status !== "in_review" && reel.status !== "approved" && (
-                      <button disabled={isProcessing} onClick={() => handleAction(reel.id, "in_review")}
+                    {reel.status === "pending" && (
+                      <button disabled={isProcessing} onClick={() => handleAction(reel.id, "REQUEST_CHANGES")}
                         className="bg-blue-600/80 hover:bg-blue-600 disabled:opacity-50 text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors">
                         {isProcessing ? "…" : "🔍 Review"}
                       </button>
                     )}
-                    {reel.status !== "rejected" && (
+                    {(reel.status === "pending" || reel.status === "in_review") && (
                       <button disabled={isProcessing} onClick={() => setRejectingId(reel.id)}
                         className="bg-red-600/80 hover:bg-red-600 disabled:opacity-50 text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors">
                         ✕ Reject
                       </button>
                     )}
+                    {/* Unpublish is a REMOVE — only valid on an already-
+                        approved (live) post, a distinct server-side
+                        transition from REJECT (see legacyPostReview.ts). */}
                     {reel.status === "approved" && (
-                      <button disabled={isProcessing} onClick={() => handleAction(reel.id, "reject", "Removed by admin")}
+                      <button disabled={isProcessing} onClick={() => handleAction(reel.id, "REMOVE", "Removed by admin")}
                         className="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-300 text-xs font-bold px-3 py-2 rounded-lg transition-colors">
                         Unpublish
                       </button>
@@ -612,7 +642,7 @@ function ReelApproval({ battles }: { battles: Battle[] }) {
                   <div className="px-4 pb-4 flex gap-2">
                     <input value={rejReason} onChange={(e) => setRejReason(e.target.value)} placeholder="Rejection reason (optional)"
                       className="flex-1 bg-slate-800 border border-red-500/40 text-white rounded-xl px-4 py-2 text-sm focus:outline-none" />
-                    <button onClick={() => handleAction(reel.id, "reject", rejReason)}
+                    <button onClick={() => handleAction(reel.id, "REJECT", rejReason)}
                       className="bg-red-600 hover:bg-red-500 text-white font-bold px-4 py-2 rounded-xl text-sm">Confirm</button>
                     <button onClick={() => setRejectingId(null)}
                       className="bg-slate-700 text-slate-300 font-bold px-4 py-2 rounded-xl text-sm">Cancel</button>

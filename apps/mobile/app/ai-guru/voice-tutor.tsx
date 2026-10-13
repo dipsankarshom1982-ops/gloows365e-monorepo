@@ -21,9 +21,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 let Speech: { speak: (text: string, opts?: any) => void; stop: () => void } | null = null;
 try { Speech = require("expo-speech"); } catch {}
 
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
+import { auth } from "@/lib/firebase";
 import { askVoiceTutor, VoiceTutorResponse } from "@/services/voiceTutorApi";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
+import CreditBalanceBadge from "@/components/aiGuru/CreditBalanceBadge";
 
 // Graceful: expo-av for recording — falls back to text if unavailable
 let Audio: any = null;
@@ -37,8 +40,6 @@ const LANG_TTS_MAP: Record<string, string> = {
   Bengali:  "bn-IN",
   Assamese: "as-IN",
 };
-
-const FREE_VOICE_DAILY = 3;
 
 type Phase = "idle" | "recording" | "processing" | "result" | "limit" | "error";
 
@@ -78,7 +79,6 @@ export default function VoiceTutorScreen() {
   const text    = isDarkMode ? "#f1f5f9" : colors.text;
   const muted   = isDarkMode ? "#94a3b8" : colors.textSecondary;
   const dim     = isDarkMode ? "#64748b" : colors.textSecondary;
-  const backBg  = isDarkMode ? "rgba(255,255,255,0.08)" : colors.card;
 
   const classLevel = String(studentProfile?.class ?? "10");
   const board      = studentProfile?.board ?? "CBSE";
@@ -89,7 +89,7 @@ export default function VoiceTutorScreen() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [textInput, setTextInput]   = useState("");
   const [showTextFallback, setShowTextFallback] = useState(false);
-  const [remaining, setRemaining]   = useState(FREE_VOICE_DAILY);
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
   const [errMsg, setErrMsg]         = useState("");
 
   const recordingRef = useRef<any>(null);
@@ -146,6 +146,10 @@ export default function VoiceTutorScreen() {
 
   // ── Ask question ──────────────────────────────────────────────────────────
   const askQuestion = async (input: { audioBase64?: string; audioMimeType?: string; textQuestion?: string }) => {
+    // FIX: this used to hard-block after 1 question via a client-side
+    // FREE_VOICE_DAILY=1 constant that didn't match the server's real free
+    // limit (3/day, functions/src/voiceTutor.ts) — nobody could ever reach
+    // the credits fallback. Removed; the server is the source of truth.
     setPhase("processing");
     setResponse(null);
     setErrMsg("");
@@ -158,12 +162,18 @@ export default function VoiceTutorScreen() {
       });
       setResponse(result);
       setPhase("result");
-      setRemaining((r) => Math.max(0, r - 1));
       // Auto-play answer
       speakAnswer(result.answer, result.detectedLanguage ?? selectedLang);
     } catch (e: any) {
-      if (e?.code === "LIMIT_REACHED") { setPhase("limit"); }
-      else { setErrMsg(e?.message ?? "Something went wrong"); setPhase("error"); }
+      if (e?.code === "CREDITS_EXHAUSTED") {
+        setCreditInfo({ balance: e.creditBalance ?? 0, required: e.creditsRequired ?? 1 });
+        setPhase("limit");
+      } else if (e?.code === "LIMIT_REACHED") {
+        setCreditInfo(undefined);
+        setPhase("limit");
+      } else {
+        setErrMsg(e?.message ?? "Something went wrong"); setPhase("error");
+      }
     }
   };
 
@@ -171,7 +181,7 @@ export default function VoiceTutorScreen() {
     const q = textInput.trim();
     if (!q) return;
     setTextInput("");
-    await askQuestion({ textQuestion: q, detectedLanguage: selectedLang });
+    await askQuestion({ textQuestion: q });
   };
 
   // ── TTS playback ──────────────────────────────────────────────────────────
@@ -203,22 +213,13 @@ export default function VoiceTutorScreen() {
     <View style={[S.root, { backgroundColor: bg }]}>
       {isDarkMode && <LinearGradient colors={["#060612", "#0a0a1a"]} style={StyleSheet.absoluteFillObject} />}
 
-      {/* Header */}
-      <Animated.View entering={FadeIn.duration(350)} style={[S.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity onPress={() => { Speech?.stop(); router.back(); }} style={[S.backBtn, { backgroundColor: backBg }]}>
-          <Ionicons name="chevron-back" size={22} color={muted} />
-        </TouchableOpacity>
-        <View style={S.headerCenter}>
-          <Text style={[S.headerTitle, { color: text }]}>🎙️ Voice Tutor</Text>
-          <Text style={[S.headerSub, { color: dim }]}>Speak your doubt · Get instant answer</Text>
-        </View>
-        <View style={[S.quotaBadge, { backgroundColor: surface, borderColor: remaining > 0 ? border : "rgba(239,68,68,0.4)" }]}>
-          <View style={[S.quotaDot, { backgroundColor: remaining > 0 ? "#10b981" : "#ef4444" }]} />
-          <Text style={[S.quotaText, { color: remaining > 0 ? "#10b981" : "#ef4444" }]}>
-            {remaining}/{FREE_VOICE_DAILY}
-          </Text>
-        </View>
-      </Animated.View>
+      <AiGuruHeader
+        title="🎙️ Voice Tutor"
+        subtitle="Speak your doubt · Get instant answer"
+        showLanguageBadge
+        onBack={() => { Speech?.stop(); router.back(); }}
+        rightElement={<CreditBalanceBadge uid={auth.currentUser?.uid ?? null} />}
+      />
 
       <ScrollView contentContainerStyle={[S.scroll, { paddingBottom: insets.bottom + 40 }]} showsVerticalScrollIndicator={false}>
 
@@ -411,14 +412,26 @@ export default function VoiceTutorScreen() {
             <Text style={S.limitEmoji}>⏰</Text>
             <Text style={[S.thinkingTitle, { color: text }]}>Daily limit reached</Text>
             <Text style={[S.thinkingNote, { color: dim }]}>
-              Free tier: {FREE_VOICE_DAILY} voice questions/day. Upgrade for unlimited.
+              {creditInfo
+                ? `You've used today's free voice questions. You have ${creditInfo.balance} credit${creditInfo.balance === 1 ? "" : "s"} — buy more or upgrade to Premium.`
+                : "Free tier: 3 voice questions/day. Upgrade for unlimited."}
             </Text>
-            <TouchableOpacity onPress={() => router.push("/ai-guru/subscription" as any)} style={S.upgradeWrap}>
-              <LinearGradient colors={["#92400e", "#d97706"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
-                <Ionicons name="star" size={16} color="#fff" />
-                <Text style={S.upgradeBtnText}>Upgrade to Premium</Text>
+            <TouchableOpacity
+              onPress={() => router.push((creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription") as any)}
+              style={S.upgradeWrap}
+            >
+              <LinearGradient colors={creditInfo ? ["#4f46e5", "#7c3aed"] : ["#92400e", "#d97706"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
+                <Ionicons name={creditInfo ? "flash" : "star"} size={16} color="#fff" />
+                <Text style={S.upgradeBtnText}>{creditInfo ? "Buy Credits" : "Upgrade to Premium"}</Text>
               </LinearGradient>
             </TouchableOpacity>
+            {creditInfo && (
+              <TouchableOpacity onPress={() => router.push("/ai-guru/subscription" as any)}>
+                <Text style={[S.thinkingNote, { color: "#a5b4fc", fontSize: 12, marginTop: 4 }]}>
+                  Or upgrade to Premium for unlimited access
+                </Text>
+              </TouchableOpacity>
+            )}
           </Animated.View>
         )}
 
@@ -441,11 +454,6 @@ export default function VoiceTutorScreen() {
 
 const S = StyleSheet.create({
   root:   { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, gap: 10 },
-  backBtn:{ width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  headerCenter: { flex: 1 },
-  headerTitle:  { fontSize: 17, fontWeight: "900" },
-  headerSub:    { fontSize: 11, marginTop: 1 },
   quotaBadge: { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 20, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 5 },
   quotaDot:   { width: 7, height: 7, borderRadius: 4 },
   quotaText:  { fontSize: 11, fontWeight: "800" },

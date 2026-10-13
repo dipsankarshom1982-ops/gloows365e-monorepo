@@ -51,7 +51,7 @@ export default function DigitalSafetyDefenderGameScreen() {
       Array.isArray(todaysMission.hints)
     ) return todaysMission;
     const local = getMissionForClass(studentClass);
-    if (local.gameType === "digital_safety") return local;
+    if (local?.gameType === "digital_safety") return local;
     return FALLBACK_MISSIONS[2];
   }, [todaysMission, studentClass]);
 

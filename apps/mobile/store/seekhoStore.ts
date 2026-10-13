@@ -54,7 +54,9 @@ export const useSeekhoStore = create<SeekhoStore>()(
   persist(
     (set, get) => ({
       // ── Initial state ──────────────────────────────────────────────────────
-      selectedClass: 10,
+      // 0 = not set yet. Used to be 10, which showed Class 10 chapters to a
+      // student whose class hadn't loaded (or wasn't on record).
+      selectedClass: 0,
       selectedBoard: "CBSE",
       currentSubscription: null,
       courseProgress: {},

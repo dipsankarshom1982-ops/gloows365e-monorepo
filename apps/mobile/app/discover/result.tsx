@@ -1,5 +1,7 @@
+import { auth } from "@/lib/firebase";
 import { useTheme } from "@/context/ThemeContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useAppConfig } from "@/context/AppConfigContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useDiscoverStore } from "@/store/discoverStore";
 import { searchDiscover } from "@/services/discoverApi";
 import type { DiscoverResult, SalaryBar, Skill, LearningStep, CollegeSuggestion, ScholarshipSuggestion } from "@/lib/discover/types";
@@ -17,6 +19,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { safeHttpUrl } from "@/lib/safeUrl";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -119,6 +122,13 @@ export default function DiscoverResultScreen() {
   const { colors } = useTheme();
   const { addSearch, addResult, saveCareer, unsaveCareer, isCareerSaved, getCachedResult, setRemaining } =
     useDiscoverStore();
+  // FIX (launch audit, Task 3) — the paywall CTA used to hardcode "₹199/month",
+  // sourced from nowhere, while discover/subscription.tsx itself renders real
+  // Firestore-driven prices. If an admin ever changes the Discover plan
+  // price, this button would lie.
+  const { plans } = useAppConfig();
+  const discoverPlan = plans.find((p) => p.module === "discover" && p.highlight)
+    ?? plans.find((p) => p.module === "discover");
 
   const [result, setResult] = useState<DiscoverResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -149,6 +159,13 @@ export default function DiscoverResultScreen() {
       return;
     }
 
+    // Discover per-user data isolation: this uid is captured before the
+    // request goes out. If the signed-in user changes while it's in
+    // flight (logout, or logout→login as someone else), the response
+    // belongs to whoever asked for it, not to whoever is signed in when
+    // it happens to land — writing it into the (now different) current
+    // user's Discover state/UI would be a stale cross-user write.
+    const requestUid = auth.currentUser?.uid;
     const fetch = async () => {
       setLoading(true);
       setError(null);
@@ -160,6 +177,7 @@ export default function DiscoverResultScreen() {
           classLevel: studentProfile?.class ?? "10",
           interests: studentProfile?.interests ?? [],
         });
+        if (auth.currentUser?.uid !== requestUid) return;
         setResult(r);
         setSaved(isCareerSaved(r.queryHash));
         addResult(r);
@@ -167,6 +185,7 @@ export default function DiscoverResultScreen() {
         setRemaining(remainingSearches);
         animateDemand(r.futureDemandScore);
       } catch (err: any) {
+        if (auth.currentUser?.uid !== requestUid) return;
         setError({ message: err?.message ?? "Search failed", code: err?.code });
       } finally {
         setLoading(false);
@@ -219,17 +238,34 @@ export default function DiscoverResultScreen() {
           <View style={{ width: 40 }} />
         </View>
         <View style={RS.errorWrap}>
-          {error.code === "FREE_LIMIT_REACHED" ? (
+          {(error.code === "CREDITS_EXHAUSTED" || error.code === "FREE_LIMIT_REACHED") ? (
             <LinearGradient colors={["#1e1b4b", "#312e81"]} style={RS.paywallCard}>
               <Text style={RS.paywallEmoji}>🔒</Text>
               <Text style={RS.paywallTitle}>Daily Limit Reached</Text>
               <Text style={RS.paywallSub}>{error.message}</Text>
               <TouchableOpacity
-                onPress={() => router.push("/discover/subscription")}
+                // Discover draws from the same shared AI Guru credit pool as
+                // every other feature (functions/src/discover.ts's
+                // checkDiscoverLimit calls tryDebitAiGuruCredit(..,
+                // "DISCOVER", ..) once the free limit is hit) — buying
+                // credits there unlocks Discover too, so CREDITS_EXHAUSTED
+                // routes there. FREE_LIMIT_REACHED (the common path) routes
+                // to /discover/subscription, which correctly calls
+                // aiGuruCreateSubscription (see that screen's own header
+                // comment for the bug this replaced).
+                onPress={() => router.push(
+                  (error.code === "CREDITS_EXHAUSTED" ? "/ai-guru/credits" : "/discover/subscription") as any
+                )}
                 style={RS.paywallBtn}
               >
                 <LinearGradient colors={["#6366f1", "#8b5cf6"]} style={RS.paywallBtnInner}>
-                  <Text style={RS.paywallBtnText}>Unlock Premium — ₹199/month</Text>
+                  <Text style={RS.paywallBtnText}>
+                    {error.code === "CREDITS_EXHAUSTED"
+                      ? "⚡ Buy Credits"
+                      : discoverPlan
+                        ? `Unlock Premium — ₹${discoverPlan.monthlyPrice}/month`
+                        : "Unlock Premium"}
+                  </Text>
                 </LinearGradient>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 12 }}>
@@ -439,14 +475,18 @@ export default function DiscoverResultScreen() {
                   {s.lastDate && (
                     <Text style={SC.scholarshipDate}>📅 {s.lastDate}</Text>
                   )}
-                  {s.applyUrl ? (
-                    <TouchableOpacity
-                      onPress={() => Linking.openURL(s.applyUrl!).catch(() => {})}
-                      style={SC.applyBtn}
-                    >
-                      <Text style={SC.applyBtnText}>Apply →</Text>
-                    </TouchableOpacity>
-                  ) : null}
+                  {(() => {
+                    // applyUrl is AI-written from web snippets: open plain http(s) links only.
+                    const applyHref = safeHttpUrl(s.applyUrl);
+                    return applyHref ? (
+                      <TouchableOpacity
+                        onPress={() => Linking.openURL(applyHref).catch(() => {})}
+                        style={SC.applyBtn}
+                      >
+                        <Text style={SC.applyBtnText}>Apply →</Text>
+                      </TouchableOpacity>
+                    ) : null;
+                  })()}
                 </LinearGradient>
               ))}
             </ScrollView>

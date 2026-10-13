@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import axios from "axios";
+import { isStreamClassLevel, MAX_CLASS_LEVEL, MIN_CLASS_LEVEL, parseClassLevel } from "./educationConfig";
 
 const FIREBASE_API_KEY = "AIzaSyCpS6KjmnGAD5vCuB_swM2SWRd6-nhoiys";
 
@@ -235,15 +236,115 @@ export const getUserSubscriptionHistory = onCall(async (request) => {
 
   const db = admin.firestore();
 
-  const [subsSnap, seekhoSnap] = await Promise.all([
-    db.collection("subscriptions").where("userId", "==", userId).get().catch(() => null),
+  // FIX (found during Payment Management investigation, 2026-08-26):
+  // subscriptions/{uid} is a single doc per user KEYED BY uid — the doc
+  // never has a `userId` FIELD inside it (see aiGuruSubscription.ts's
+  // aiGuruPaymentSuccess: db.doc(`subscriptions/${uid}`), no userId field
+  // ever written). The old `.where("userId","==",userId)` query against
+  // that collection could therefore never match anything — this "main"
+  // branch has likely never returned a result since it was written. Fixed
+  // to a direct doc().get(), which is also what every other reader of this
+  // collection in the codebase already does. seekho_subscriptions/{userId}
+  // is different — it DOES store a userId field (seekho.ts's
+  // seekhoCreateSubscription writes { userId, plan, ... }) — that query
+  // was already correct and is left unchanged.
+  const [subSnap, seekhoSnap] = await Promise.all([
+    db.doc(`subscriptions/${userId}`).get().catch(() => null),
     db.collection("seekho_subscriptions").where("userId", "==", userId).get().catch(() => null),
   ]);
 
   const subscriptions = [
-    ...(subsSnap?.docs ?? []).map((d) => ({ id: d.id, source: "main", ...d.data() })),
+    ...(subSnap?.exists ? [{ id: subSnap.id, source: "main", ...subSnap.data() }] : []),
     ...(seekhoSnap?.docs ?? []).map((d) => ({ id: d.id, source: "seekho", ...d.data() })),
   ];
 
   return { subscriptions };
+});
+
+// ── adminUpdateStudentProfile (2026-09-14, Class 11/12 stream + parent/
+// guardian name architecture update) ────────────────────────────────────
+// students/{uid} has no admin bypass in firestore.rules (only read) — every
+// other admin mutation of user-owned data in this codebase goes through a
+// Cloud Function for exactly that reason, and this is that path for
+// apps/admin/src/pages/Students.tsx's Class/Stream/Parent-Guardian-Name
+// correction UI. Deliberately narrow: only ever touches these three fields,
+// never anything a student earns/accrues (XP, streak, V-Coins all live
+// elsewhere and this function doesn't import/touch them at all).
+const STUDENT_STREAMS = ["Science", "Commerce", "Arts/Humanities"];
+
+export const adminUpdateStudentProfile = onCall(async (request) => {
+  if (!request.auth?.token?.admin) {
+    throw new HttpsError("permission-denied", "Admins only.");
+  }
+
+  const { uid, class: rawClass, stream, parentGuardianName } = request.data as {
+    uid: string;
+    class?: number | string;
+    stream?: string | null;
+    parentGuardianName?: string;
+  };
+  if (!uid) throw new HttpsError("invalid-argument", "uid is required.");
+
+  const db = admin.firestore();
+  const studentRef = db.doc(`students/${uid}`);
+
+  const updates: Record<string, unknown> = {};
+
+  if (rawClass !== undefined) {
+    const cls = parseClassLevel(rawClass);
+    if (cls === null) {
+      throw new HttpsError("invalid-argument", `class must be one of ${MIN_CLASS_LEVEL}–${MAX_CLASS_LEVEL}.`);
+    }
+    updates.class = String(cls);
+  }
+
+  // Stream is re-validated whenever EITHER the stream itself OR the class is
+  // being changed — a class change alone (e.g. correcting "Class 11,
+  // Commerce" to "Class 9") must never leave a stale stream behind (Stage
+  // 2.2, F1: previously only an explicit `stream` in the request touched
+  // this field at all, so a class-only edit into a non-stream class left
+  // the old stream sitting on the profile — confirmed live in staging QA).
+  if (stream !== undefined || rawClass !== undefined) {
+    // Whichever class this write ends up with — the one being set in this
+    // same call takes priority over whatever's already stored, since both
+    // might change together (e.g. correcting "Class 10, no stream" to
+    // "Class 11, Science" in one save).
+    const effectiveClass = rawClass !== undefined
+      ? rawClass
+      : (await studentRef.get()).data()?.class;
+
+    if (isStreamClassLevel(effectiveClass)) {
+      if (stream !== undefined) {
+        if (!stream || !STUDENT_STREAMS.includes(stream)) {
+          throw new HttpsError("invalid-argument", "Class 11/12 requires a valid stream (Science, Commerce, or Arts/Humanities).");
+        }
+        updates.stream = stream;
+      }
+      // else: the class is (or remains) 11/12 and this call didn't touch
+      // stream — leave it as stored. A stream-less 11/12 student simply
+      // gets no stream-specific content; that's enforced by the learning
+      // features themselves (dailyStreakQuiz.ts), not by forcing every
+      // unrelated admin edit to also supply a stream.
+    } else {
+      if (stream) {
+        throw new HttpsError("invalid-argument", "Only Class 11/12 students have a stream.");
+      }
+      updates.stream = null;
+    }
+  }
+
+  if (parentGuardianName !== undefined) {
+    const trimmed = String(parentGuardianName).trim();
+    if (!trimmed) throw new HttpsError("invalid-argument", "parentGuardianName cannot be empty.");
+    updates.parentGuardianName = trimmed.slice(0, 60);
+  }
+
+  if (Object.keys(updates).length === 0) {
+    throw new HttpsError("invalid-argument", "Nothing to update.");
+  }
+
+  updates.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+  await studentRef.set(updates, { merge: true });
+
+  return { success: true };
 });

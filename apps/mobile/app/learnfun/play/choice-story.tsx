@@ -85,7 +85,7 @@ export default function ChoiceStoryGameScreen() {
   const mission: DailyMission = useMemo(() => {
     if (todaysMission && todaysMission.gameType === "choice_story") return todaysMission;
     const local = getMissionForClass(studentClass);
-    if (local.gameType === "choice_story") return local;
+    if (local?.gameType === "choice_story") return local;
     return FALLBACK_MISSIONS[0];
   }, [todaysMission, studentClass]);
 

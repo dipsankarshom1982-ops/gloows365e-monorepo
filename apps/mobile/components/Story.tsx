@@ -31,7 +31,7 @@ import {
   View
 } from "react-native";
 
-import { AddStoryCard, StoryCard } from "@/components/StoryCard";
+import { StoryCard } from "@/components/StoryCard";
 import { useTheme } from "@/context/ThemeContext";
 import { StoryDoc } from "@/lib/story";
 import {
@@ -41,14 +41,9 @@ import {
 } from "@/lib/storyCategories";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as ImagePicker from "expo-image-picker";
 import { useVideoPlayer, VideoView } from "expo-video";
 
-import {
-  getStreamUploadUrl,
-  resolveStreamUrl,
-  uploadToStream,
-} from "@/lib/cloudflareStream";
+import { resolveStreamUrl } from "@/lib/cloudflareStream";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import {
   collection,
@@ -58,28 +53,18 @@ import {
   increment,
   onSnapshot,
   query,
-  serverTimestamp,
-  setDoc,
   Timestamp,
   updateDoc,
   where,
 } from "firebase/firestore";
-import {
-  getDownloadURL,
-  getStorage,
-  ref,
-  uploadBytesResumable,
-} from "firebase/storage";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const IMAGE_DURATION = 5000;
-const MAX_VIDEO_SEC  = 10;
 const { width: SW }  = Dimensions.get("window");
 const VIEWED_KEY     = "gloows_viewed_stories";
 
 const db      = getFirestore();
-const storage = getStorage();
 const auth    = getAuth();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -195,12 +180,6 @@ export default function Story() {
   const [currentStoryIdx,  setCurrentStoryIdx]  = useState(0);
   const [liked,            setLiked]            = useState(false);
   const [videoPlaying,     setVideoPlaying]      = useState(false);
-
-  // Upload state
-  const [uploading,   setUploading]   = useState(false);
-  const [uploadPct,   setUploadPct]   = useState(0);
-  const [uploadPhase, setUploadPhase] = useState<"uploading" | "saving" | "done">("uploading");
-  const uploadAnim = useRef(new Animated.Value(0)).current;
 
   const progress    = useRef(new Animated.Value(0)).current;
   const progressRef = useRef<Animated.CompositeAnimation | null>(null);
@@ -417,78 +396,6 @@ export default function Story() {
     updateDoc(doc(db, "stories", activeStory.id), { likes: increment(1) }).catch(() => {});
   }, [activeStory, liked]);
 
-  // ── Upload ─────────────────────────────────────────────────────────────────
-
-  const uploadStory = useCallback(async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images", "videos"],
-      videoMaxDuration: MAX_VIDEO_SEC,
-      quality: 0.7,
-    });
-    if (result.canceled) return;
-
-    const asset   = result.assets[0];
-    const isVideo = asset.type === "video";
-
-    setUploadPct(0); setUploadPhase("uploading"); setUploading(true); uploadAnim.setValue(0);
-
-    const storyId = Date.now().toString();
-    let mediaUrl = "", thumbnailUrl = "";
-
-    if (isVideo) {
-      const { uploadURL, playbackUrl, thumbnailUrl: cfThumb } = await getStreamUploadUrl();
-      await uploadToStream(uploadURL, asset.uri, (pct) => {
-        setUploadPct(pct);
-        Animated.timing(uploadAnim, { toValue: pct / 100, duration: 250, useNativeDriver: false }).start();
-      });
-      mediaUrl = playbackUrl; thumbnailUrl = cfThumb;
-    } else {
-      const blob: Blob = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.onload  = () => resolve(xhr.response);
-        xhr.onerror = () => reject(new Error("Network request failed"));
-        xhr.responseType = "blob";
-        xhr.open("GET", asset.uri, true);
-        xhr.send(null);
-      });
-      const mediaRef = ref(storage, `stories/${currentUserId}/${storyId}`);
-      mediaUrl = await new Promise<string>((resolve, reject) => {
-        const task = uploadBytesResumable(mediaRef, blob);
-        task.on("state_changed",
-          (snap) => {
-            const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
-            setUploadPct(pct);
-            Animated.timing(uploadAnim, { toValue: pct / 100, duration: 250, useNativeDriver: false }).start();
-          },
-          (err) => { setUploading(false); reject(err); },
-          async () => resolve(await getDownloadURL(task.snapshot.ref))
-        );
-      });
-      thumbnailUrl = mediaUrl;
-    }
-
-    setUploadPhase("saving");
-    Animated.timing(uploadAnim, { toValue: 1, duration: 400, useNativeDriver: false }).start();
-
-    const { name: realName, userClass: realClass } = await fetchUserProfile(currentUserId ?? "");
-    await setDoc(doc(db, "stories", storyId), {
-      userId: currentUserId, userName: realName, userClass: realClass ?? null,
-      mediaUrl, thumbnailUrl: thumbnailUrl || mediaUrl,
-      type: isVideo ? "video" : "image",
-      category: "achievement", educationalCategory: "success",
-      title: "", description: "", relatedFeature: "SkillBattle",
-      likes: 0, views: 0, status: "pending", isFeatured: false,
-      createdAt: serverTimestamp(),
-      expiresAt: Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000)),
-    });
-
-    setUploadPhase("done");
-    setTimeout(() => setUploading(false), 1200);
-  }, [currentUserId, uploadAnim]);
-
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -506,7 +413,6 @@ export default function Story() {
         initialNumToRender={5}
         contentContainerStyle={s.listContent}
         getItemLayout={(_, i) => ({ length: 115, offset: 115 * i, index: i })}
-        ListHeaderComponent={<AddStoryCard onPress={uploadStory} size={100} />}
         renderItem={({ item }) => {
           const cat = getCategoryById(item.categoryId, categories);
           return (
@@ -697,43 +603,6 @@ export default function Story() {
         </View>
       </Modal>
 
-      {/* ── Upload overlay ──────────────────────────────────────────── */}
-      <Modal visible={uploading} transparent animationType="fade">
-        <View style={s.upOverlay}>
-          <View style={s.upCard}>
-            <View style={s.upIconCircle}>
-              <Text style={{ fontSize: 30 }}>
-                {uploadPhase === "done" ? "✅" : uploadPhase === "saving" ? "💾" : "☁️"}
-              </Text>
-            </View>
-            <Text style={s.upTitle}>
-              {uploadPhase === "uploading" ? "Uploading story…"
-                : uploadPhase === "saving" ? "Saving…"
-                : "Submitted! 🎉"}
-            </Text>
-            <Text style={s.upSub}>
-              {uploadPhase === "uploading" ? "Please keep the app open"
-                : uploadPhase === "saving"   ? "Almost done…"
-                : "Waiting for admin approval"}
-            </Text>
-            <View style={s.upTrack}>
-              <Animated.View
-                style={[
-                  s.upFill,
-                  uploadPhase === "done" && { backgroundColor: "#22C55E" },
-                  { width: uploadAnim.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }) },
-                ]}
-              />
-            </View>
-            <Text style={s.upPct}>
-              {uploadPhase === "done" ? "100%"
-                : uploadPhase === "saving" ? "Saving…"
-                : `${uploadPct}%`}
-            </Text>
-          </View>
-        </View>
-      </Modal>
-
     </View>
   );
 }
@@ -799,13 +668,4 @@ const s = StyleSheet.create({
   partnerName:  { color: "#fff", fontSize: 13, fontWeight: "600", flex: 1 },
   learnMoreBtn: { backgroundColor: "#FFD700", borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, marginLeft: 10 },
   learnMoreTxt: { color: "#1a1a1a", fontSize: 12, fontWeight: "800" },
-
-  upOverlay:    { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", paddingHorizontal: 32 },
-  upCard:       { backgroundColor: "#fff", borderRadius: 20, paddingVertical: 32, paddingHorizontal: 28, width: "100%", alignItems: "center", elevation: 10 },
-  upIconCircle: { width: 72, height: 72, borderRadius: 36, backgroundColor: "#F3F0FF", alignItems: "center", justifyContent: "center", marginBottom: 16 },
-  upTitle:      { fontSize: 17, fontWeight: "700", color: "#111827", marginBottom: 6, textAlign: "center" },
-  upSub:        { fontSize: 13, color: "#6B7280", marginBottom: 24, textAlign: "center" },
-  upTrack:      { width: "100%", height: 8, borderRadius: 4, backgroundColor: "#E9E7FF", overflow: "hidden", marginBottom: 10 },
-  upFill:       { height: "100%", borderRadius: 4, backgroundColor: "#6C63FF" },
-  upPct:        { fontSize: 13, fontWeight: "600", color: "#6C63FF" },
 });

@@ -1,5 +1,7 @@
 import { useTheme } from "@/context/ThemeContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
+import { MODULE_GATES, getAiGuruScreenSpec } from "@gloows/shared-logic";
+import { useRouteGate } from "@/hooks/useRouteGate";
 import { LESSON_WATCH_THRESHOLD } from "@/lib/seekho/constants";
 import type { SeekhoLesson, SeekhoSubject } from "@/lib/seekho/types";
 import { streamPlaybackUrl } from "@/lib/cloudflareStream";
@@ -23,6 +25,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 export default function LessonPlayerScreen() {
   const { colors } = useTheme();
   const { user } = useStudentProfile();
+  // "Ask AI Guru" opens /ai-guru/setup — show it only when that screen's own
+  // gate (AI Guru module + "generate" feature) would let this user in, so it
+  // never renders as a dead link. Hidden while access is still resolving.
+  const canOpenAiGuruSetup =
+    useRouteGate(MODULE_GATES.aiGuru, getAiGuruScreenSpec("setup")).state === "allowed";
   const { subject, chapterId, lessonId } = useLocalSearchParams<{
     subject: string;
     chapterId: string;
@@ -238,11 +245,13 @@ export default function LessonPlayerScreen() {
       </ScrollView>
 
       {/* Ask AI Guru FAB */}
-      <TouchableOpacity style={S.fab} onPress={handleAskAiGuru} activeOpacity={0.85}>
-        <LinearGradientFab />
-        <Text style={S.fabText}>Ask AI Guru</Text>
-        <Ionicons name="sparkles" size={16} color="#fff" />
-      </TouchableOpacity>
+      {canOpenAiGuruSetup && (
+        <TouchableOpacity style={S.fab} onPress={handleAskAiGuru} activeOpacity={0.85}>
+          <LinearGradientFab />
+          <Text style={S.fabText}>Ask AI Guru</Text>
+          <Ionicons name="sparkles" size={16} color="#fff" />
+        </TouchableOpacity>
+      )}
     </SafeAreaView>
   );
 }

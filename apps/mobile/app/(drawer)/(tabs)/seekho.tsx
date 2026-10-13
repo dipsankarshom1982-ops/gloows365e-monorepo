@@ -1,4 +1,4 @@
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { isPrimaryClassLevel, useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useAppConfig } from "@/context/AppConfigContext";
@@ -26,7 +26,7 @@ import Header from "@/components/header";
 export default function SeekhoHomeScreen() {
   const { colors } = useTheme();
   const { t } = useAppTranslation();
-  const { user, authLoading } = useStudentProfile();
+  const { user, authLoading, studentProfile } = useStudentProfile();
   const { selectedClass, selectedBoard, courseProgress, revisionQueue } = useSeekhoStore();
   const { isFreeUser, loading: seekhoLoading, showSubscriptionSheet } = useSeekhoAccess();
   const { plans } = useAppConfig();
@@ -52,6 +52,37 @@ export default function SeekhoHomeScreen() {
         <View style={S.center}>
           <Text style={[S.emptyTitle, { color: colors.text }]}>{t("seekhoSignIn")}</Text>
         </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Class 3–5: no Seekho chapters exist yet. Show a clear "coming soon" state
+  // instead of the (empty) subject grid, and don't advertise a plan for
+  // content that isn't there.
+  if (isPrimaryClassLevel(studentProfile?.class)) {
+    return (
+      <SafeAreaView style={[S.container, { backgroundColor: colors.background }]}>
+        <Header />
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={S.scroll}>
+          <View style={S.titleRow}>
+            <View style={S.titleLeft}>
+              <Text style={[S.title, { color: colors.text }]}>📖 {t("seekhoPreviewTitle") ?? "Seekho"}</Text>
+              <Text style={[S.subtitle, { color: colors.textSecondary }]}>{t("curriculumAligned")}</Text>
+            </View>
+          </View>
+          <View
+            accessibilityRole="summary"
+            style={{ marginTop: 24, padding: 28, borderRadius: 20, alignItems: "center", gap: 10, backgroundColor: colors.card }}
+          >
+            <Text style={{ fontSize: 44 }}>🌱</Text>
+            <Text style={{ fontSize: 18, fontWeight: "900", textAlign: "center", color: colors.text }}>
+              Seekho for Class {studentProfile?.class} is coming soon
+            </Text>
+            <Text style={{ fontSize: 14, lineHeight: 21, textAlign: "center", color: colors.textSecondary }}>
+              We're preparing video lessons for your class. Courses are being added, so check back soon!
+            </Text>
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }

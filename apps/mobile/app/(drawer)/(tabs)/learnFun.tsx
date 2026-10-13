@@ -10,6 +10,7 @@ import SkillWorldCard from "@/components/learnfun/SkillWorldCard";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useLearnFun } from "@/hooks/useLearnFun";
+import { isPrimaryClassLevel } from "@gloows/shared-logic";
 import { COMING_SOON } from "@/lib/learnfun/constants";
 import { LearnFunGame, SkillWorld } from "@/lib/learnfun/types";
 import { Ionicons } from "@expo/vector-icons";
@@ -121,6 +122,9 @@ export default function LearnFunHomeScreen() {
   const { t } = useAppTranslation();
   const router = useRouter();
   const { profile, todaysMission, visibleGames, skillWorlds, allBadges, missionPlayedToday, loading } = useLearnFun();
+  // Class 3–5 have no games or boss battle of their own yet (the existing ones
+  // are written for Class 6+), so those sections show "coming soon" for them.
+  const isPrimary = isPrimaryClassLevel(profile?.class);
 
   const daysUntilFriday = getDaysUntilFriday();
 
@@ -334,7 +338,8 @@ export default function LearnFunHomeScreen() {
           </View>
         </View>
 
-        {/* 5. Boss Battle */}
+        {/* 5. Boss Battle — not offered to Class 3–5 */}
+        {!isPrimary && (
         <View style={styles.sectionWithHeader}>
           <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: 20 }]}>
             ⚔️ {t("bossBattle")}
@@ -345,6 +350,7 @@ export default function LearnFunHomeScreen() {
             onPlay={handleBossBattlePlay}
           />
         </View>
+        )}
 
         {/* 6. Your Games */}
         <View style={styles.sectionWithHeader}>
@@ -373,7 +379,7 @@ export default function LearnFunHomeScreen() {
             <View style={[styles.emptyGamesCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Text style={styles.emptyEmoji}>🎮</Text>
               <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                {t("gamesLoading")}
+                {isPrimary ? "Games for your class are coming soon!" : t("gamesLoading")}
               </Text>
             </View>
           )}

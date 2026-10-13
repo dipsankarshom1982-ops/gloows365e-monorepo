@@ -12,6 +12,9 @@ import { onRequest } from "firebase-functions/v2/https";
 import { callGeminiWithImage, parseJsonFromResponse } from "./gemini";
 import { getRedis, todayIST, TTL, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
+import { tryDebitAiGuruCredit, refundAiGuruCredit } from "./aiGuruCreditDebit";
+import { resolveStudentLanguage, getLanguageInstruction } from "./aiLanguage";
+import { getClassLevelInstruction, resolveStudentClassLevel } from "./aiStudentContext";
 
 const db = admin.firestore();
 
@@ -32,16 +35,40 @@ async function verifyAuthToken(req: any): Promise<string> {
   return decoded.uid;
 }
 
-function buildPhotoSolvePrompt(
+// Extracted as its own pure function (2026-09-06) so the language-isolation
+// guarantee below is directly unit-testable without mocking Redis/Gemini —
+// see __tests__/aiLanguage.test.ts's cache-key coverage. Exported for that
+// reason only; the handler below is still the only real caller.
+export function buildPhotoSolveCacheKey(
+  imageBase64: string,
   classLevel: string | number,
   board: string,
   language: string
 ): string {
-  return `You are an expert AI tutor for Indian school students, specialised in ${board} curriculum for Class ${classLevel}.
+  const imageHash = createHash("sha256")
+    .update(`${imageBase64.slice(0, 500)}:${classLevel}:${board}`)
+    .digest("hex")
+    .slice(0, 16);
+  return `photosolve:cache:${imageHash}:${language}`;
+}
+
+// FIX (production, 2026-09-06): used to hardcode a 3-way ternary
+// (Hindi/Bengali/Assamese, else English) that silently forced English for
+// every other supported language regardless of the student's actual
+// selection. Now uses the shared, exhaustive instruction — see
+// functions/src/aiLanguage.ts's header comment for the full context.
+function buildPhotoSolvePrompt(
+  classLevel: number | null,
+  board: string,
+  language: string
+): string {
+  const levelInstruction = getClassLevelInstruction(classLevel);
+  return `You are an expert AI tutor for Indian school students, specialised in ${board} curriculum${classLevel === null ? "" : ` for Class ${classLevel}`}.
 
 A student has photographed a question or problem. Analyse it carefully and provide a complete solution.
 
-Respond in ${language === "Hindi" ? "Hindi" : language === "Bengali" ? "Bengali" : language === "Assamese" ? "Assamese" : "English"}.
+${getLanguageInstruction(language)}${levelInstruction ? `\n${levelInstruction}` : ""}
+This applies to every text field below — questionText, solution steps, finalAnswer, conceptExplained, examTip, and similarQuestions — not just the top-level summary.
 
 Return ONLY a valid JSON object with this exact structure:
 {
@@ -63,7 +90,7 @@ Return ONLY a valid JSON object with this exact structure:
 
 Rules:
 - Solve completely step by step. Do NOT skip steps.
-- Use simple language appropriate for Class ${classLevel}.
+- Use simple language appropriate for ${classLevel === null ? "a school student" : `Class ${classLevel}`}.
 - If the image is blurry or unreadable, set questionText to "Could not read clearly" and explain in conceptExplained.
 - Do NOT use markdown in the step strings — plain sentences only.
 - All strings must be valid JSON (escape quotes, no newlines in strings).`;
@@ -88,14 +115,24 @@ export const photoSolve = onRequest(
       return;
     }
 
-    const { imageBase64, imageMimeType, classLevel, board, language } = req.body ?? {};
+    // classLevel is deliberately NOT read from the body — see aiStudentContext.ts.
+    const { imageBase64, imageMimeType, board, language: requestedLanguage } = req.body ?? {};
 
     if (!imageBase64 || !imageMimeType) {
       res.status(400).json({ error: "imageBase64 and imageMimeType are required", code: "MISSING_IMAGE" });
       return;
     }
 
+    // Priority order per functions/src/aiLanguage.ts: this request's own
+    // language field → the student's saved preference looked up
+    // server-side → English. Never trusts an unrecognized client value.
+    const language = await resolveStudentLanguage(uid, db, requestedLanguage);
+    const classLevel = await resolveStudentClassLevel(uid, db);
+
     // ── Rate limit check ────────────────────────────────────────────────────
+    // creditTxId declared outside this try so the Gemini-call catch further
+    // down can refund it if the request fails after this point.
+    let creditTxId: string | null = null;
     try {
       const { isPremium } = await getSubscription(uid, db);
       const dailyLimit = isPremium ? PREMIUM_PHOTOSOLVE_DAILY : FREE_PHOTOSOLVE_DAILY;
@@ -108,26 +145,57 @@ export const photoSolve = onRequest(
       } catch { /* Redis unavailable — allow through */ }
 
       if (used >= dailyLimit) {
-        res.status(429).json({
-          error: isPremium
-            ? `You've reached your daily limit of ${PREMIUM_PHOTOSOLVE_DAILY} solves.`
-            : `You've used your ${FREE_PHOTOSOLVE_DAILY} free photo solves for today. Upgrade for more.`,
-          code: "LIMIT_REACHED",
-          isPremium,
-        });
-        return;
+        // Premium never pays credits, even at its own generous daily cap —
+        // silently billing someone who already pays for unlimited access
+        // would be the worst outcome of adding credits at all.
+        if (isPremium) {
+          res.status(429).json({
+            error: `You've reached your daily limit of ${PREMIUM_PHOTOSOLVE_DAILY} solves.`,
+            code: "LIMIT_REACHED",
+            isPremium,
+          });
+          return;
+        }
+
+        const debit = await tryDebitAiGuruCredit(uid, "PHOTOSOLVE", db);
+        if (!debit.ok) {
+          const balance  = debit.reason === "insufficient" ? debit.balance  : 0;
+          const required = debit.reason === "insufficient" ? debit.required : 1;
+          const balanceNote = debit.reason === "insufficient"
+            ? ` You have ${balance} credit${balance === 1 ? "" : "s"} left, need ${required}.`
+            : "";
+          res.status(429).json({
+            error: `You've used your ${FREE_PHOTOSOLVE_DAILY} free photo solves for today.${balanceNote} Buy credits or upgrade to Premium.`,
+            code: "CREDITS_EXHAUSTED",
+            isPremium,
+            creditBalance: balance,
+            creditsRequired: required,
+          });
+          return;
+        }
+        creditTxId = debit.txId;
       }
     } catch (e) {
       console.error("Rate limit check failed:", e);
-      // On error, allow through (fail open for UX)
+      // On error, allow through (fail open for UX) — matches this
+      // function's existing behavior; tryDebitAiGuruCredit never throws
+      // for the ordinary "insufficient" case (returns a result instead),
+      // so a genuine debit failure above always returns 429 explicitly
+      // rather than falling through to this fail-open branch.
     }
 
-    // ── Check result cache (image hash + class + board) ──────────────────────
-    const imageHash = createHash("sha256")
-      .update(`${imageBase64.slice(0, 500)}:${classLevel}:${board}`)
-      .digest("hex")
-      .slice(0, 16);
-    const cacheKey = `photosolve:cache:${imageHash}`;
+    // ── Check result cache (image hash + class + board + language) ───────────
+    // FIX (production, 2026-09-06): this cache key used to omit language
+    // entirely — the identical photo solved once in English would then be
+    // served straight back to a Hindi-preference student (and vice versa)
+    // from cache, bypassing buildPhotoSolvePrompt's language instruction
+    // altogether. `language` here is already the fully-resolved value (see
+    // resolveStudentLanguage() above), so two students with different
+    // preferences solving the same photo now get separate cache entries,
+    // one per language — matching every other Ask AI Guru cache
+    // (askAiGuru.ts's cacheKey already included language for the same
+    // reason; examSimulator.ts's below does too).
+    const cacheKey = buildPhotoSolveCacheKey(imageBase64, classLevel ?? "unknown", board, language);
 
     try {
       const cached = await getRedis().get<object>(cacheKey);
@@ -139,7 +207,7 @@ export const photoSolve = onRequest(
 
     // ── Call Gemini Vision ───────────────────────────────────────────────────
     try {
-      const prompt = buildPhotoSolvePrompt(classLevel ?? "10", board ?? "CBSE", language ?? "English");
+      const prompt = buildPhotoSolvePrompt(classLevel, board ?? "CBSE", language);
       const raw = await callGeminiWithImage(prompt, imageBase64, imageMimeType);
       const parsed = parseJsonFromResponse(raw) as any;
 
@@ -167,6 +235,7 @@ export const photoSolve = onRequest(
       res.status(200).json(parsed);
     } catch (e: any) {
       console.error("PhotoSolve error:", e);
+      if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "PHOTOSOLVE", db);
       res.status(500).json({ error: e?.message ?? "Failed to solve question", code: "AI_ERROR" });
     }
   }

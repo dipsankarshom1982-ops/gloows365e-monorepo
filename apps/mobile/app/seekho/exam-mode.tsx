@@ -1,5 +1,5 @@
 import { useTheme } from "@/context/ThemeContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useSeekhoAccess } from "@/hooks/useSeekhoAccess";
 import { useSeekhoStore } from "@/store/seekhoStore";
 import type { DailyPlanItem } from "@/lib/seekho/types";

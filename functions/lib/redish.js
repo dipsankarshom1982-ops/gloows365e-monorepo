@@ -37,6 +37,8 @@ exports.TTL = {
     seekhoPlan: 3600, // 1 hr
     seekhoCourses: 86400, // 1 day
     vcoinBalance: 300, // 5 min
+    // Daily Streak Quiz
+    dailyStreakQuizQuestion: 3600, // 1 hr — today's resolved question per student
     // Discover AI
     discoverQuery: 3600, // 1 hr — per-query response cache
     discoverTrending: 86400, // 1 day
@@ -69,6 +71,9 @@ exports.RK = {
     vcoinBalance: (uid) => `vcoin:balance:${uid}`,
     vcoinLock: (uid, activity, suffix) => `vcoin:lock:${uid}:${activity}:${suffix}`,
     vcoinCount: (uid, activity, date) => `vcoin:count:${uid}:${activity}:${date}`,
+    // Daily Streak Quiz
+    streakQuizQuestion: (uid, date) => `streakquiz:q:${uid}:${date}`,
+    streakQuizSubmitLock: (uid, date) => `streakquiz:lock:${uid}:${date}`,
     // Discover AI
     discoverSearch: (uid, date) => `discover:search:${uid}:${date}`,
     discoverQuery: (hash) => `discover:query:${hash}`,

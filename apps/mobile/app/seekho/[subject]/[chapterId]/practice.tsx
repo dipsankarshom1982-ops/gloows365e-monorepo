@@ -1,5 +1,5 @@
 import { useTheme } from "@/context/ThemeContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { CHAPTER_XP_REWARD, PRACTICE_PASS_THRESHOLD } from "@/lib/seekho/constants";
 import type { SeekhoPracticeQuestion, SeekhoSubject, PracticeResultItem } from "@/lib/seekho/types";
 import { useSeekhoStore } from "@/store/seekhoStore";
@@ -124,7 +124,7 @@ export default function PracticeScreen() {
         const wrongResults = allResults.filter((r) => !r.correct);
         if (wrongResults.length > 0) {
           const updateRevision = httpsCallable<{ results: PracticeResultItem[] }, { updated: number }>(
-            fns,
+            functions,
             "seekhoUpdateRevisionQueue"
           );
           await updateRevision({ results: allResults }).catch(() => null);

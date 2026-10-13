@@ -36,6 +36,8 @@ export async function askVoiceTutor(params: {
     const err: any = new Error(data.error ?? "Voice tutor request failed");
     err.code = data.code ?? "UNKNOWN";
     err.status = resp.status;
+    if (data.creditBalance   !== undefined) err.creditBalance   = data.creditBalance;
+    if (data.creditsRequired !== undefined) err.creditsRequired = data.creditsRequired;
     throw err;
   }
   return data as VoiceTutorResponse;

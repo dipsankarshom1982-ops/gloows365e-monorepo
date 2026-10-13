@@ -78,7 +78,7 @@ export default function TimePlannerGameScreen() {
       Array.isArray(todaysMission.hints)
     ) return todaysMission;
     const local = getMissionForClass(studentClass);
-    if (local.gameType === "time_planner") return local;
+    if (local?.gameType === "time_planner") return local;
     return FALLBACK_MISSIONS[1];
   }, [todaysMission, studentClass]);
 

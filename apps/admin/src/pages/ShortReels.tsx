@@ -36,6 +36,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { db } from "../lib/firebase";
+import { SUPPORTED_CLASS_LEVEL_STRINGS } from "../lib/educationConfig";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const WORKER_URL      = (import.meta.env.VITE_CF_WORKER_URL ?? "").replace(/\/$/, "");
@@ -54,7 +55,7 @@ const CATEGORIES = [
   "Exam Hacks", "Fun Learning", "History", "Geography", "General",
 ];
 
-const CLASS_OPTIONS    = ["All","5","6","7","8","9","10","11","12"];
+const CLASS_OPTIONS    = ["All", ...SUPPORTED_CLASS_LEVEL_STRINGS];
 const LANGUAGE_OPTIONS = ["All","Hindi","English","Bengali","Assamese","Odia","Telugu","Tamil","Kannada","Malayalam","Marathi","Gujarati"];
 const STATE_OPTIONS    = ["All","Assam","Bihar","Delhi","Gujarat","Jharkhand","Karnataka","Kerala","Madhya Pradesh","Maharashtra","Nagaland","Odisha","Rajasthan","Tamil Nadu","Telangana","Uttar Pradesh","West Bengal"];
 const INTEREST_OPTIONS = ["All","Mathematics","Science","History","Geography","English","Coding","Arts","Sports","Career","Exam Prep","General Knowledge"];

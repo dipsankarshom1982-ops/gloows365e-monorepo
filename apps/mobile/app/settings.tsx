@@ -68,6 +68,15 @@ export default function SettingsScreen() {
       route: "/profile-settings",
     },
     {
+      id: "billing-history",
+      title: t("billingHistory") ?? "Billing History",
+      description: t("billingHistoryDesc") ?? "View your subscription invoices",
+      icon: "receipt-outline",
+      accentColor: "#22c55e",
+      toggle: false,
+      route: "/billing-history",
+    },
+    {
       id: "language",
       title: t("language"),
       description: t("changeLanguage"),

@@ -81,7 +81,7 @@ export default function CareerGoalBuilderGameScreen() {
   const mission: DailyMission = useMemo(() => {
     if (todaysMission && todaysMission.gameType === "career_goal") return todaysMission;
     const local = getMissionForClass(studentClass);
-    if (local.gameType === "career_goal") return local;
+    if (local?.gameType === "career_goal") return local;
     return FALLBACK_MISSIONS[3];
   }, [todaysMission, studentClass]);
 

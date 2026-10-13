@@ -36,8 +36,9 @@ export async function getCoursesByClassBoard(
       courseId: d.id,
       ...(d.data() as Omit<SeekhoCourse, "courseId">),
     }));
+    // Drafts stay hidden; docs seeded before isPublished existed count as published.
     return courses
-      .filter((c) => c.board === board && (!subject || c.subject === subject))
+      .filter((c) => c.isPublished !== false && c.board === board && (!subject || c.subject === subject))
       .sort((a, b) => a.chapterNumber - b.chapterNumber);
   } catch (e) {
     console.warn("getCoursesByClassBoard:", e);

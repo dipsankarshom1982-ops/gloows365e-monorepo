@@ -7,7 +7,7 @@ export type SeekhoDifficulty = "easy" | "medium" | "hard";
 
 export interface SeekhoCourse {
   courseId: string;
-  class: number;               // 6–12
+  class: number;               // 3–12 (chapters currently exist for 6–12)
   board: SeekhoBoard;
   subject: SeekhoSubject;
   chapterNumber: number;
@@ -15,6 +15,7 @@ export interface SeekhoCourse {
   description: string;
   totalLessons: number;
   isFree: boolean;             // first 2 chapters per subject = true
+  isPublished?: boolean;       // false = draft (hidden); absent on older docs = published
   thumbnailUrl: string;
   createdAt: unknown;
 }

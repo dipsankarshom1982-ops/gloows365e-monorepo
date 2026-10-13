@@ -2,11 +2,17 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { addDoc, collection, doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
+import { SUPPORTED_CLASS_LEVEL_STRINGS } from "../lib/educationConfig";
 import { motion } from "framer-motion";
 import ToggleSwitch from "../components/ToggleSwitch";
 
 const BOARDS = ["CBSE","ICSE","State Board","Other"];
-const EMPTY = { title: "", description: "", videoUrl: "", thumbnailUrl: "", subject: "", board: "CBSE", chapter: "", targetClass: [] as string[], durationSeconds: 0, isApproved: false };
+const ALL_CLASSES = [...SUPPORTED_CLASS_LEVEL_STRINGS, "all"];
+// isActive is the one visibility field — it's what every student client
+// queries (where("isActive", "==", true)). This form used to write only
+// `isApproved`, which nothing reads, so videos it created never appeared.
+// isApproved is still written (mirroring isActive) for older tooling.
+const EMPTY = { title: "", description: "", videoUrl: "", thumbnailUrl: "", subject: "", board: "CBSE", chapter: "", targetClass: [] as string[], durationSeconds: 0, isActive: false };
 
 export default function CreateKnowledgeVideo() {
   const { id } = useParams<{ id?: string }>();
@@ -19,17 +25,25 @@ export default function CreateKnowledgeVideo() {
   useEffect(() => {
     if (!isEdit) return;
     getDoc(doc(db, "knowledgeVideos", id!)).then((snap) => {
-      if (snap.exists()) setForm({ ...EMPTY, ...snap.data() } as typeof EMPTY);
+      if (!snap.exists()) return;
+      const d = snap.data();
+      // A video approved under the old form has isApproved but no isActive;
+      // show it as active so re-saving makes it visible.
+      setForm({ ...EMPTY, ...d, isActive: d.isActive ?? d.isApproved ?? false } as typeof EMPTY);
     });
   }, [id, isEdit]);
 
   const set = (field: string, value: unknown) => setForm((p) => ({ ...p, [field]: value }));
+  const toggleClass = (c: string) => setForm((p) => ({
+    ...p,
+    targetClass: p.targetClass.includes(c) ? p.targetClass.filter((v) => v !== c) : [...p.targetClass, c],
+  }));
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const payload = { ...form, durationSeconds: Number(form.durationSeconds), updatedAt: serverTimestamp() };
+      const payload = { ...form, isApproved: form.isActive, durationSeconds: Number(form.durationSeconds), updatedAt: serverTimestamp() };
       if (isEdit) { await updateDoc(doc(db, "knowledgeVideos", id!), payload); }
       else { await addDoc(collection(db, "knowledgeVideos"), { ...payload, createdAt: serverTimestamp() }); }
       setSuccess(true);
@@ -57,7 +71,17 @@ export default function CreateKnowledgeVideo() {
           <div><label className={labelCls}>Chapter</label><input value={form.chapter} onChange={(e) => set("chapter", e.target.value)} className={inputCls} /></div>
           <div><label className={labelCls}>Duration (seconds)</label><input type="number" min={0} value={form.durationSeconds} onChange={(e) => set("durationSeconds", e.target.value)} className={inputCls} /></div>
         </div>
-        <ToggleSwitch value={form.isApproved} onChange={(v) => set("isApproved", v)} label="Approved" />
+        <div>
+          <label className={labelCls}>Target Class <span className="text-slate-500 font-normal">(pick "all" for every class; Class 3–5 students only see videos that target their class or "all")</span></label>
+          <div className="flex flex-wrap gap-2">
+            {ALL_CLASSES.map((c) => (
+              <button key={c} type="button" onClick={() => toggleClass(c)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${form.targetClass.includes(c) ? "bg-indigo-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
+              >{c}</button>
+            ))}
+          </div>
+        </div>
+        <ToggleSwitch value={form.isActive} onChange={(v) => set("isActive", v)} label="Active (visible to students)" />
         <button type="submit" disabled={saving} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-bold py-3 rounded-xl transition-colors">
           {saving ? "Saving…" : isEdit ? "Update Video" : "Create Video"}
         </button>

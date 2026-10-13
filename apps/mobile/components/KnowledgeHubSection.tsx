@@ -6,6 +6,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
 import { useEffect, useRef, useState } from "react";
+import { isPrimaryClassLevel, isTargetedAtClass, useStudentProfile } from "@gloows/shared-logic";
 import {
   Animated,
   FlatList,
@@ -38,6 +39,7 @@ interface KBVideo {
   likesCount?: number;
   isFeatured?: boolean;
   isActive: boolean;
+  targetClass?: string[];
   order?: number;
   createdAt?: any;
 }
@@ -70,20 +72,16 @@ function Pulse({ w, h, r = 10 }: { w: number; h: number; r?: number }) {
 }
 
 // ─── Video card ───────────────────────────────────────────────
+// Not tappable: cards used to navigate to a video-detail route, but no video
+// player screen exists in the app (the web Knowledge Hub is also still a
+// "Coming Soon" page), so every tap landed on expo-router's "Unmatched Route"
+// screen (physical-device QA, 2026-10-09). Cards stay as a browsable preview
+// with no play affordance until a real player screen ships.
 function KBCard({ item }: { item: KBVideo }) {
   const { colors } = useTheme();
 
   return (
-    <TouchableOpacity
-      style={[S.card, { backgroundColor: colors.card }]}
-      onPress={() =>
-        router.push({
-          pathname: "/video-detail" as any,
-          params: { id: item.id, videoUrl: item.videoUrl ?? "", title: item.title },
-        })
-      }
-      activeOpacity={0.85}
-    >
+    <View style={[S.card, { backgroundColor: colors.card }]} accessibilityLabel={item.title}>
       {/* Thumbnail */}
       <View style={S.thumbWrap}>
         {item.thumbnailUrl ? (
@@ -93,10 +91,6 @@ function KBCard({ item }: { item: KBVideo }) {
             <Ionicons name="tv-outline" size={28} color="#60a5fa" />
           </LinearGradient>
         )}
-        {/* Play overlay */}
-        <View style={S.playBtn}>
-          <Ionicons name="play" size={12} color="#fff" />
-        </View>
         {/* Duration */}
         {item.duration ? (
           <View style={S.durationBadge}>
@@ -128,7 +122,7 @@ function KBCard({ item }: { item: KBVideo }) {
           <Text style={[S.metaText, { color: colors.textSecondary }]}>❤️ {fmtViews(item.likesCount)}</Text>
         )}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -136,6 +130,7 @@ function KBCard({ item }: { item: KBVideo }) {
 export default function KnowledgeHubSection() {
   const { colors } = useTheme();
   const { t } = useAppTranslation();
+  const { studentProfile } = useStudentProfile();
   const [videos,    setVideos]    = useState<KBVideo[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(false);
@@ -144,10 +139,12 @@ export default function KnowledgeHubSection() {
   useEffect(() => {
     (async () => {
       try {
+        // isActive is the one visibility field (the admin form now writes it).
+        // Fetch a wider page than is shown, since class targeting filters it down below.
         const snap = await getDocs(query(
           collection(db, "knowledgeVideos"),
           where("isActive", "==", true),
-          limit(10)
+          limit(30)
         ));
         setVideos(
           snap.docs
@@ -166,9 +163,16 @@ export default function KnowledgeHubSection() {
     })();
   }, []);
 
+  const classVideos = videos
+    .filter((v) => isTargetedAtClass(v.targetClass, studentProfile?.class))
+    .slice(0, 10);
   const filtered = activecat === "All"
-    ? videos
-    : videos.filter((v) => v.category === activecat);
+    ? classVideos
+    : classVideos.filter((v) => v.category === activecat);
+
+  // Class 3–5 only see videos explicitly targeted at their class (or "all").
+  // Until some exist, show one clear card instead of category chips over an empty row.
+  const showPrimaryEmpty = isPrimaryClassLevel(studentProfile?.class) && !loading && !error && classVideos.length === 0;
 
   return (
     <View style={S.section}>
@@ -186,7 +190,7 @@ export default function KnowledgeHubSection() {
       </View>
 
       {/* Category chips */}
-      <ScrollView
+      {!showPrimaryEmpty && <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 10 }}
@@ -208,7 +212,7 @@ export default function KnowledgeHubSection() {
             </Text>
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </ScrollView>}
 
       {/* Content */}
       {loading ? (
@@ -219,6 +223,13 @@ export default function KnowledgeHubSection() {
         <View style={S.empty}>
           <Text style={S.emptyIcon}>⚠️</Text>
           <Text style={[S.emptyText, { color: colors.textSecondary }]}>{t("couldNotLoadVideos")}</Text>
+        </View>
+      ) : showPrimaryEmpty ? (
+        <View style={S.empty} accessibilityRole="summary">
+          <Text style={S.emptyIcon}>🌱</Text>
+          <Text style={[S.emptyText, { color: colors.textSecondary }]}>
+            Videos picked for your class are coming soon. We're adding them now!
+          </Text>
         </View>
       ) : filtered.length === 0 ? (
         <View style={S.empty}>
@@ -258,15 +269,6 @@ const S = StyleSheet.create({
   thumbWrap: { position: "relative", width: 160, height: 100 },
   thumb:     { width: 160, height: 100 },
   thumbPlaceholder: { width: 160, height: 100, justifyContent: "center", alignItems: "center" },
-
-  playBtn: {
-    position: "absolute", top: "50%", left: "50%",
-    marginLeft: -13, marginTop: -13,
-    width: 26, height: 26, borderRadius: 13,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    justifyContent: "center", alignItems: "center",
-    borderWidth: 1.5, borderColor: "#fff",
-  },
 
   durationBadge: { position: "absolute", bottom: 6, right: 6, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2 },
   durationText:  { color: "#fff", fontSize: 10, fontWeight: "700" },

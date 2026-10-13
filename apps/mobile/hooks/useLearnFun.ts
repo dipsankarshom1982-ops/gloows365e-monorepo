@@ -26,6 +26,7 @@ import {
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useCallback, useEffect, useState } from "react";
+import { gamesForClass, parseClassLevel } from "@gloows/shared-logic";
 
 interface UseLearnFunReturn {
   profile: StudentLearnFunProfile | null;
@@ -63,10 +64,10 @@ export function useLearnFun(): UseLearnFunReturn {
   const todayStr = getTodayStr();
 
   // ── Load games ────────────────────────────────────────────────────────────
-  const loadGamesForClass = useCallback(async (studentClass: number) => {
-    const local = GAMES.filter(
-      (g) => g.classRange.includes(studentClass) && g.isActive && !g.isComingSoon
-    );
+  const loadGamesForClass = useCallback(async (studentClass: number | null) => {
+    // No supported class on record → no games, never another class's.
+    if (studentClass === null) { setVisibleGames([]); return; }
+    const local = gamesForClass(GAMES, studentClass);
     try {
       const snapshot = await getDocs(collection(db, "LearnFunGames"));
       if (!snapshot.empty) {
@@ -90,7 +91,8 @@ export function useLearnFun(): UseLearnFunReturn {
   }, []);
 
   // ── Load today's mission ──────────────────────────────────────────────────
-  const loadTodaysMission = useCallback(async (studentClass: number) => {
+  const loadTodaysMission = useCallback(async (studentClass: number | null) => {
+    if (studentClass === null) { setTodaysMission(null); return; }
     try {
       const q = query(
         collection(db, "dailyFunLearnMissions"),
@@ -125,11 +127,13 @@ export function useLearnFun(): UseLearnFunReturn {
 
           const data = snapshot.data();
           const xp: number = data.LearnFunXP ?? 0;
-          const studentClass = Number(data.class ?? 8);
+          // null (missing/unsupported) is handled explicitly below — it used
+          // to default to Class 8, silently serving Class 8 games/missions.
+          const studentClass = parseClassLevel(data.class);
 
           setProfile({
             name:                data.name ?? "Student",
-            class:               studentClass,
+            class:               studentClass ?? 0,
             level:               getLevelFromXP(xp),
             xp,
             // coins now reflects V-Coins balance (read from users doc via useVCoins elsewhere)

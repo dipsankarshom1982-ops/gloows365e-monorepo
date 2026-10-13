@@ -2,6 +2,7 @@
 // 7 sample daily missions (class 6–12) + 4 fallback missions
 // Indian context: ₹ amounts, Indian names, Indian school settings
 
+import { fallbackMissionFor } from "@gloows/shared-logic";
 import { DailyMission } from "./types";
 
 // ─── CLASS 6 MISSIONS ────────────────────────────────────────
@@ -450,12 +451,24 @@ export const FALLBACK_MISSIONS: DailyMission[] = [
   fallback_goal_basics,
 ];
 
-export function getMissionForClass(studentClass: number): DailyMission {
+// Class 3–5 have no class-specific missions yet. They rotate through the two
+// general, class-neutral fallback missions about everyday life (managing pocket
+// money, planning a school day). The digital-safety mission (bank/OTP scams) and
+// the SMART-goal mission (exam marks) are aimed at older students and left out.
+export const PRIMARY_FALLBACK_MISSIONS: DailyMission[] = [
+  fallback_money_basics,
+  fallback_time_basics,
+];
+
+export function getMissionForClass(studentClass: number): DailyMission | null {
   const classMission = SAMPLE_MISSIONS.find((m) => m.class === studentClass);
   if (classMission) return classMission;
 
-  // fallback by day of week
-  const dayIndex = new Date().getDay();
-  const fallbackIndex = dayIndex % FALLBACK_MISSIONS.length;
-  return FALLBACK_MISSIONS[fallbackIndex];
+  // Fallback by day of week, from the pool suited to this class band; an
+  // unsupported class gets no mission rather than a guessed one.
+  return fallbackMissionFor(
+    { primary: PRIMARY_FALLBACK_MISSIONS, general: FALLBACK_MISSIONS },
+    studentClass,
+    new Date().getDay()
+  );
 }

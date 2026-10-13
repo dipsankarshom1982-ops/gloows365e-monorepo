@@ -1,6 +1,6 @@
 import { useTheme } from "@/context/ThemeContext";
 import { RAZORPAY_KEY_ID } from "@/lib/seekho/constants";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useAppConfig } from "@/context/AppConfigContext";
 import {
   Alert,
@@ -103,7 +103,7 @@ export default function SubscriptionBottomSheet({
         order_id: razorpayOrderId,
         amount: amount * 100,
         currency: "INR",
-        name: "GLOOWS365E",
+        name: "Gloows365",
         description: `${plan.name} — ${cycle === "monthly" ? "Monthly" : "Annual"}`,
         prefill: { email: user.email ?? "" },
         theme: { color: "#6366f1" },

@@ -1,6 +1,6 @@
 // lib/learnfun/constants.ts
 
-import { Badge, GameType, LearnFunGame, Skill, SkillWorld } from "./types";
+import { Badge, LearnFunGame, Skill, SkillWorld } from "./types";
 
 // ─── XP CONFIG ────────────────────────────────────────────────────────────────
 export const XP_PER_LEVEL = 200;
@@ -21,6 +21,10 @@ export const DAILY_SKILL_ROTATION: Record<number, Skill | "boss_battle"> = {
 };
 
 // ─── GAMES (28 total, 4 per class 6-12) ───────────────────────────────────────
+// Class 3–5 have no games of their own yet, and the Class 6 games below are
+// written for Class 6, so they are NOT offered to Class 3–5 (they see a
+// "coming soon" state instead). Extend a game's classRange only once it has
+// been reviewed for that class.
 export const GAMES: LearnFunGame[] = [
   // ── Class 6 ──────────────────────────────────────────────────────────────────
   {

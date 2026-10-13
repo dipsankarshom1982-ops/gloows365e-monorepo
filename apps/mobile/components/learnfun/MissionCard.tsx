@@ -173,7 +173,7 @@ export default function MissionCard({ mission, onPress, studentClass, completed 
           </View>
           <View style={[styles.classBadge, { backgroundColor: `${gradientColors[0]}25` }]}>
             <Text style={[styles.classText, { color: gradientColors[0] }]}>
-              Class {studentClass}
+              {mission.class > 0 ? `Class ${studentClass}` : "All classes"}
             </Text>
           </View>
         </View>

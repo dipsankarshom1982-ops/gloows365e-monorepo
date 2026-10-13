@@ -13,10 +13,11 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import { generateExam, evaluateExam, GeneratedExam, ExamEvaluation } from "@/services/examSimulatorApi";
-import { SUBJECTS, SUBJECT_ICONS } from "@/lib/aiGuru/constants";
+import { getSubjectsForClass, SUBJECT_ICONS } from "@/lib/aiGuru/constants";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 
 const DIFFICULTIES = ["Easy", "Standard", "Exam Level"] as const;
 
@@ -33,9 +34,9 @@ export default function ExamSimulatorScreen() {
   const text    = isDarkMode ? "#f1f5f9" : colors.text;
   const muted   = isDarkMode ? "#94a3b8" : colors.textSecondary;
   const dim     = isDarkMode ? "#64748b" : colors.textSecondary;
-  const backBg  = isDarkMode ? "rgba(255,255,255,0.08)" : colors.card;
 
-  const classLevel = String(studentProfile?.class ?? "10");
+  // No default class: a student with none on record gets a "set your class" message from the server, not a guessed Class 10 exam.
+  const classLevel = String(studentProfile?.class ?? "");
   const board      = studentProfile?.board ?? "CBSE";
   const language   = studentProfile?.preferredLanguage ?? "English";
 
@@ -54,6 +55,10 @@ export default function ExamSimulatorScreen() {
   // Timer
   const [timeLeft,   setTimeLeft]   = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Set only on a CREDITS_EXHAUSTED response — undefined keeps the "limit"
+  // screen's plain pre-credits render.
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
 
   const startTimer = (minutes: number) => {
     setTimeLeft(minutes * 60);
@@ -75,6 +80,11 @@ export default function ExamSimulatorScreen() {
       Alert.alert("Missing info", "Please pick a subject and enter the chapter name.");
       return;
     }
+    // FIX: this used to hard-block via a client-side, never-resetting
+    // examsUsedRef counter (stricter than the server's real 1/day limit,
+    // and reset only by an app restart) that also meant nobody could ever
+    // reach the credits fallback. Removed; the server is the source of
+    // truth for both the free limit and the credits fallback beyond it.
     setPhase("generating");
     try {
       const result = await generateExam({
@@ -86,8 +96,15 @@ export default function ExamSimulatorScreen() {
       setPhase("exam");
       startTimer(result.estimatedMinutes);
     } catch (e: any) {
-      if (e?.code === "LIMIT_REACHED") { setPhase("limit"); }
-      else { setErrMsg(e?.message ?? "Failed to generate exam"); setPhase("error"); }
+      if (e?.code === "CREDITS_EXHAUSTED") {
+        setCreditInfo({ balance: e.creditBalance ?? 0, required: e.creditsRequired ?? 1 });
+        setPhase("limit");
+      } else if (e?.code === "LIMIT_REACHED") {
+        setCreditInfo(undefined);
+        setPhase("limit");
+      } else {
+        setErrMsg(e?.message ?? "Failed to generate exam"); setPhase("error");
+      }
     }
   };
 
@@ -121,22 +138,18 @@ export default function ExamSimulatorScreen() {
     <View style={[S.root, { backgroundColor: bg }]}>
       {isDarkMode && <LinearGradient colors={["#060612", "#0a0a1a"]} style={StyleSheet.absoluteFillObject} />}
 
-      {/* Header */}
-      <Animated.View entering={FadeIn.duration(350)} style={[S.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity onPress={() => { if (timerRef.current) clearInterval(timerRef.current); router.back(); }} style={[S.backBtn, { backgroundColor: backBg }]}>
-          <Ionicons name="chevron-back" size={22} color={muted} />
-        </TouchableOpacity>
-        <View style={S.headerCenter}>
-          <Text style={[S.headerTitle, { color: text }]}>🎯 Exam Simulator</Text>
-          <Text style={[S.headerSub, { color: dim }]}>Board-pattern mock tests · AI-evaluated</Text>
-        </View>
-        {phase === "exam" && (
+      <AiGuruHeader
+        title="🎯 Exam Simulator"
+        subtitle="Board-pattern mock tests · AI-evaluated"
+        showLanguageBadge
+        onBack={() => { if (timerRef.current) clearInterval(timerRef.current); router.back(); }}
+        rightElement={phase === "exam" ? (
           <View style={[S.timerBadge, { backgroundColor: timeLeft < 120 ? "rgba(239,68,68,0.15)" : surface, borderColor: timeLeft < 120 ? "#ef4444" : border }]}>
             <Ionicons name="time-outline" size={14} color={timeLeft < 120 ? "#ef4444" : muted} />
             <Text style={[S.timerText, { color: timeLeft < 120 ? "#ef4444" : text }]}>{formatTime(timeLeft)}</Text>
           </View>
-        )}
-      </Animated.View>
+        ) : undefined}
+      />
 
       <ScrollView contentContainerStyle={[S.scroll, { paddingBottom: insets.bottom + 40 }]} showsVerticalScrollIndicator={false}>
 
@@ -153,7 +166,7 @@ export default function ExamSimulatorScreen() {
             {/* Subject picker */}
             <Text style={[S.sectionLabel, { color: muted }]}>📚 Subject *</Text>
             <View style={S.subjectGrid}>
-              {SUBJECTS.map((s) => (
+              {getSubjectsForClass(studentProfile?.class).map((s) => (
                 <TouchableOpacity key={s} onPress={() => setSubject(s)} activeOpacity={0.8}
                   style={[S.subjectCard, { backgroundColor: surface, borderColor: subject === s ? "#dc2626" : border },
                     subject === s && { backgroundColor: "rgba(220,38,38,0.1)" }]}>
@@ -411,15 +424,29 @@ export default function ExamSimulatorScreen() {
             </Text>
             <Text style={[S.thinkingNote, { color: dim }]}>
               {phase === "limit"
-                ? "Free tier: 1 exam/day. Upgrade for unlimited exams."
+                ? (creditInfo
+                    ? `You've used today's free exam. You have ${creditInfo.balance} credit${creditInfo.balance === 1 ? "" : "s"} — buy more or upgrade to Premium.`
+                    : "Free tier: 1 exam/day. Upgrade for unlimited exams.")
                 : errMsg}
             </Text>
             {phase === "limit" ? (
-              <TouchableOpacity onPress={() => router.push("/ai-guru/subscription" as any)} style={S.upgradeWrap}>
-                <LinearGradient colors={["#92400e", "#d97706"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
-                  <Text style={S.upgradeBtnText}>Upgrade to Premium</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  onPress={() => router.push((creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription") as any)}
+                  style={S.upgradeWrap}
+                >
+                  <LinearGradient colors={creditInfo ? ["#4f46e5", "#7c3aed"] : ["#92400e", "#d97706"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.upgradeBtn}>
+                    <Text style={S.upgradeBtnText}>{creditInfo ? "Buy Credits" : "Upgrade to Premium"}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+                {creditInfo && (
+                  <TouchableOpacity onPress={() => router.push("/ai-guru/subscription" as any)}>
+                    <Text style={[S.thinkingNote, { color: "#a5b4fc", fontSize: 12, marginTop: 4 }]}>
+                      Or upgrade to Premium for unlimited access
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
             ) : (
               <TouchableOpacity onPress={() => setPhase("setup")} style={[S.retakeWrap]}>
                 <LinearGradient colors={["#7f1d1d", "#dc2626"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={S.retakeBtn}>
@@ -437,11 +464,6 @@ export default function ExamSimulatorScreen() {
 
 const S = StyleSheet.create({
   root:   { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, gap: 10 },
-  backBtn:{ width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  headerCenter: { flex: 1 },
-  headerTitle:  { fontSize: 17, fontWeight: "900" },
-  headerSub:    { fontSize: 11, marginTop: 1 },
   timerBadge:   { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 20, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 5 },
   timerText:    { fontSize: 13, fontWeight: "900" },
   scroll:       { paddingHorizontal: 16, paddingTop: 8 },

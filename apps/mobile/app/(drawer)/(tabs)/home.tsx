@@ -1,6 +1,6 @@
 // PATH: app/(drawer)/(tabs)/home.tsx
 
-import { useFeatureFlags } from "@/context/FeatureFlagsContext";
+import { useFeatureFlags } from "@gloows/shared-logic";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useAdFeed } from "@/hooks/useAdFeed";
@@ -23,7 +23,10 @@ import PostCard from "@/components/FeedPostCard";
 import Header from "@/components/header";
 import Stories from "@/components/Story";
 
+import BannerCarousel from "@/components/BannerCarousel";
+import DailyStreakQuizCard from "@/components/DailyStreakQuizCard";
 import DiscoverPreviewSection from "@/components/DiscoverPreviewSection";
+import GloStorePreviewSection from "@/components/GloStorePreviewSection";
 import HomeAdsCarousel from "@/components/HomeAdsCarousel";
 import KnowledgeHubSection from "@/components/KnowledgeHubSection";
 import ReferralCard from "@/components/ReferralCard";
@@ -39,7 +42,7 @@ import { httpsCallable } from "firebase/functions";
 export default function Home() {
   const { colors }                 = useTheme();
   const { t }                      = useAppTranslation();
-  const { homeSection, homeFlags } = useFeatureFlags();
+  const { homeSection, homeFlags, isTester } = useFeatureFlags();
   const [posts, setPosts]          = useState<any[]>([]);
 
   const { currentAd: feedAd }        = useAdFeed({ module: "home", adType: "feed" });
@@ -70,6 +73,7 @@ export default function Home() {
 
     if (homeSection("stories"))          feed.push({ type: "stories" });
     if (homeSection("aiguru"))           feed.push({ type: "aiguru" });
+    if (homeSection("daily_streak_quiz")) feed.push({ type: "daily_streak_quiz" });
     if (homeSection("creator_reels"))    feed.push({ type: "creator_reels" });
     if (homeSection("skillshorts"))      feed.push({ type: "skillshorts" });
     if (homeSection("referral"))         feed.push({ type: "referral" });
@@ -77,6 +81,7 @@ export default function Home() {
     if (homeSection("home_ads"))         feed.push({ type: "home_ads" });
     if (homeSection("vidya_star"))       feed.push({ type: "vidya_star" });
     if (homeSection("seekho_preview"))   feed.push({ type: "seekho_preview" });
+    if (homeSection("glostore_preview")) feed.push({ type: "glostore_preview" });
     if (homeSection("scholarship_ad"))   feed.push({ type: "scholarship_ad" });
     if (homeSection("discover_preview")) feed.push({ type: "discover_preview" });
     if (homeSection("knowledge_hub"))    feed.push({ type: "knowledge_hub" });
@@ -97,8 +102,11 @@ export default function Home() {
     }
 
     return feed;
+  // isTester is part of homeSection()'s bypass: on a cold start the OFF flags
+  // can arrive before the tester role, so without it the list was built for a
+  // non-tester and never rebuilt when isTester became true.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [homeFlags, posts]);
+  }, [homeFlags, posts, isTester]);
 
   const renderItem = ({ item }: { item: any }) => {
     switch (item.type) {
@@ -153,6 +161,9 @@ export default function Home() {
           </TouchableOpacity>
         );
 
+      case "daily_streak_quiz":
+        return <DailyStreakQuizCard />;
+
       case "post":
         return <PostCard data={item.data} />;
 
@@ -184,6 +195,9 @@ export default function Home() {
 
       case "seekho_preview":
         return <SeekhoPreviewSection />;
+
+      case "glostore_preview":
+        return <GloStorePreviewSection />;
 
       case "scholarship_ad":
         return scholarshipAd
@@ -217,6 +231,7 @@ export default function Home() {
         keyExtractor={(_, i) => i.toString()}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
+        ListHeaderComponent={<BannerCarousel screen="home" />}
       />
     </SafeAreaView>
   );

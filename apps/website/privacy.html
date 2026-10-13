@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — Gloows365E</title>
+  <meta name="description" content="Gloows365E Privacy Policy and Grievance Redressal — how we collect, use, and protect your data under the Digital Personal Data Protection Act, 2023." />
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- Firebase compat SDK — same project as index.html, used only to read
+       the publicly-readable publicConfig/grievanceOfficer doc (see
+       firestore.rules and the admin panel's Grievances page). -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #050B18;
+      --bg2:       #0A1428;
+      --violet:    #7C3AED;
+      --violet-lt: #9F67FF;
+      --cyan:      #06B6D4;
+      --text:      #F0F4FF;
+      --text2:     #94A3B8;
+      --lavender:  #C4B5FD;
+      --card:      rgba(255,255,255,0.04);
+      --border:    rgba(255,255,255,0.08);
+      --radius:    18px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .logo img { width: 32px; height: 32px; border-radius: 8px; object-fit: cover; }
+    .logo span {
+      font-family: 'Poppins', sans-serif;
+      font-weight: 900;
+      font-size: 18px;
+      background: linear-gradient(90deg, var(--lavender), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .back-link { color: var(--text2); text-decoration: none; font-size: 14px; font-weight: 600; }
+    .back-link:hover { color: var(--lavender); }
+
+    main { max-width: 780px; margin: 0 auto; padding: 48px 24px 80px; }
+
+    h1 { font-family: 'Poppins', sans-serif; font-size: 32px; font-weight: 800; margin-bottom: 8px; }
+    .updated { color: var(--text2); font-size: 13px; margin-bottom: 32px; }
+
+    section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    section h2 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    section p { color: var(--text2); font-size: 14.5px; }
+    section a { color: var(--lavender); }
+
+    .todo-note {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(245,158,11,0.12);
+      border: 1px solid rgba(245,158,11,0.3);
+      color: #fbbf24;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    footer {
+      text-align: center;
+      padding: 32px 24px;
+      border-top: 1px solid var(--border);
+      color: var(--text2);
+      font-size: 13px;
+    }
+    footer a { color: var(--lavender); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="logo">
+    <img src="logo.png" alt="Gloows365E" />
+    <span>Gloows365E</span>
+  </a>
+  <a href="index.html" class="back-link">← Back to Home</a>
+</nav>
+
+<main>
+  <h1>🔒 Privacy Policy</h1>
+  <p class="updated">Last updated: 17 July 2026</p>
+
+  <section>
+    <h2>📋 Data We Collect</h2>
+    <p>We collect information you provide directly — such as your name, email address, phone number, school, class, and profile picture — when you create or update your account. We also collect usage data like quiz scores, lesson progress, and in-app activity to personalise your learning experience.</p>
+  </section>
+
+  <section>
+    <h2>⚙️ How We Use Your Data</h2>
+    <p>Your data is used to deliver and improve the Gloows365E learning experience, including personalised content recommendations, progress tracking, leaderboards, and notifications. We do not sell your personal data to third parties.</p>
+  </section>
+
+  <section>
+    <h2>🗄️ Data Storage &amp; Security</h2>
+    <p>All data is stored securely on Google Firebase servers. We apply industry-standard encryption in transit (TLS) and at rest. Access to your data is restricted to authorised Gloows365E systems and personnel.</p>
+  </section>
+
+  <section>
+    <h2>🔗 Third-Party Services</h2>
+    <p>Gloows365E integrates with trusted third-party services including Google Firebase (auth, database, storage), Cloudflare Stream (video delivery), and Razorpay (payments). Each service operates under its own privacy policy.</p>
+  </section>
+
+  <section>
+    <h2>✅ Your Rights</h2>
+    <p>Under the Digital Personal Data Protection Act, 2023, you have the right to access, correct, and erase your personal data. In the Gloows365E app, go to Profile Settings → "Export My Data" to download everything we hold about you, or Profile Settings → "Delete My Account" to permanently erase your account. You can also reach us at <a href="mailto:support@gloows365.in">support@gloows365.in</a>. We process data-rights requests within 30 days. Some records (e.g. payment/financial records) may be retained beyond account deletion where Indian law requires it.</p>
+  </section>
+
+  <section>
+    <h2>👧 Children's Privacy</h2>
+    <p>Gloows365E is built for school students in Class 6–12, most of whom are under 18. Registration requires an OTP-verified parent/guardian phone number and explicit parental consent, captured at signup, before any student account is created. We do not run behavioral tracking or targeted advertising on any account — ads shown in the app are selected only by subject/class relevance, never by inferred interests or browsing behavior. Parents may review or request deletion of their child's data at any time via <a href="mailto:support@gloows365.in">support@gloows365.in</a>.</p>
+  </section>
+
+  <section id="grievance">
+    <h2>📮 Grievance Redressal</h2>
+    <p id="grievanceText">
+      For any complaint or concern about how your personal data is handled, write to
+      <a href="mailto:support@gloows365.in?subject=Grievance">support@gloows365.in</a>
+      with the subject line "Grievance". We aim to acknowledge grievances within 7 days
+      and resolve them within 30 days.
+    </p>
+    <span class="todo-note" id="grievanceTodo">⚠ Grievance Officer not yet published — set via the admin panel.</span>
+  </section>
+
+  <section>
+    <h2>🔄 Policy Updates</h2>
+    <p>We may update this Privacy Policy from time to time. When we do, we will notify you via in-app message or email. Continued use of the app after changes constitutes your acceptance of the revised policy.</p>
+  </section>
+</main>
+
+<footer>
+  © 2026 Shikshakool Academy Private Limited · All rights reserved<br />
+  <a href="mailto:support@gloows365.in">support@gloows365.in</a> &nbsp;·&nbsp;
+  <a href="index.html">gloows365.in</a>
+</footer>
+
+<script>
+  // Same Firebase project as index.html — see its "Firebase init" block.
+  var firebaseConfig = {
+    apiKey: "AIzaSyCpS6KjmnGAD5vCuB_swM2SWRd6-nhoiys",
+    authDomain: "gloows-03b6sz.firebaseapp.com",
+    projectId: "gloows-03b6sz",
+    storageBucket: "gloows-03b6sz.firebasestorage.app",
+    messagingSenderId: "1039247674814",
+    appId: "1:1039247674814:web:071d5c2982065f6712bdef"
+  };
+  firebase.initializeApp(firebaseConfig);
+  var db = firebase.firestore();
+
+  db.collection("publicConfig").doc("grievanceOfficer").get().then(function (snap) {
+    if (!snap.exists) return;
+    var o = snap.data();
+    if (!o.name) return;
+
+    var email = o.email || "support@gloows365.in";
+    var text = "Grievance Officer: " + o.name + (o.designation ? ", " + o.designation : "") +
+      '. For any complaint or concern about how your personal data is handled, write to <a href="mailto:' +
+      email + '?subject=Grievance">' + email + '</a>' +
+      (o.phone ? " or call " + o.phone : "") +
+      ' with the subject line "Grievance". We aim to acknowledge grievances within 7 days and resolve them within 30 days.';
+
+    document.getElementById("grievanceText").innerHTML = text;
+    var todo = document.getElementById("grievanceTodo");
+    if (todo) todo.style.display = "none";
+  }).catch(function (err) {
+    console.error("Failed to load grievance officer details:", err);
+  });
+</script>
+
+</body>
+</html>

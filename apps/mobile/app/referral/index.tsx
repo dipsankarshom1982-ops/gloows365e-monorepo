@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useAppTranslation } from "@/context/LanguageContext";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import { useReferral } from "@/hooks/useReferral";
 import { ReferralDoc } from "@/services/referralService";
 import { Ionicons } from "@expo/vector-icons";
@@ -22,7 +23,19 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function ReferralScreen() {
+// FIX (Mobile route coverage audit — Phase 2): referral had no onboarding/
+// restart protection despite being account-specific (referral code, coin
+// rewards). Confirmed live bypass: ReferralCard.tsx pushes here from the
+// Home tab. Wrapped below with the shared guard; screen unchanged.
+export default function ReferralRoute() {
+  return (
+    <OnboardingGuard>
+      <ReferralScreen />
+    </OnboardingGuard>
+  );
+}
+
+function ReferralScreen() {
   const { t } = useAppTranslation();
   const {
     referralCode,

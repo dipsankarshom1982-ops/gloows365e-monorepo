@@ -9,6 +9,9 @@ import { onRequest } from "firebase-functions/v2/https";
 import { callGeminiText, parseJsonFromResponse } from "./gemini";
 import { getRedis, todayIST, TTL, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
+import { tryDebitAiGuruCredit, refundAiGuruCredit } from "./aiGuruCreditDebit";
+import { resolveStudentLanguage, getLanguageInstruction } from "./aiLanguage";
+import { getClassLevelInstruction, resolveClassLevelForRequest } from "./aiStudentContext";
 
 const db = admin.firestore();
 const FREE_EXAMS_DAILY    = 1;  // free: 1 exam/day
@@ -29,7 +32,7 @@ async function verifyAuthToken(req: any): Promise<string> {
 }
 
 function buildExamPrompt(
-  classLevel: string,
+  classLevel: number,
   board: string,
   subject: string,
   chapter: string,
@@ -37,10 +40,13 @@ function buildExamPrompt(
   language: string,
   questionCount: number
 ): string {
+  const levelInstruction = getClassLevelInstruction(classLevel);
   return `You are an expert ${board} exam question setter for Class ${classLevel} ${subject}.
 
 Generate a ${difficulty} difficulty mock test for the chapter/topic: "${chapter}".
-The student's preferred language is ${language} — write questions and options in ${language === "Hindi" ? "Hindi" : language === "Bengali" ? "Bengali" : "English"}.
+
+${getLanguageInstruction(language)}${levelInstruction ? `\n${levelInstruction}` : ""}
+This applies to every text field below — examTitle, question, options, explanation, and concept — not just the questions themselves.
 
 Return ONLY a valid JSON object:
 {
@@ -149,14 +155,32 @@ export const generateExam = onRequest(
       return;
     }
 
-    const { classLevel, board, subject, chapter, difficulty = "Standard", language = "English", questionCount = 15 } = req.body ?? {};
+    const { classLevel: requestedClass, board, subject, chapter, difficulty = "Standard", language: requestedLanguage, questionCount = 15 } = req.body ?? {};
 
     if (!subject || !chapter) {
       res.status(400).json({ error: "subject and chapter are required", code: "MISSING_PARAMS" });
       return;
     }
 
+    // Class 3–5 students are pinned to their own class; older students may
+    // pick another supported class. No default class is ever assumed.
+    const classLevel = await resolveClassLevelForRequest(uid, db, requestedClass);
+    if (classLevel === null) {
+      res.status(400).json({ error: "Set your class in your profile to generate an exam.", code: "CLASS_REQUIRED" });
+      return;
+    }
+
+    // Priority order per functions/src/aiLanguage.ts: this request's own
+    // language field (already correctly sourced from studentProfile.
+    // preferredLanguage on the client) → the student's saved preference
+    // looked up server-side → English. Never trusts an unrecognized value
+    // the way the old `language = "English"` default silently did.
+    const language = await resolveStudentLanguage(uid, db, requestedLanguage);
+
     // ── Rate limit ───────────────────────────────────────────────────────────
+    // creditTxId declared outside this try so the generate-exam catch
+    // further down can refund it if the request fails after this point.
+    let creditTxId: string | null = null;
     try {
       const { isPremium } = await getSubscription(uid, db);
       const dailyLimit = isPremium ? PREMIUM_EXAMS_DAILY : FREE_EXAMS_DAILY;
@@ -166,14 +190,33 @@ export const generateExam = onRequest(
       try { const c = await getRedis().get<number>(key); used = c ?? 0; } catch {}
 
       if (used >= dailyLimit) {
-        res.status(429).json({
-          error: isPremium
-            ? `Daily exam limit reached (${PREMIUM_EXAMS_DAILY}/day).`
-            : `Free tier: 1 exam/day. Upgrade for unlimited exams.`,
-          code: "LIMIT_REACHED",
-          isPremium,
-        });
-        return;
+        // Premium never pays credits, even at its own generous daily cap.
+        if (isPremium) {
+          res.status(429).json({
+            error: `Daily exam limit reached (${PREMIUM_EXAMS_DAILY}/day).`,
+            code: "LIMIT_REACHED",
+            isPremium,
+          });
+          return;
+        }
+
+        const debit = await tryDebitAiGuruCredit(uid, "EXAM_SIMULATOR", db);
+        if (!debit.ok) {
+          const balance  = debit.reason === "insufficient" ? debit.balance  : 0;
+          const required = debit.reason === "insufficient" ? debit.required : 1;
+          const balanceNote = debit.reason === "insufficient"
+            ? ` You have ${balance} credit${balance === 1 ? "" : "s"} left, need ${required}.`
+            : "";
+          res.status(429).json({
+            error: `Free tier: ${FREE_EXAMS_DAILY} exam/day.${balanceNote} Buy credits or upgrade to Premium.`,
+            code: "CREDITS_EXHAUSTED",
+            isPremium,
+            creditBalance: balance,
+            creditsRequired: required,
+          });
+          return;
+        }
+        creditTxId = debit.txId;
       }
     } catch {}
 
@@ -190,7 +233,7 @@ export const generateExam = onRequest(
     // ── Generate exam ────────────────────────────────────────────────────────
     try {
       const prompt = buildExamPrompt(
-        classLevel ?? "10", board ?? "CBSE", subject, chapter,
+        classLevel, board ?? "CBSE", subject, chapter,
         difficulty, language, Math.min(Math.max(Number(questionCount), 10), 20)
       );
       const raw = await callGeminiText(prompt);
@@ -224,6 +267,7 @@ export const generateExam = onRequest(
       res.status(200).json(parsed);
     } catch (e: any) {
       console.error("generateExam error:", e);
+      if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "EXAM_SIMULATOR", db);
       res.status(500).json({ error: e?.message ?? "Failed to generate exam", code: "AI_ERROR" });
     }
   }

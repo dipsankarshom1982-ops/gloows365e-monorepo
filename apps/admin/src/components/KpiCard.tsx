@@ -7,14 +7,16 @@ interface Props {
   suffix?: string;
   icon: string;
   color: string;
-  format?: "number" | "percent";
+  format?: "number" | "percent" | "decimal";
 }
 
 export default function KpiCard({ label, value, suffix = "", icon, color, format = "number" }: Props) {
   const count = useMotionValue(0);
-  const rounded = useTransform(count, (v) =>
-    format === "percent" ? `${(v * 100).toFixed(1)}%` : `${Math.round(v).toLocaleString("en-IN")}${suffix}`
-  );
+  const rounded = useTransform(count, (v) => {
+    if (format === "percent") return `${(v * 100).toFixed(1)}%`;
+    if (format === "decimal") return `${v.toFixed(1)}${suffix}`;
+    return `${Math.round(v).toLocaleString("en-IN")}${suffix}`;
+  });
   const prevRef = useRef(0);
 
   useEffect(() => {

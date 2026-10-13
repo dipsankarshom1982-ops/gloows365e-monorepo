@@ -1,9 +1,10 @@
 // PATH: admin-web/src/pages/FeatureControl.tsx
 
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ToggleSwitch from "../components/ToggleSwitch";
+import { diffFlags, saveFlagDiffs, type FlagDocName, type FlagMap } from "../lib/flagDiffSave";
 import { db } from "../lib/firebase";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -12,10 +13,11 @@ interface AiFeature{ key: string; icon: string; label: string; description: stri
 
 // ─── Home page sections ────────────────────────────────────────────────────────
 const HOME_SECTIONS: Section[] = [
-  { key: "stories",          icon: "📖", label: "Stories ✅ LAUNCH",        description: "Horizontal story circles — LIVE DAY 1" },
-  { key: "aiguru",           icon: "🤖", label: "AI Guru Banner ✅ LAUNCH",  description: "AI Guru promo card — LIVE DAY 1" },
-  { key: "creator_reels",    icon: "🎬", label: "Short Reels ✅ LAUNCH",     description: "Admin-curated short reels — LIVE DAY 1" },
-  { key: "referral",         icon: "🎁", label: "Referral Card ✅ LAUNCH",   description: "Refer & Earn card — LIVE DAY 1" },
+  { key: "stories",          icon: "📖", label: "Stories",        description: "Horizontal story circles" },
+  { key: "aiguru",           icon: "🤖", label: "AI Guru Banner",  description: "AI Guru promo card" },
+  { key: "daily_streak_quiz", icon: "🔥", label: "Daily Streak Quiz Card", description: "Daily quiz streak promo card" },
+  { key: "creator_reels",    icon: "🎬", label: "Short Reels",     description: "Admin-curated short reels" },
+  { key: "referral",         icon: "🎁", label: "Referral Card",   description: "Refer & Earn card" },
   { key: "skillshorts",      icon: "⚡", label: "Skill Battle Reels",        description: "Student battle reels from approved posts" },
   { key: "skillbattle",      icon: "⚔️", label: "Skill Battle Preview",      description: "Live skill battle cards section" },
   { key: "home_ads",         icon: "📢", label: "Home Ads Carousel",         description: "Banner ads carousel" },
@@ -27,21 +29,16 @@ const HOME_SECTIONS: Section[] = [
   { key: "learning",         icon: "🎥", label: "Short Learning Reels",      description: "Learning reels injected between posts" },
   { key: "feed_posts",       icon: "📝", label: "Feed Posts",                description: "Student photo/video posts in feed" },
   { key: "feed_ads",         icon: "📣", label: "Feed Ads",                  description: "Ads injected between feed posts" },
+  { key: "glostore_preview", icon: "🛍️", label: "GloStore Preview",          description: "Affiliate product flash cards (max 20, picked below in Affiliate Products)" },
 ];
 
 // ─── AI Guru features ──────────────────────────────────────────────────────────
-// ─── 🚀 LAUNCH FEATURES — these 6 go live on day 1 ───────────────────────────
-const LAUNCH_HOME_KEYS   = ["stories", "aiguru", "creator_reels", "referral"];
-const LAUNCH_AI_KEYS     = ["ask_aiguru", "notebook"];
-const LAUNCH_DRAWER_KEYS = ["home", "wallet", "leaderboard", "language", "settings"];
 
 const AIGURU_FEATURES: AiFeature[] = [
-  // ── Launch day features ──
-  { key: "ask_aiguru",     icon: "🤖",  label: "Ask AI Guru ✅ LAUNCH",   description: "Q&A chat with prompt chips — LIVE DAY 1" },
-  { key: "notebook",       icon: "📓",  label: "My AI Notebook ✅ LAUNCH", description: "Saved AI conversations — LIVE DAY 1" },
-  // ── Post-launch features ──
+  { key: "ask_aiguru",     icon: "🤖",  label: "Ask AI Guru",   description: "Q&A chat with prompt chips" },
+  { key: "notebook",       icon: "📓",  label: "My AI Notebook", description: "Saved AI conversations" },
   { key: "dashboard",      icon: "🧠",  label: "AI Dashboard",             description: "Personal AI study dashboard" },
-  { key: "vidyaguru",      icon: "🧑‍🏫", label: "VidyaGuru Chat",           description: "AI tutor voice/text chat" },
+  { key: "skillguru",      icon: "🎯",  label: "Ask AI SkillGuru",         description: "AI skills coach voice/text chat (resume, interview, communication, coding, soft skills)" },
   { key: "photo_solve",    icon: "📸",  label: "PhotoSolve AI",             description: "Snap a question photo → instant solution" },
   { key: "exam_simulator", icon: "🎯",  label: "Exam Simulator",            description: "AI-generated board-pattern mock tests" },
   { key: "voice_tutor",    icon: "🎙️",  label: "Voice Tutor",               description: "Speak doubt in regional language, get answer" },
@@ -54,16 +51,34 @@ const AIGURU_FEATURES: AiFeature[] = [
 ];
 
 // ─── Drawer menu items ─────────────────────────────────────────────────────────
+// CORRECTED (Feature Control + App Module restructure audit): the previous
+// list here (home, starboard, dashboard, aiguru, learnfun, skillboost,
+// skillboard) predates the bottom-nav restructure — those were Drawer
+// shortcuts before Home/Dashboard/Learn/Challenge became fixed tabs, and
+// the actual Drawer (apps/mobile/app/(drawer)/_layout.tsx) has never
+// checked drawerItem() for any of them since. Toggling them here had zero
+// effect. Meanwhile the Drawer DOES check reels/myPrizes/myProfile/
+// subscription/feedback/about/privacy, none of which were toggleable here
+// — they silently defaulted to always-visible with no admin control at
+// all. This list is now the exact 11 keys the real Drawer checks, grouped
+// to match its actual on-screen sections (Quick Access / Account /
+// Support / Other) for clarity.
 const DRAWER_ITEMS: Section[] = [
-  { key: "home",        icon: "🏠", label: "Home",         description: "Home tab link",                  locked: true },
-  { key: "leaderboard", icon: "🏆", label: "Leaderboard",  description: "Pan India leaderboard" },
-  { key: "wallet",      icon: "💰", label: "Wallet",       description: "VCoins wallet" },
-  { key: "settings",    icon: "⚙️", label: "Settings",     description: "App settings" },
-  { key: "dashboard",   icon: "📊", label: "Dashboard",    description: "Student dashboard" },
-  { key: "aiguru",      icon: "🤖", label: "AI Guru",      description: "AI Guru main screen" },
-  { key: "learnfun",    icon: "📖", label: "LearnFun",     description: "LearnFun gamification screen" },
-  { key: "language",    icon: "🌐", label: "Language",     description: "Language selector" },
-  { key: "skillboard",  icon: "⚔️", label: "Skill Board",  description: "Skill battle leaderboard" },
+  // Quick Access
+  { key: "reels",        icon: "🎬", label: "Reels",          description: "Quick Access — reels feed" },
+  { key: "wallet",       icon: "💰", label: "Wallet",         description: "Quick Access — VCoins wallet" },
+  { key: "myPrizes",     icon: "🎁", label: "My Prizes",      description: "Quick Access — prize claims" },
+  // Account
+  { key: "myProfile",    icon: "👤", label: "My Profile",     description: "Account — profile settings" },
+  { key: "subscription", icon: "🧾", label: "Subscription",   description: "Account — billing history" },
+  { key: "settings",     icon: "⚙️", label: "Settings",       description: "Account — app settings" },
+  // Support
+  { key: "feedback",     icon: "⭐", label: "Feedback",       description: "Support — feedback & ratings" },
+  { key: "about",        icon: "ℹ️", label: "About Gloows365", description: "Support — about screen" },
+  { key: "privacy",      icon: "🔒", label: "Privacy",        description: "Support — privacy policy" },
+  // Other
+  { key: "language",     icon: "🌐", label: "Language",       description: "Other — language selector" },
+  { key: "glostore",     icon: "🛍️", label: "GloStore",       description: "Other — affiliate product store" },
 ];
 
 // ─── Defaults ──────────────────────────────────────────────────────────────────
@@ -115,31 +130,131 @@ export default function FeatureControl() {
   const [homeFlags,   setHomeFlags]   = useState<Record<string, boolean>>(defaultHomeFlags);
   const [aiFlags,     setAiFlags]     = useState<Record<string, boolean>>(defaultAiFlags);
   const [drawerFlags, setDrawerFlags] = useState<Record<string, boolean>>(defaultDrawerFlags);
-  const [loading, setSaving_l] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [saving,  setSaving]   = useState(false);
   const [saved,   setSaved]    = useState(false);
 
+  // What this page last loaded from / successfully saved to Firestore. Save
+  // writes only the flags that differ from this, as field-level merges — see
+  // lib/flagDiffSave.ts — so a stale page can't revert another Admin's changes.
+  // UNCHANGED role/mechanism from the earlier fix — still the sole input to
+  // diffFlags()/saveFlagDiffs() below.
+  const baseline = useRef<Record<FlagDocName, FlagMap>>({
+    homeSection: defaultHomeFlags, aiGuru: defaultAiFlags, drawerItems: defaultDrawerFlags,
+  });
+
+  // Keys the Admin has locally toggled (via a card or Enable/Disable All)
+  // since the last successful Save — i.e. a pending, unsaved edit. Live
+  // snapshots below must skip these keys entirely (both the displayed value
+  // AND baseline) so a remote change never silently erases what the Admin is
+  // mid-editing; Save removes a key once its write succeeds. A ref, not
+  // state — it doesn't drive rendering on its own, only alongside the
+  // homeFlags/aiFlags/drawerFlags updates that already do.
+  const dirtyKeys = useRef<Record<FlagDocName, Set<string>>>({
+    homeSection: new Set(), aiGuru: new Set(), drawerItems: new Set(),
+  });
+
+  // Reliability fix: this used to be a one-time getDoc() at mount, so this
+  // page could sit on stale data indefinitely — another admin's change, or
+  // the same admin in another tab, never showed up without a manual reload
+  // (same issue AppStructure.tsx had, fixed the same way there). Live
+  // onSnapshot listeners make Firestore the continuous source of truth for
+  // any key the Admin hasn't locally touched, while dirtyKeys (above)
+  // protects whatever they're still mid-editing.
   useEffect(() => {
-    Promise.all([
-      getDoc(doc(db, "featureFlags", "homeSection")),
-      getDoc(doc(db, "featureFlags", "aiGuru")),
-      getDoc(doc(db, "featureFlags", "drawerItems")),
-    ]).then(([homeSnap, aiSnap, drawerSnap]) => {
-      if (homeSnap.exists())   setHomeFlags({   ...defaultHomeFlags,   ...homeSnap.data()   });
-      if (aiSnap.exists())     setAiFlags({     ...defaultAiFlags,     ...aiSnap.data()     });
-      if (drawerSnap.exists()) setDrawerFlags({ ...defaultDrawerFlags, ...drawerSnap.data() });
-      setSaving_l(false);
-    }).catch(() => setSaving_l(false));
+    let loaded = 0;
+    const total = 3;
+    const check = () => { if (++loaded === total) setLoading(false); };
+
+    const unsubHome = onSnapshot(
+      doc(db, "featureFlags", "homeSection"),
+      (snap) => {
+        if (snap.exists()) {
+          const next = { ...defaultHomeFlags, ...(snap.data() as FlagMap) };
+          const dirty = dirtyKeys.current.homeSection;
+          setHomeFlags((prev) => {
+            const merged = { ...prev };
+            for (const k of Object.keys(next)) if (!dirty.has(k)) merged[k] = next[k];
+            return merged;
+          });
+          const newBaseline = { ...baseline.current.homeSection };
+          for (const k of Object.keys(next)) if (!dirty.has(k)) newBaseline[k] = next[k];
+          baseline.current.homeSection = newBaseline;
+        }
+        check();
+      },
+      () => check()
+    );
+    const unsubAi = onSnapshot(
+      doc(db, "featureFlags", "aiGuru"),
+      (snap) => {
+        if (snap.exists()) {
+          const next = { ...defaultAiFlags, ...(snap.data() as FlagMap) };
+          const dirty = dirtyKeys.current.aiGuru;
+          setAiFlags((prev) => {
+            const merged = { ...prev };
+            for (const k of Object.keys(next)) if (!dirty.has(k)) merged[k] = next[k];
+            return merged;
+          });
+          const newBaseline = { ...baseline.current.aiGuru };
+          for (const k of Object.keys(next)) if (!dirty.has(k)) newBaseline[k] = next[k];
+          baseline.current.aiGuru = newBaseline;
+        }
+        check();
+      },
+      () => check()
+    );
+    const unsubDrawer = onSnapshot(
+      doc(db, "featureFlags", "drawerItems"),
+      (snap) => {
+        if (snap.exists()) {
+          const next = { ...defaultDrawerFlags, ...(snap.data() as FlagMap) };
+          const dirty = dirtyKeys.current.drawerItems;
+          setDrawerFlags((prev) => {
+            const merged = { ...prev };
+            for (const k of Object.keys(next)) if (!dirty.has(k)) merged[k] = next[k];
+            return merged;
+          });
+          const newBaseline = { ...baseline.current.drawerItems };
+          for (const k of Object.keys(next)) if (!dirty.has(k)) newBaseline[k] = next[k];
+          baseline.current.drawerItems = newBaseline;
+        }
+        check();
+      },
+      () => check()
+    );
+
+    return () => { unsubHome(); unsubAi(); unsubDrawer(); };
   }, []);
+
+  const toggleHome   = (key: string) => { dirtyKeys.current.homeSection.add(key); setHomeFlags((p) => ({ ...p, [key]: !p[key] })); };
+  const toggleAi     = (key: string) => { dirtyKeys.current.aiGuru.add(key);      setAiFlags((p) => ({ ...p, [key]: !p[key] })); };
+  const toggleDrawer = (key: string) => { dirtyKeys.current.drawerItems.add(key); setDrawerFlags((p) => ({ ...p, [key]: !p[key] })); };
+
+  const setAllHome   = (value: boolean, keys: string[]) => { keys.forEach((k) => dirtyKeys.current.homeSection.add(k));   setHomeFlags(Object.fromEntries(keys.map((k) => [k, value]))); };
+  const setAllAi     = (value: boolean, keys: string[]) => { keys.forEach((k) => dirtyKeys.current.aiGuru.add(k));        setAiFlags(Object.fromEntries(keys.map((k) => [k, value]))); };
+  const setAllDrawer = (mapper: (d: Section) => boolean, items: Section[]) => { items.forEach((d) => dirtyKeys.current.drawerItems.add(d.key)); setDrawerFlags(Object.fromEntries(items.map((d) => [d.key, mapper(d)]))); };
 
   const save = async () => {
     setSaving(true); setSaved(false);
     try {
-      await Promise.all([
-        setDoc(doc(db, "featureFlags", "homeSection"), homeFlags),
-        setDoc(doc(db, "featureFlags", "aiGuru"),      aiFlags),
-        setDoc(doc(db, "featureFlags", "drawerItems"), drawerFlags),
-      ]);
+      const results = await saveFlagDiffs(db, {
+        homeSection: diffFlags(baseline.current.homeSection, homeFlags),
+        aiGuru:      diffFlags(baseline.current.aiGuru,      aiFlags),
+        drawerItems: diffFlags(baseline.current.drawerItems, drawerFlags),
+      });
+      // Only documents whose write succeeded become the new baseline, so a
+      // failed write is never treated as persisted (it stays in the next diff
+      // and next Save attempt). A written key also leaves dirtyKeys — it's no
+      // longer a pending edit, so future remote snapshots resume updating it.
+      for (const r of results) {
+        if (!r.error) {
+          baseline.current[r.name] = { ...baseline.current[r.name], ...r.written };
+          for (const k of Object.keys(r.written)) dirtyKeys.current[r.name].delete(k);
+        }
+      }
+      const failed = results.find((r) => r.error);
+      if (failed) throw failed.error;
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err: any) {
@@ -158,7 +273,7 @@ export default function FeatureControl() {
   );
 
   const SaveBtn = ({ className = "" }) => (
-    <button onClick={save} disabled={saving}
+    <button onClick={() => save()} disabled={saving}
       className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${
         saved ? "bg-green-600 text-white" : "bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white"
       } ${className}`}>
@@ -180,52 +295,6 @@ export default function FeatureControl() {
         <SaveBtn />
       </div>
 
-      {/* ── 🚀 Launch Features ──────────────────────────────────────────────── */}
-      <section className="border border-emerald-500/40 rounded-2xl p-5 bg-emerald-950/20">
-        <div className="flex items-center gap-3 mb-4">
-          <div>
-            <h2 className="text-xl font-black text-emerald-400">🚀 Launch Day Features</h2>
-            <p className="text-slate-400 text-xs mt-0.5">
-              These 6 features go live on Day 1. Everything else can be toggled post-launch.
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              const newHome = { ...homeFlags };
-              LAUNCH_HOME_KEYS.forEach((k) => (newHome[k] = true));
-              setHomeFlags(newHome);
-              const newAi = { ...aiFlags };
-              LAUNCH_AI_KEYS.forEach((k) => (newAi[k] = true));
-              setAiFlags(newAi);
-              const newDrawer = { ...drawerFlags };
-              LAUNCH_DRAWER_KEYS.forEach((k) => (newDrawer[k] = true));
-              setDrawerFlags(newDrawer);
-            }}
-            className="ml-auto text-xs px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold transition-colors"
-          >
-            ✅ Enable All Launch Features
-          </button>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {[
-            { label: "📖 Stories",        key: "stories",      flags: homeFlags,   setter: setHomeFlags   },
-            { label: "🤖 AI Guru Banner",  key: "aiguru",       flags: homeFlags,   setter: setHomeFlags   },
-            { label: "🎬 Short Reels",     key: "creator_reels",flags: homeFlags,   setter: setHomeFlags   },
-            { label: "🎁 Referral Card",   key: "referral",     flags: homeFlags,   setter: setHomeFlags   },
-            { label: "🤖 Ask AI Guru",     key: "ask_aiguru",   flags: aiFlags,     setter: setAiFlags     },
-            { label: "📓 AI Notebook",     key: "notebook",     flags: aiFlags,     setter: setAiFlags     },
-          ].map((f) => (
-            <div key={f.key} className={`flex items-center justify-between gap-3 rounded-xl px-4 py-3 border ${f.flags[f.key] ? "border-emerald-500/50 bg-emerald-900/20" : "border-slate-700 bg-slate-800/40"}`}>
-              <span className="text-sm font-bold text-white">{f.label}</span>
-              <ToggleSwitch
-                enabled={f.flags[f.key] ?? true}
-                onToggle={() => f.setter((prev: Record<string,boolean>) => ({ ...prev, [f.key]: !prev[f.key] }))}
-              />
-            </div>
-          ))}
-        </div>
-      </section>
-
       {/* ── Drawer Items ────────────────────────────────────────────────────── */}
       <section>
         <div className="flex items-center gap-3 mb-4">
@@ -236,11 +305,11 @@ export default function FeatureControl() {
             </p>
           </div>
           <div className="flex gap-2 ml-auto">
-            <button onClick={() => setDrawerFlags(Object.fromEntries(DRAWER_ITEMS.map((d) => [d.key, true])))}
+            <button onClick={() => setAllDrawer(() => true, DRAWER_ITEMS)}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">
               Enable All
             </button>
-            <button onClick={() => setDrawerFlags(Object.fromEntries(DRAWER_ITEMS.map((d) => [d.key, d.locked ? true : false])))}
+            <button onClick={() => setAllDrawer((d) => (d.locked ? true : false), DRAWER_ITEMS)}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">
               Disable All
             </button>
@@ -252,7 +321,7 @@ export default function FeatureControl() {
               <SectionCard
                 item={item}
                 enabled={drawerFlags[item.key] ?? true}
-                onToggle={() => setDrawerFlags((p) => ({ ...p, [item.key]: !p[item.key] }))}
+                onToggle={() => toggleDrawer(item.key)}
               />
             </motion.div>
           ))}
@@ -267,9 +336,9 @@ export default function FeatureControl() {
             <p className="text-slate-500 text-xs mt-0.5">{homeEnabledCount} of {HOME_SECTIONS.length} sections enabled</p>
           </div>
           <div className="flex gap-2 ml-auto">
-            <button onClick={() => setHomeFlags(Object.fromEntries(HOME_SECTIONS.map((s) => [s.key, true])))}
+            <button onClick={() => setAllHome(true, HOME_SECTIONS.map((s) => s.key))}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">Enable All</button>
-            <button onClick={() => setHomeFlags(Object.fromEntries(HOME_SECTIONS.map((s) => [s.key, false])))}
+            <button onClick={() => setAllHome(false, HOME_SECTIONS.map((s) => s.key))}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">Disable All</button>
           </div>
         </div>
@@ -279,7 +348,7 @@ export default function FeatureControl() {
               <SectionCard
                 item={section}
                 enabled={homeFlags[section.key] ?? true}
-                onToggle={() => setHomeFlags((p) => ({ ...p, [section.key]: !p[section.key] }))}
+                onToggle={() => toggleHome(section.key)}
               />
             </motion.div>
           ))}
@@ -294,9 +363,9 @@ export default function FeatureControl() {
             <p className="text-slate-500 text-xs mt-0.5">{aiEnabledCount} of {AIGURU_FEATURES.length} features enabled</p>
           </div>
           <div className="flex gap-2 ml-auto">
-            <button onClick={() => setAiFlags(Object.fromEntries(AIGURU_FEATURES.map((f) => [f.key, true])))}
+            <button onClick={() => setAllAi(true, AIGURU_FEATURES.map((f) => f.key))}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">Enable All</button>
-            <button onClick={() => setAiFlags(Object.fromEntries(AIGURU_FEATURES.map((f) => [f.key, false])))}
+            <button onClick={() => setAllAi(false, AIGURU_FEATURES.map((f) => f.key))}
               className="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors">Disable All</button>
           </div>
         </div>
@@ -306,7 +375,7 @@ export default function FeatureControl() {
               <SectionCard
                 item={feature}
                 enabled={aiFlags[feature.key] ?? true}
-                onToggle={() => setAiFlags((p) => ({ ...p, [feature.key]: !p[feature.key] }))}
+                onToggle={() => toggleAi(feature.key)}
               />
             </motion.div>
           ))}

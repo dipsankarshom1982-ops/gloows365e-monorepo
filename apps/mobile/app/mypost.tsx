@@ -1,4 +1,5 @@
 import PostCard from "@/components/ProfilePostCard";
+import OnboardingGuard from "@/components/OnboardingGuard";
 import { useTheme } from "@/context/ThemeContext";
 import { auth, db } from "@/lib/firebase";
 import {
@@ -20,7 +21,17 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function MyPostScreen() {
+// FIX (Mobile route coverage audit): mypost had no onboarding/restart
+// protection — wrapped below with the shared guard; screen unchanged.
+export default function MyPostRoute() {
+  return (
+    <OnboardingGuard>
+      <MyPostScreen />
+    </OnboardingGuard>
+  );
+}
+
+function MyPostScreen() {
   const { colors } = useTheme();
   const [userData, setUserData] = useState<any>(null);
   const [posts, setPosts] = useState<any[]>([]);

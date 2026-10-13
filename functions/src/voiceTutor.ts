@@ -14,6 +14,9 @@ import { onRequest } from "firebase-functions/v2/https";
 import { callGeminiWithAudio, callGeminiText, parseJsonFromResponse } from "./gemini";
 import { getRedis, todayIST, ttlUntilMidnightIST } from "./redish";
 import { getSubscription } from "./usageCheck";
+import { tryDebitAiGuruCredit, refundAiGuruCredit } from "./aiGuruCreditDebit";
+import { resolveStudentLanguage, getDetectOrFallbackInstruction } from "./aiLanguage";
+import { boardClassPhrase, getClassLevelInstruction, resolveStudentClassLevel } from "./aiStudentContext";
 
 const db = admin.firestore();
 const FREE_VOICE_DAILY    = 3;   // free: 3 voice queries/day
@@ -33,49 +36,63 @@ async function verifyAuthToken(req: any): Promise<string> {
   return decoded.uid;
 }
 
-function buildVoiceTutorPrompt(classLevel: string, board: string): string {
-  return `You are an expert AI tutor for Indian school students (${board}, Class ${classLevel}).
+// FIX (production, 2026-09-06): the audio path used to hardcode "answer in
+// the same language as the question" with no fallback at all for unclear
+// audio — Gemini was left to guess. Now falls back to the student's saved
+// preference (looked up server-side) instead of guessing, via the same
+// shared instruction every Ask AI Guru feature uses. See functions/src/
+// aiLanguage.ts's header comment.
+function buildVoiceTutorPrompt(classLevel: number | null, board: string, preferredLanguage: string): string {
+  const levelInstruction = getClassLevelInstruction(classLevel);
+  return `You are an expert AI tutor for Indian school students (${boardClassPhrase(board, classLevel)}).
 
 A student has sent you an audio question. First, transcribe what they said, then answer it.
+
+${getDetectOrFallbackInstruction(preferredLanguage)}${levelInstruction ? `\n${levelInstruction}` : ""}
 
 Return ONLY a valid JSON object:
 {
   "transcribedQuestion": "<what the student said, exactly>",
   "detectedLanguage": "<English | Hindi | Bengali | Assamese | Tamil | Telugu | Other>",
-  "answer": "<your complete answer in the SAME language the student used. If Hindi, answer in Hindi. If Bengali, answer in Bengali. Use simple, friendly language as a real teacher would.>",
+  "answer": "<your complete answer, following the language rule above. Use simple, friendly language as a real teacher would.>",
   "keyPoints": ["<main point 1>", "<main point 2>", "<main point 3 if needed>"],
   "followUpSuggestion": "<one suggested follow-up question to deepen understanding>",
   "subject": "<detected subject: Math/Science/etc>"
 }
 
 Rules:
-- Answer in the SAME language as the question. This is critical.
 - Be warm and encouraging — like a real tutor.
 - Keep answer under 150 words — clear and spoken-friendly (it will be read aloud via TTS).
 - Do NOT use markdown, asterisks, or formatting symbols.
 - If audio is unclear, set transcribedQuestion to "Could not hear clearly" and ask to try again.`;
 }
 
+// FIX (production, 2026-09-06): `detectedLanguage` used to default straight
+// to "English" whenever the client didn't send one — now falls back to the
+// student's saved preference instead, same priority order as every other
+// Ask AI Guru feature (see caller).
 function buildTextVoiceTutorPrompt(
   question: string,
   detectedLanguage: string,
-  classLevel: string,
+  classLevel: number | null,
   board: string
 ): string {
-  return `You are an expert AI tutor for Indian school students (${board}, Class ${classLevel}).
+  const levelInstruction = getClassLevelInstruction(classLevel);
+  return `You are an expert AI tutor for Indian school students (${boardClassPhrase(board, classLevel)}).
 
 Student's question (in ${detectedLanguage}): "${question}"
 
+${getDetectOrFallbackInstruction(detectedLanguage)}${levelInstruction ? `\n${levelInstruction}` : ""}
+
 Return ONLY a valid JSON object:
 {
-  "answer": "<your complete answer in ${detectedLanguage}. Use simple, friendly language. Max 120 words.>",
+  "answer": "<your complete answer, following the language rule above. Use simple, friendly language. Max 120 words.>",
   "keyPoints": ["<main point 1>", "<main point 2>"],
   "followUpSuggestion": "<one follow-up question>",
   "subject": "<detected subject>"
 }
 
 Rules:
-- Answer in ${detectedLanguage} only.
 - No markdown or symbols — plain spoken sentences only.
 - Be encouraging.`;
 }
@@ -104,7 +121,6 @@ export const voiceTutorAnswer = onRequest(
       audioMimeType,
       textQuestion,      // fallback: if client sends text instead of audio
       detectedLanguage,
-      classLevel,
       board,
     } = req.body ?? {};
 
@@ -116,7 +132,18 @@ export const voiceTutorAnswer = onRequest(
       return;
     }
 
+    // Priority order per functions/src/aiLanguage.ts: this request's own
+    // detectedLanguage (if recognized) → the student's saved preference
+    // looked up server-side → English. Used as the fallback language for
+    // ambiguous/unclear input in both paths below.
+    const preferredLanguage = await resolveStudentLanguage(uid, db, detectedLanguage);
+    // Class comes from the student's own profile, never the body — see aiStudentContext.ts.
+    const classLevel = await resolveStudentClassLevel(uid, db);
+
     // ── Rate limit check ────────────────────────────────────────────────────
+    // creditTxId declared outside this try so the Gemini-call catch further
+    // down can refund it if the request fails after this point.
+    let creditTxId: string | null = null;
     try {
       const { isPremium } = await getSubscription(uid, db);
       const dailyLimit = isPremium ? PREMIUM_VOICE_DAILY : FREE_VOICE_DAILY;
@@ -126,14 +153,33 @@ export const voiceTutorAnswer = onRequest(
       try { const c = await getRedis().get<number>(key); used = c ?? 0; } catch {}
 
       if (used >= dailyLimit) {
-        res.status(429).json({
-          error: isPremium
-            ? `Daily voice tutor limit reached (${PREMIUM_VOICE_DAILY}/day).`
-            : `Free tier: ${FREE_VOICE_DAILY} voice questions/day. Upgrade for unlimited.`,
-          code: "LIMIT_REACHED",
-          isPremium,
-        });
-        return;
+        // Premium never pays credits, even at its own generous daily cap.
+        if (isPremium) {
+          res.status(429).json({
+            error: `Daily voice tutor limit reached (${PREMIUM_VOICE_DAILY}/day).`,
+            code: "LIMIT_REACHED",
+            isPremium,
+          });
+          return;
+        }
+
+        const debit = await tryDebitAiGuruCredit(uid, "VOICE_TUTOR", db);
+        if (!debit.ok) {
+          const balance  = debit.reason === "insufficient" ? debit.balance  : 0;
+          const required = debit.reason === "insufficient" ? debit.required : 1;
+          const balanceNote = debit.reason === "insufficient"
+            ? ` You have ${balance} credit${balance === 1 ? "" : "s"} left, need ${required}.`
+            : "";
+          res.status(429).json({
+            error: `Free tier: ${FREE_VOICE_DAILY} voice questions/day.${balanceNote} Buy credits or upgrade to Premium.`,
+            code: "CREDITS_EXHAUSTED",
+            isPremium,
+            creditBalance: balance,
+            creditsRequired: required,
+          });
+          return;
+        }
+        creditTxId = debit.txId;
       }
     } catch {}
 
@@ -143,13 +189,13 @@ export const voiceTutorAnswer = onRequest(
 
       if (hasAudio) {
         // Full audio processing via Gemini audio understanding
-        const prompt = buildVoiceTutorPrompt(classLevel ?? "10", board ?? "CBSE");
+        const prompt = buildVoiceTutorPrompt(classLevel, board ?? "CBSE", preferredLanguage);
         const raw = await callGeminiWithAudio(prompt, audioBase64, audioMimeType);
         parsed = parseJsonFromResponse(raw);
       } else {
         // Text fallback (client already transcribed or typed)
-        const lang = detectedLanguage ?? "English";
-        const prompt = buildTextVoiceTutorPrompt(hasText, lang, classLevel ?? "10", board ?? "CBSE");
+        const lang = detectedLanguage ?? preferredLanguage;
+        const prompt = buildTextVoiceTutorPrompt(hasText, lang, classLevel, board ?? "CBSE");
         const raw = await callGeminiText(prompt);
         parsed = parseJsonFromResponse(raw);
         parsed.transcribedQuestion = hasText;
@@ -174,6 +220,7 @@ export const voiceTutorAnswer = onRequest(
       res.status(200).json(parsed);
     } catch (e: any) {
       console.error("voiceTutorAnswer error:", e);
+      if (creditTxId) await refundAiGuruCredit(uid, creditTxId, "VOICE_TUTOR", db);
       res.status(500).json({ error: e?.message ?? "Failed to process voice question", code: "AI_ERROR" });
     }
   }

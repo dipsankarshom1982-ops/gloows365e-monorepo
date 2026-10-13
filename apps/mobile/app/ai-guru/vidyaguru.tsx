@@ -28,13 +28,37 @@ import ChatBubble from "@/components/vidyaguru/ChatBubble";
 import GuruAvatar from "@/components/vidyaguru/GuruAvatar";
 import VoiceWaveform from "@/components/vidyaguru/VoiceWaveform";
 import { useAppTranslation, useLanguage } from "@/context/LanguageContext";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useTheme } from "@/context/ThemeContext";
 import type { GuruMessage, GuruState } from "@/lib/vidyaguru/types";
 import { askVidyaGuru, playGuruAudio } from "@/services/vidyaguruApi";
 
-const GREETING =
-  "Namaste! I am VidyaGuru AI — your personal AI teacher. Ask me anything about your studies — maths, science, history, anything! I'm here to help you learn and grow.";
+// FEATURE (distinct identity from other AI Guru screens): VidyaGuru's own
+// color identity — emerald + gold, not the indigo (#6366f1/#0a0a1a) every
+// other AI Guru screen (ask, dashboard, exam-simulator, photo-solve,
+// voice-tutor, the index) already uses. Chosen over the app's default
+// blue accent (colors.accent) specifically so this screen reads as its
+// own thing, not screen #6 in the same palette. Used here and in
+// GuruAvatar / ChatBubble / VoiceWaveform (all re-skinned to match).
+const EMERALD       = "#10b981";
+const EMERALD_DARK   = "#0f6e56";
+const GOLD          = "#d4a017";
+
+// FEATURE (starter prompts): this screen previously had a single static
+// greeting bubble and nothing else — no tappable conversation starters,
+// unlike ask.tsx's rich empty state. Worded as genuine doubts a student
+// brings to a 1-on-1 tutor (confusion, exam nervousness, "explain it
+// simpler"), not factual lookups — that tone belongs to ask.tsx's search
+// experience, not here. Index 0-1 stay subject-neutral since they don't
+// know the student's board/class yet at render time for every case.
+const STARTER_PROMPTS = [
+  "I don't understand this topic at all, can you explain it simply?",
+  "I'm nervous about my exam next week, what should I do?",
+  "Can you explain this like I'm in Class 6, step by step?",
+  "Give me 3 tricks to remember this chapter easily",
+  "I keep making the same mistake in my homework, help me fix it",
+  "Quiz me on what I studied today",
+];
 
 export default function VidyaGuruScreen() {
   const { colors, isDarkMode } = useTheme();
@@ -44,12 +68,16 @@ export default function VidyaGuruScreen() {
   const { studentProfile } = useStudentProfile();
   const studentName = studentProfile?.name?.split(" ")[0] ?? "Student";
   const classLevel = studentProfile?.class ?? "8";
+  const board = studentProfile?.board as string | undefined;
 
   const [messages, setMessages] = useState<GuruMessage[]>([]);
   const [inputText, setInputText] = useState("");
   const [guruState, setGuruState] = useState<GuruState>("idle");
   const [isRecording, setIsRecording] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
+  // Set only on a CREDITS_EXHAUSTED response — undefined keeps the
+  // paywall's plain pre-credits copy/CTA.
+  const [creditInfo, setCreditInfo] = useState<{ balance: number; required: number } | undefined>(undefined);
   const flatListRef = useRef<FlatList>(null);
   const currentPlayerRef = useRef<any>(null);
   // Keep messages in a ref so sendMessage callback never goes stale
@@ -57,17 +85,33 @@ export default function VidyaGuruScreen() {
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
-  // Show greeting on mount — greeting updates when language changes
+  // Show greeting on mount — greeting updates when language changes.
+  // FEATURE: greeting now references the student's class (and board, when
+  // known) instead of a generic "ask me anything" line — makes the first
+  // message feel like it's actually addressed to *this* student, not a
+  // copy-pasted intro every AI screen could show.
   useEffect(() => {
+    const greetingBody = board
+      ? t(
+          "vidyaGuruGreetingWithBoard",
+          `I'm VidyaGuru, your personal AI teacher for Class ${classLevel} (${board}). Ask me anything — doubts, homework help, exam tips, or just a friendly chat about what you're learning. I can answer in ${languageName} too!`,
+          { classLevel, board, language: languageName }
+        )
+      : t(
+          "vidyaGuruGreetingNoBoard",
+          `I'm VidyaGuru, your personal AI teacher for Class ${classLevel}. Ask me anything — doubts, homework help, exam tips, or just a friendly chat about what you're learning. I can answer in ${languageName} too!`,
+          { classLevel, language: languageName }
+        );
+
     const greetMsg: GuruMessage = {
       id: "greeting",
       role: "guru",
-      text: `${t("helloGreet") ?? "Hello"} ${studentName}! ${GREETING}`,
+      text: `${t("helloGreet", "Hello")} ${studentName}! ${greetingBody}`,
       createdAt: Date.now(),
     };
     setMessages([greetMsg]);
     messagesRef.current = [greetMsg];
-  }, [languageName]);
+  }, [languageName, classLevel, board]);
 
   const sendMessage = useCallback(
     async (text: string, audioBase64?: string, audioMimeType?: string) => {
@@ -76,7 +120,7 @@ export default function VidyaGuruScreen() {
       const studentMsg: GuruMessage = {
         id: `s_${Date.now()}`,
         role: "student",
-        text: audioBase64 ? (t("voiceMessage") ?? "🎤 Voice message") : text.trim(),
+        text: audioBase64 ? t("voiceMessage", "🎤 Voice message") : text.trim(),
         createdAt: Date.now(),
       };
 
@@ -137,7 +181,11 @@ export default function VidyaGuruScreen() {
         }
       } catch (err: any) {
         setGuruState("idle");
-        if (err?.code === "FREE_LIMIT_REACHED") {
+        if (err?.code === "CREDITS_EXHAUSTED") {
+          setCreditInfo({ balance: err.creditBalance ?? 0, required: err.creditsRequired ?? 1 });
+          setShowPaywall(true);
+        } else if (err?.code === "FREE_LIMIT_REACHED") {
+          setCreditInfo(undefined);
           setShowPaywall(true);
         } else {
           Alert.alert("Oops!", err?.message ?? "Failed to get a response. Please try again.");
@@ -222,19 +270,20 @@ export default function VidyaGuruScreen() {
     setTimeout(() => setGuruState("idle"), Math.max(3000, msg.text.length * 60));
   };
 
-  // Theme-aware colors
+  // Theme-aware colors — emerald/gold instead of the indigo every other
+  // AI Guru screen uses (see EMERALD/GOLD constants above for why).
   const bgGradient: [string, string] = isDarkMode
-    ? ["#0a0a1a", "#0f172a"]
-    : ["#f0f4ff", "#e8eeff"];
-  const surfaceBg  = isDarkMode ? "#1e293b" : colors.card;
-  const borderCol  = isDarkMode ? "#334155" : colors.border;
+    ? ["#06140f", "#0a1f17"]
+    : ["#f0fbf6", "#e3f5ec"];
+  const surfaceBg  = isDarkMode ? "#0f3d2e" : colors.card;
+  const borderCol  = isDarkMode ? EMERALD_DARK : colors.border;
   const inputColor = isDarkMode ? "#f1f5f9" : colors.text;
-  const placeholderColor = isDarkMode ? "#475569" : "#9ca3af";
+  const placeholderColor = isDarkMode ? "#5a8b78" : "#9ca3af";
 
   const stateText =
-    guruState === "thinking"  ? t("thinking")   :
-    guruState === "speaking"  ? t("speaking")   :
-    guruState === "listening" ? t("listening")  : t("readyToHelp");
+    guruState === "thinking"  ? t("thinking", "Thinking...")   :
+    guruState === "speaking"  ? t("speaking", "Speaking...")   :
+    guruState === "listening" ? t("listening", "Listening...")  : t("readyToHelp", "Ready to help!");
 
   return (
     <LinearGradient colors={bgGradient} style={S.bg}>
@@ -252,8 +301,8 @@ export default function VidyaGuruScreen() {
             <Ionicons name="chevron-back" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
           <View style={S.headerCenter}>
-            <Text style={[S.headerTitle, { color: colors.text }]}>{t("vidyaGuruAI")}</Text>
-            <Text style={[S.headerSub, { color: colors.textSecondary }]}>{t("personalAiTeacher")}</Text>
+            <Text style={[S.headerTitle, { color: colors.text }]}>{t("vidyaGuruAI", "VidyaGuru AI")}</Text>
+            <Text style={[S.headerSub, { color: colors.textSecondary }]}>{t("personalAiTeacher", "Your personal AI teacher")}</Text>
           </View>
           <View style={S.premiumBadge}>
             <Ionicons name="sparkles" size={12} color="#fbbf24" />
@@ -275,6 +324,32 @@ export default function VidyaGuruScreen() {
           renderItem={({ item }) => (
             <ChatBubble message={item} onReplayAudio={handleReplayAudio} isDarkMode={isDarkMode} />
           )}
+          // FEATURE: starter prompts shown right after the greeting, while
+          // the conversation is still just that one message — this screen
+          // previously had nothing tappable before the first real message,
+          // unlike ask.tsx's rich empty state. Hidden once a real exchange
+          // starts so it doesn't clutter an ongoing conversation.
+          ListFooterComponent={
+            messages.length <= 1 ? (
+              <View style={S.starterWrap}>
+                <Text style={[S.starterLabel, { color: colors.textSecondary }]}>
+                  {t("tryAskingVidyaGuru", "OR TRY ASKING")}
+                </Text>
+                {STARTER_PROMPTS.map((p) => (
+                  <TouchableOpacity
+                    key={p}
+                    style={[S.starterChip, { backgroundColor: surfaceBg, borderColor: borderCol }]}
+                    onPress={() => sendMessage(p)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[S.starterChipText, { color: colors.text }]} numberOfLines={2}>
+                      {p}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null
+          }
           contentContainerStyle={S.messageList}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           showsVerticalScrollIndicator={false}
@@ -286,19 +361,29 @@ export default function VidyaGuruScreen() {
             S.inputBar,
             {
               borderColor: borderCol,
-              backgroundColor: isDarkMode ? "#0f172a" : colors.background,
+              backgroundColor: isDarkMode ? "#0a1f17" : colors.background,
               paddingBottom: insets.bottom + 8,
             },
           ]}
         >
-          {/* Selected language badge */}
+          {/* Selected language badge — gold-themed (VidyaGuru's highlight
+              color, distinct from the emerald primary actions), and now
+              tappable: jumps straight to language settings, since
+              "preferred language" matters enough here that a student
+              should be able to act on it without leaving the chat to dig
+              through Settings manually. */}
           <View style={S.langRow}>
-            <View style={[S.langBadge, { backgroundColor: isDarkMode ? "rgba(99,102,241,0.15)" : "#ede9fe", borderColor: "#6366f1" }]}>
-              <Ionicons name="globe-outline" size={12} color="#6366f1" />
-              <Text style={[S.langBadgeText, { color: "#6366f1" }]}>
-                {t("respondingIn", { lang: languageName }) ?? `Responding in ${languageName}`}
+            <TouchableOpacity
+              style={[S.langBadge, { backgroundColor: isDarkMode ? "rgba(212,160,23,0.15)" : "#fef3d6", borderColor: GOLD }]}
+              onPress={() => router.push("/language-settings" as any)}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="globe-outline" size={12} color={GOLD} />
+              <Text style={[S.langBadgeText, { color: GOLD }]}>
+                {t("respondingIn", { defaultValue: `Responding in ${languageName}`, lang: languageName })}
               </Text>
-            </View>
+              <Ionicons name="chevron-forward" size={11} color={GOLD} />
+            </TouchableOpacity>
           </View>
 
           {/* Text + mic row */}
@@ -317,7 +402,7 @@ export default function VidyaGuruScreen() {
                     color: inputColor,
                   },
                 ]}
-                placeholder={t("askSomethingPlaceholder") ?? `Ask something...`}
+                placeholder={t("askSomethingPlaceholder", "Ask something...")}
                 placeholderTextColor={placeholderColor}
                 value={inputText}
                 onChangeText={setInputText}
@@ -370,22 +455,33 @@ export default function VidyaGuruScreen() {
             style={[S.paywallCard, { backgroundColor: colors.card, borderColor: borderCol }]}
           >
             <GuruAvatar state="idle" size={80} />
-            <Text style={[S.paywallTitle, { color: colors.text }]}>{t("paywallTitle")}</Text>
-            <Text style={[S.paywallBody, { color: colors.textSecondary }]}>{t("paywallBody")}</Text>
+            <Text style={[S.paywallTitle, { color: colors.text }]}>{t("paywallTitle", "Continue with VidyaGuru?")}</Text>
+            <Text style={[S.paywallBody, { color: colors.textSecondary }]}>
+              {creditInfo
+                ? `You've used your free question for today. You have ${creditInfo.balance} credit${creditInfo.balance === 1 ? "" : "s"} — buy more or upgrade to Premium for unlimited conversations.`
+                : t("paywallBody", "You've used your free question for today. Upgrade to Premium for unlimited conversations!")}
+            </Text>
             <TouchableOpacity
               style={S.paywallPrimary}
               onPress={() => {
                 setShowPaywall(false);
-                router.push("/ai-guru/subscription" as any);
+                router.push((creditInfo ? "/ai-guru/credits" : "/ai-guru/subscription") as any);
               }}
             >
-              <LinearGradient colors={["#6366f1", "#4f46e5"]} style={S.paywallGradient}>
-                <Ionicons name="sparkles" size={16} color="#fff" />
-                <Text style={S.paywallPrimaryText}>{t("upgradeToPremium")}</Text>
+              <LinearGradient colors={[EMERALD, EMERALD_DARK]} style={S.paywallGradient}>
+                <Ionicons name={creditInfo ? "flash" : "sparkles"} size={16} color="#fff" />
+                <Text style={S.paywallPrimaryText}>{creditInfo ? "Buy Credits" : t("upgradeToPremium", "Upgrade to Premium")}</Text>
               </LinearGradient>
             </TouchableOpacity>
+            {creditInfo && (
+              <TouchableOpacity onPress={() => { setShowPaywall(false); router.push("/ai-guru/subscription" as any); }}>
+                <Text style={[S.paywallBody, { color: "#a5b4fc", fontSize: 12 }]}>
+                  Or upgrade to Premium for unlimited access
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={S.paywallClose} onPress={() => setShowPaywall(false)}>
-              <Text style={[S.paywallCloseText, { color: colors.textSecondary }]}>{t("maybeLater")}</Text>
+              <Text style={[S.paywallCloseText, { color: colors.textSecondary }]}>{t("maybeLater", "Maybe Later")}</Text>
             </TouchableOpacity>
           </Animated.View>
         </View>
@@ -409,6 +505,11 @@ const S = StyleSheet.create({
 
   messageList:        { paddingHorizontal: 8, paddingBottom: 16, paddingTop: 4 },
 
+  starterWrap:        { paddingHorizontal: 16, paddingTop: 8, gap: 8 },
+  starterLabel:       { fontSize: 10, fontWeight: "700", letterSpacing: 0.5, marginBottom: 4 },
+  starterChip:        { borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 11 },
+  starterChipText:    { fontSize: 13, lineHeight: 18 },
+
   inputBar:           { borderTopWidth: 1, paddingHorizontal: 12, paddingTop: 8 },
   langRow:            { flexDirection: "row", marginBottom: 8 },
   langBadge:          { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1 },
@@ -419,7 +520,7 @@ const S = StyleSheet.create({
   textInput:          { flex: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, maxHeight: 100, borderWidth: 1 },
   micBtn:             { width: 44, height: 44, borderRadius: 22, justifyContent: "center", alignItems: "center", borderWidth: 1 },
   micBtnActive:       { borderColor: "#ef4444", backgroundColor: "#450a0a" },
-  sendBtn:            { width: 44, height: 44, borderRadius: 22, backgroundColor: "#6366f1", justifyContent: "center", alignItems: "center" },
+  sendBtn:            { width: 44, height: 44, borderRadius: 22, backgroundColor: EMERALD, justifyContent: "center", alignItems: "center" },
 
   paywallOverlay:     { ...StyleSheet.absoluteFillObject, justifyContent: "center", alignItems: "center", padding: 24 },
   paywallCard:        { borderRadius: 24, padding: 28, alignItems: "center", gap: 16, width: "100%", borderWidth: 1 },

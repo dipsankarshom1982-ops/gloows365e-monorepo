@@ -4,14 +4,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { useStudentProfile } from "@/context/StudentProfileContext";
+import { useStudentProfile } from "@gloows/shared-logic";
 import { useAppTranslation } from "@/context/LanguageContext";
 import { useTheme } from "@/context/ThemeContext";
 import {
-  SUBJECTS, SUBJECT_ICONS,
+  getSubjectsForClass, SUBJECT_ICONS,
   LANGUAGES, DIFFICULTIES, DIFFICULTY_DESC,
   LESSON_STYLES, LESSON_STYLE_DESC,
 } from "@/lib/aiGuru/constants";
+import AiGuruHeader from "@/components/aiGuru/AiGuruHeader";
 
 export default function SetupScreen() {
   const { t } = useAppTranslation();
@@ -24,7 +25,6 @@ export default function SetupScreen() {
   const textSec   = isDarkMode ? "#94a3b8" : colors.textSecondary;
   const textDim   = isDarkMode ? "#475569" : colors.textSecondary;
   const headerBg  = isDarkMode ? "rgba(10,10,26,0.95)" : colors.background;
-  const backBtnBg = isDarkMode ? "rgba(255,255,255,0.08)" : colors.card;
 
   const [board, setBoard]           = useState("");
   const [classLevel, setClass]      = useState("");
@@ -58,21 +58,14 @@ export default function SetupScreen() {
       {isDarkMode && (
         <LinearGradient colors={["#0a0a1a", "#0f172a"]} style={StyleSheet.absoluteFillObject} />
       )}
-      <SafeAreaView style={S.safeArea}>
-        {/* Fixed header */}
-        <View style={[S.header, { backgroundColor: headerBg }]}>
-          <TouchableOpacity onPress={() => router.back()} style={[S.backBtn, { backgroundColor: backBtnBg }]}>
-            <Ionicons name="chevron-back" size={22} color={textSec} />
-          </TouchableOpacity>
-          <Text style={[S.headerTitle, { color: textMain }]}>{t("lessonSetup")}</Text>
-          <View style={{ width: 40 }} />
-        </View>
+      <SafeAreaView style={S.safeArea} edges={["bottom"]}>
+        <AiGuruHeader title={t("lessonSetup")} showLanguageBadge />
 
         <ScrollView contentContainerStyle={S.scroll} showsVerticalScrollIndicator={false}>
           {/* Subject */}
           <Section label="📚 Subject" required textSec={textSec}>
             <View style={S.subjectGrid}>
-              {SUBJECTS.map((s) => (
+              {getSubjectsForClass(studentProfile?.class).map((s) => (
                 <TouchableOpacity
                   key={s}
                   style={[S.subjectCard, { backgroundColor: surfaceBg, borderColor: borderCol }, subject === s && S.subjectCardActive]}
@@ -222,9 +215,6 @@ function ChipRow({ items, selected, onSelect, labelSuffix = "", surfaceBg, borde
 const S = StyleSheet.create({
   bg:               { flex: 1 },
   safeArea:         { flex: 1 },
-  header:           { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 8, paddingBottom: 12, paddingHorizontal: 16 },
-  backBtn:          { width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-  headerTitle:      { fontSize: 18, fontWeight: "800" },
   scroll:           { paddingHorizontal: 16, paddingTop: 16 },
   section:          { marginBottom: 24, gap: 10 },
   sectionLabel:     { fontSize: 13, fontWeight: "800", letterSpacing: 0.3 },

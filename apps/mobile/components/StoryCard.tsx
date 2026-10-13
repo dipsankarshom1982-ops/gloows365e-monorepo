@@ -139,47 +139,6 @@ export const StoryCard = React.memo(function StoryCard({
   );
 });
 
-// ─── Add Story card ───────────────────────────────────────────────────────────
-
-interface AddStoryCardProps {
-  onPress: () => void;
-  size?:   number;
-}
-
-export const AddStoryCard = React.memo(function AddStoryCard({
-  onPress,
-  size = 100,
-}: AddStoryCardProps) {
-  const pressAnim = useRef(new Animated.Value(1)).current;
-  const cardHeight = Math.round(size * 1.18);
-
-  return (
-    <Animated.View style={{ transform: [{ scale: pressAnim }] }}>
-      <TouchableOpacity
-        onPress={onPress}
-        onPressIn={() =>
-          Animated.spring(pressAnim, { toValue: 0.93, useNativeDriver: true, speed: 50, bounciness: 4 }).start()
-        }
-        onPressOut={() =>
-          Animated.spring(pressAnim, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 6 }).start()
-        }
-        activeOpacity={1}
-        style={[styles.wrapper, { width: size, marginHorizontal: 5 }]}
-      >
-        <View
-          style={[
-            styles.addCard,
-            { width: size, height: cardHeight, borderRadius: 14 },
-          ]}
-        >
-          <Text style={styles.addPlus}>+</Text>
-        </View>
-        <Text style={styles.label}>Your Story</Text>
-      </TouchableOpacity>
-    </Animated.View>
-  );
-});
-
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -282,21 +241,5 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: "center",
     maxWidth: 96,
-  },
-
-  // Add card
-  addCard: {
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1.5,
-    borderStyle: "dashed",
-    borderColor: "rgba(99,102,241,0.4)",
-    backgroundColor: "rgba(99,102,241,0.04)",
-  },
-  addPlus: {
-    fontSize: 26,
-    color: "#6366f1",
-    fontWeight: "300",
-    lineHeight: 32,
   },
 });
